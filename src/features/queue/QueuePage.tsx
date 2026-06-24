@@ -3,7 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table";
 import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
 import { useAppState } from "../../state/AppState";
-import { byId, getPersonalStats, getPresentedOpportunitySummary, getProspectiveCounts, isAssignedToUser } from "../../domain/selectors";
+import {
+  byId,
+  getPersonalStats,
+  getPresentedOpportunitySummary,
+  getProspectiveCounts,
+  getReviewScenarioTags,
+  isAssignedToUser
+} from "../../domain/selectors";
 import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
 import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
@@ -27,6 +34,7 @@ interface QueueRow {
   categories: ReturnType<typeof getPresentedOpportunitySummary>;
   recapture: number;
   suspect: number;
+  sourceExamples: string[];
   noVisit: boolean;
 }
 
@@ -41,6 +49,7 @@ export function QueuePage() {
   const [reviewTypeFilter, setReviewTypeFilter] = useState("All");
   const [teamMemberFilter, setTeamMemberFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [sourceExampleFilter, setSourceExampleFilter] = useState("All");
   const [noVisitOnly, setNoVisitOnly] = useState(false);
 
   const maps = useMemo(
@@ -81,10 +90,13 @@ export function QueuePage() {
         categories,
         recapture: counts.recapture,
         suspect: counts.suspect,
+        sourceExamples: getReviewScenarioTags(data, review),
         noVisit: !maps.appointments.has(patient.id)
       };
     });
   }, [currentUser, data, maps]);
+
+  const sourceExampleOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.sourceExamples))).sort((a, b) => a.localeCompare(b)), [rows]);
 
   const filteredRows = rows.filter((row) => {
     const search = query.trim().toLowerCase();
@@ -99,8 +111,9 @@ export function QueuePage() {
       row.review.assignedCdiId === teamMemberFilter ||
       row.review.assignedAuditorId === teamMemberFilter;
     const matchesCategory = categoryFilter === "All" || row.categories[categoryFilter as keyof typeof row.categories]?.count > 0;
+    const matchesSourceExample = sourceExampleFilter === "All" || row.sourceExamples.includes(sourceExampleFilter);
     const matchesVisit = !noVisitOnly || row.noVisit;
-    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesVisit;
+    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesSourceExample && matchesVisit;
   });
 
   const personalStats = getPersonalStats(data, currentUser);
@@ -111,6 +124,7 @@ export function QueuePage() {
     setReviewTypeFilter("All");
     setTeamMemberFilter("All");
     setCategoryFilter("All");
+    setSourceExampleFilter("All");
     setNoVisitOnly(false);
   }
 
@@ -133,6 +147,7 @@ export function QueuePage() {
           <span>
             {info.row.original.dob} - {info.row.original.memberId}
           </span>
+          {info.row.original.sourceExamples.length ? <ScenarioTagList tags={info.row.original.sourceExamples} limit={3} /> : null}
         </div>
       )
     }),
@@ -205,6 +220,8 @@ export function QueuePage() {
     getSortedRowModel: getSortedRowModel()
   });
 
+  const sortedRows = table.getRowModel().rows.map((row) => row.original);
+
   return (
     <div className="page-stack">
       <Panel
@@ -248,6 +265,14 @@ export function QueuePage() {
             <option value="potentialAddition">Potential Addition</option>
             <option value="prospective">CDI Recapture/Suspect</option>
           </select>
+          <select value={sourceExampleFilter} onChange={(event) => setSourceExampleFilter(event.target.value)} aria-label="Scenario or source example">
+            <option value="All">All source/scenario examples</option>
+            {sourceExampleOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
           <label className="checkbox-filter">
             <input type="checkbox" checked={noVisitOnly} onChange={(event) => setNoVisitOnly(event.target.checked)} />
             No upcoming visit
@@ -257,8 +282,22 @@ export function QueuePage() {
           </Button>
         </div>
         <div className="queue-count">{filteredRows.length} result(s)</div>
-        <div className="table-wrap">
-          <table className="data-table">
+        <div className="table-wrap queue-table-wrap" aria-label="Desktop work queue">
+          <table className="data-table queue-table">
+            <colgroup>
+              <col className="queue-col-patient" />
+              <col className="queue-col-payer" />
+              <col className="queue-col-clinic" />
+              <col className="queue-col-provider" />
+              <col className="queue-col-year" />
+              <col className="queue-col-type" />
+              <col className="queue-col-assigned" />
+              <col className="queue-col-status" />
+              <col className="queue-col-queue" />
+              <col className="queue-col-lock" />
+              <col className="queue-col-indicators" />
+              <col className="queue-col-actions" />
+            </colgroup>
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
@@ -284,6 +323,11 @@ export function QueuePage() {
             </tbody>
           </table>
         </div>
+        <div className="mobile-queue-list" aria-label="Mobile work queue cards">
+          {sortedRows.map((row) => (
+            <MobileQueueCard key={row.review.id} row={row} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
+          ))}
+        </div>
       </Panel>
       <Panel title="Personal Statistics">
         <div className="stat-grid">
@@ -300,6 +344,102 @@ export function QueuePage() {
           <Stat label="Audit Agreement" value={personalStats.auditAgreement} suffix="%" />
         </div>
       </Panel>
+    </div>
+  );
+}
+
+function MobileQueueCard({
+  row,
+  data,
+  currentUser,
+  onOpen,
+  onCover
+}: {
+  row: QueueRow;
+  data: ReturnType<typeof useAppState>["data"];
+  currentUser: ReturnType<typeof useAppState>["currentUser"];
+  onOpen: (reviewId: string) => void;
+  onCover: (reviewId: string) => void;
+}) {
+  const canCover = canTakeCoverage(data, row.review, currentUser) && !isAssignedToUser(row.review, currentUser);
+  return (
+    <article className="queue-card">
+      <header>
+        <div className="patient-cell">
+          <strong>{row.patient}</strong>
+          <span>
+            {row.dob} - {row.memberId}
+          </span>
+        </div>
+        <StatusChip tone={row.status.includes("Complete") ? "good" : row.status.includes("Audit") ? "purple" : row.status.includes("Pended") ? "warn" : "info"}>
+          <IconForStatus status={row.status} />
+          {row.status}
+        </StatusChip>
+      </header>
+      <dl className="queue-card-details">
+        <div>
+          <dt>Payer</dt>
+          <dd>{row.payer}</dd>
+        </div>
+        <div>
+          <dt>Clinic</dt>
+          <dd>{row.clinic}</dd>
+        </div>
+        <div>
+          <dt>Provider</dt>
+          <dd>{row.provider}</dd>
+        </div>
+        <div>
+          <dt>CY / type</dt>
+          <dd>
+            {row.year} - {row.type}
+          </dd>
+        </div>
+        <div>
+          <dt>Assigned</dt>
+          <dd>{row.assigned}</dd>
+        </div>
+        <div>
+          <dt>Queue</dt>
+          <dd>{row.queue}</dd>
+        </div>
+        <div>
+          <dt>Lock</dt>
+          <dd>{row.lockedBy ? `Locked by ${row.lockedBy}` : "Unlocked"}</dd>
+        </div>
+      </dl>
+      <div className="category-strip queue-card-indicators" aria-label="Category indicators">
+        {Object.entries(row.categories).map(([category, value]) => (
+          <QueueCategoryBadge key={category} category={category as keyof typeof categoryTokens} count={value.count} />
+        ))}
+        <StatusChip tone="purple">Recapture {row.recapture}</StatusChip>
+        <StatusChip tone="warn">Suspect {row.suspect}</StatusChip>
+      </div>
+      {row.sourceExamples.length ? <ScenarioTagList tags={row.sourceExamples} limit={6} /> : null}
+      <div className="row-actions queue-card-actions">
+        <Button variant="primary" onClick={() => onOpen(row.review.id)}>
+          Open
+        </Button>
+        {canCover ? (
+          <Button variant="secondary" onClick={() => onCover(row.review.id)}>
+            <UserPlus size={14} />
+            Cover
+          </Button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function ScenarioTagList({ tags, limit }: { tags: string[]; limit?: number }) {
+  const visibleTags = typeof limit === "number" ? tags.slice(0, limit) : tags;
+  const remaining = typeof limit === "number" ? tags.length - visibleTags.length : 0;
+  return (
+    <div className="scenario-tags" aria-label="Source and scenario examples">
+      {visibleTags.map((tag) => (
+        <span key={tag}>{tag}</span>
+      ))}
+      {remaining > 0 ? <span>+{remaining}</span> : null}
     </div>
   );
 }

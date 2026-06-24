@@ -4,7 +4,7 @@ import { LockKeyhole, UserCheck } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import { byId, canManageLocks, getActionTotals, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
 import { formatRaf } from "../../domain/format";
-import { Button, Panel, StatusChip } from "../../ui/Primitives";
+import { Button, CloseDialogButton, Panel, StatusChip } from "../../ui/Primitives";
 import type { AssignmentMode, PatientReview, User } from "../../domain/types";
 
 const chartColors = ["#1264b3", "#087f5b", "#b42318", "#6d55d8", "#8a5a00", "#64748b"];
@@ -114,7 +114,7 @@ export function ManagerPage() {
                         Assign
                       </Button>
                       {review.lock ? (
-                        <Button disabled={!canManageLocks(currentUser)} onClick={() => setOverrideReviewId(review.id)}>
+                        <Button className="override-lock-action" disabled={!canManageLocks(currentUser)} onClick={() => setOverrideReviewId(review.id)}>
                           <LockKeyhole size={14} />
                           Override
                         </Button>
@@ -177,7 +177,7 @@ function AssignmentDialog({
       <div className="modal">
         <header>
           <h2>Assign Review</h2>
-          <button type="button" onClick={onClose} aria-label="Close">x</button>
+          <CloseDialogButton onClick={onClose} />
         </header>
         <div className="modal-body">
           <div className="assignment-context">
@@ -225,7 +225,7 @@ function OverrideDialog({ onOverride, onClose }: { onOverride: (reason: string) 
       <div className="modal">
         <header>
           <h2>Override Lock</h2>
-          <button type="button" onClick={onClose} aria-label="Close">x</button>
+          <CloseDialogButton onClick={onClose} />
         </header>
         <div className="modal-body">
           <label>

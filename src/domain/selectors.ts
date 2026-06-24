@@ -10,6 +10,7 @@ import type {
   PatientReview,
   Recommendation,
   SeedData,
+  SourceDocument,
   User
 } from "./types";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
@@ -200,6 +201,39 @@ export function getClaimForReview(data: SeedData, reviewId: string) {
 
 export function isPrototypeCurrentYear(review: PatientReview, settings: AppSettings) {
   return review.calendarYear === settings.prototypeCurrentYear;
+}
+
+export function getReviewScenarioTags(data: SeedData, review: PatientReview) {
+  const tags = new Set<string>();
+  const documents = data.documents.filter((document) => document.reviewId === review.id);
+  const sourceTypes = new Set<SourceDocument["type"]>(documents.map((document) => document.type));
+  (["MOR", "Payer Data", "Registry", "HIE", "Specialist Note", "Pathology", "Imaging"] as const).forEach((type) => {
+    if (sourceTypes.has(type)) tags.add(type);
+  });
+
+  const reviewEvidenceText = data.evidence
+    .filter((evidence) => evidence.reviewId === review.id)
+    .map((evidence) => `${evidence.text} ${evidence.exactText ?? ""} ${evidence.summary}`)
+    .join(" ")
+    .toLowerCase();
+  if (reviewEvidenceText.includes("payer data")) tags.add("Payer Data");
+  if (reviewEvidenceText.includes("registry")) tags.add("Registry");
+
+  const claim = getClaimForReview(data, review.id);
+  if (claim?.cptSourceEligible === false) tags.add("Ineligible CPT");
+  if (claim?.providerTypeEligible === false) tags.add("Ineligible provider");
+  if (claim?.faceToFace === false) tags.add("Non-face-to-face");
+  if (claim?.providerSignatureValid === false) tags.add("Invalid signature");
+
+  reviewConditions(data, review).forEach((condition) => {
+    if (condition.claimStatus === "Registry") tags.add("Registry");
+    if (condition.acuteCondition) tags.add("Acute condition");
+    if (condition.trumpedByCode) tags.add("Trumping");
+    if (condition.sdohCode) tags.add("SDoH");
+    if (condition.qualityExclusionCode) tags.add("Quality exclusion");
+  });
+
+  return Array.from(tags).sort((a, b) => a.localeCompare(b));
 }
 
 export function getTeamStats(data: SeedData) {

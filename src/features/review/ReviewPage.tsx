@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
@@ -19,7 +19,7 @@ import {
 } from "../../domain/selectors";
 import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, SourceDocument } from "../../domain/types";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
-import { Button, CategoryBadge, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
+import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
 import { canOverrideLock, canReleaseReviewLock, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
 
@@ -43,7 +43,7 @@ export function ReviewPage() {
   const [changeCondition, setChangeCondition] = useState<Condition | null>(null);
   const [flagCondition, setFlagCondition] = useState<Condition | null>(null);
   const [overrideRequested, setOverrideRequested] = useState(false);
-  const [summaryExpanded, setSummaryExpanded] = useState(true);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [completionWarnings, setCompletionWarnings] = useState<string[]>([]);
 
   const maps = useMemo(
@@ -83,6 +83,7 @@ export function ReviewPage() {
   const lockOwner = activeReview.lock ? maps.users.get(activeReview.lock.lockedByUserId)?.name : undefined;
   const canRelease = canReleaseReviewLock(activeReview, currentUser);
   const canUseProspectiveActions = isPrototypeCurrentYear(activeReview, settings);
+  const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while locked by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
 
   function jumpToEvidence(evidence: EvidencePassage) {
     setSelectedEvidenceId(evidence.id);
@@ -112,11 +113,11 @@ export function ReviewPage() {
   }
 
   return (
-    <div className="page-stack review-page">
+    <div className={`page-stack review-page${!editable ? " review-read-only" : ""}`}>
       <Panel
         className="patient-header"
         actions={
-          <div className="header-actions">
+          <div className="header-actions patient-header-actions">
             {review.lock ? (
               <StatusChip tone={editable ? "info" : "warn"}>Locked by {lockOwner}</StatusChip>
             ) : (
@@ -129,7 +130,7 @@ export function ReviewPage() {
               </Button>
             ) : null}
             {review.lock && !editable && canOverrideLock(review, currentUser, "override") ? (
-              <Button variant="secondary" onClick={() => setOverrideRequested(true)}>
+              <Button className="override-lock-action" variant="secondary" onClick={() => setOverrideRequested(true)}>
                 <LockKeyhole size={15} />
                 Override Lock
               </Button>
@@ -138,13 +139,13 @@ export function ReviewPage() {
               {summaryExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               Summary
             </Button>
-            <Button disabled={!editable} onClick={() => actions.pendReview(review.id)}>Pend</Button>
-            <Button disabled={!editable} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
-            <Button disabled={!editable} onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
-            <Button disabled={!editable} variant="primary" onClick={complete}>
+            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.pendReview(review.id)}>Pend</Button>
+            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
+            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
+            <Button disabled={!editable} title={readOnlyTitle} variant="primary" onClick={complete}>
               Complete review
             </Button>
-            <Button disabled={!canRelease} variant="ghost" onClick={exitAndRelease}>Exit/release</Button>
+            <Button disabled={!canRelease} title={!canRelease ? readOnlyTitle : undefined} variant="ghost" onClick={exitAndRelease}>Exit/release</Button>
           </div>
         }
       >
@@ -158,23 +159,34 @@ export function ReviewPage() {
           <div className="patient-meta">
             <span>CY {review.calendarYear}</span>
             <span>{review.reviewType}</span>
-            <span>{clinic?.name}</span>
-            <span>{provider?.name}</span>
-            <span>Assigned: {[review.assignedCoderId, review.assignedCdiId].map((id) => (id ? maps.users.get(id)?.name : undefined)).filter(Boolean).join(" / ")}</span>
+            {summaryExpanded ? (
+              <>
+                <span>{clinic?.name}</span>
+                <span>{provider?.name}</span>
+                <span>Assigned: {[review.assignedCoderId, review.assignedCdiId].map((id) => (id ? maps.users.get(id)?.name : undefined)).filter(Boolean).join(" / ")}</span>
+              </>
+            ) : null}
           </div>
         </div>
+        {activeReview.auditReturn ? (
+          <div className="warning-banner rework-banner">
+            <AlertTriangle size={18} />
+            Correction requested by {maps.users.get(activeReview.auditReturn.returnedByUserId)?.name}: {activeReview.auditReturn.comments}
+          </div>
+        ) : null}
         {!editable ? (
           <div className="read-only-banner">
             <AlertTriangle size={16} />
             Read-only view. {review.lock ? `Current lock owner: ${lockOwner}.` : "Open the chart to acquire an edit lock."}
           </div>
         ) : null}
-        {activeReview.auditReturn ? (
-          <div className="warning-banner">
-            <AlertTriangle size={18} />
-            Rework requested by {maps.users.get(activeReview.auditReturn.returnedByUserId)?.name}: {activeReview.auditReturn.comments}
-          </div>
-        ) : null}
+        <CompactReviewSummary
+          dispositionSummary={dispositionSummary}
+          presentedSummary={presentedSummary}
+          projectedRaf={rafSummary.projectedRaf}
+          unresolvedRaf={rafSummary.unresolvedPotentialRaf}
+          summaryExpanded={summaryExpanded}
+        />
         {summaryExpanded ? (
           <>
             <div className="summary-label">Current dispositions</div>
@@ -267,6 +279,7 @@ export function ReviewPage() {
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
+              readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -279,6 +292,7 @@ export function ReviewPage() {
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
+              readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -291,6 +305,7 @@ export function ReviewPage() {
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
+              readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -321,6 +336,53 @@ export function ReviewPage() {
       {changeCondition ? <ChangeModal condition={changeCondition} reviewId={review.id} onClose={() => setChangeCondition(null)} /> : null}
       {flagCondition ? <FlagModal condition={flagCondition} reviewId={review.id} onClose={() => setFlagCondition(null)} /> : null}
       {overrideRequested ? <OverrideLockModal reviewId={review.id} onClose={() => setOverrideRequested(false)} /> : null}
+    </div>
+  );
+}
+
+function CompactReviewSummary({
+  dispositionSummary,
+  presentedSummary,
+  projectedRaf,
+  unresolvedRaf,
+  summaryExpanded
+}: {
+  dispositionSummary: ReturnType<typeof getDispositionSummary>;
+  presentedSummary: ReturnType<typeof getPresentedOpportunitySummary>;
+  projectedRaf: number;
+  unresolvedRaf: number;
+  summaryExpanded: boolean;
+}) {
+  if (summaryExpanded) return null;
+  const prospectiveOpen = dispositionSummary["Sent to Prospective"].count + dispositionSummary["Prospective Yes"].count + dispositionSummary["Prospective No"].count;
+  return (
+    <div className="compact-review-summary" aria-label="Compact review summary">
+      <span>
+        Validated <strong>{dispositionSummary.Validated.count}</strong>
+      </span>
+      <span>
+        Deleted <strong>{dispositionSummary.Deleted.count}</strong>
+      </span>
+      <span>
+        Added <strong>{dispositionSummary["Added to Claim"].count}</strong>
+      </span>
+      <span>
+        Prospective <strong>{prospectiveOpen}</strong>
+      </span>
+      <span>
+        Unresolved <strong>{dispositionSummary.Unresolved.count}</strong>
+      </span>
+      <span>
+        Projected RAF <strong>{formatRaf(projectedRaf)}</strong>
+      </span>
+      <span>
+        Open RAF <strong>{formatRaf(unresolvedRaf)}</strong>
+      </span>
+      <div className="compact-presented-summary">
+        {Object.entries(presentedSummary).map(([category, summary]) => (
+          <CategoryBadge key={category} category={category as keyof typeof categoryTokens} count={summary.count} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -413,6 +475,7 @@ function ConditionGroup({
   review,
   editable,
   canUseProspectiveActions,
+  readOnlyTitle,
   warningIds,
   jumpToEvidence,
   onDisagree,
@@ -424,6 +487,7 @@ function ConditionGroup({
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
   canUseProspectiveActions: boolean;
+  readOnlyTitle?: string;
   warningIds: string[];
   jumpToEvidence: (evidence: EvidencePassage) => void;
   onDisagree: (condition: Condition) => void;
@@ -441,6 +505,7 @@ function ConditionGroup({
           review={review}
           editable={editable}
           canUseProspectiveActions={canUseProspectiveActions}
+          readOnlyTitle={readOnlyTitle}
           isWarning={warningIds.includes(condition.id)}
           jumpToEvidence={jumpToEvidence}
           onDisagree={onDisagree}
@@ -457,6 +522,7 @@ function ConditionCard({
   review,
   editable,
   canUseProspectiveActions,
+  readOnlyTitle,
   isWarning,
   jumpToEvidence,
   onDisagree,
@@ -467,6 +533,7 @@ function ConditionCard({
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
   canUseProspectiveActions: boolean;
+  readOnlyTitle?: string;
   isWarning: boolean;
   jumpToEvidence: (evidence: EvidencePassage) => void;
   onDisagree: (condition: Condition) => void;
@@ -549,25 +616,25 @@ function ConditionCard({
         <div className="action-row">
           {condition.workflow === "codesOnClaim" ? (
             <>
-              <Button disabled={disabled} onClick={() => act("Validate")}>Validate</Button>
-              <Button variant="danger" disabled={disabled || condition.hasOtherSupportingEvidence} onClick={() => act("Delete")}>Delete</Button>
-              <Button disabled={disabled || !condition.currentYear || !canUseProspectiveActions} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Validate")}>Validate</Button>
+              <Button variant="danger" disabled={disabled || condition.hasOtherSupportingEvidence} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Delete")}>Delete</Button>
+              <Button disabled={disabled || !condition.currentYear || !canUseProspectiveActions} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
             </>
           ) : null}
           {condition.workflow === "codesNotOnClaim" ? (
             <>
-              <Button disabled={disabled} onClick={() => act("Add to Claim")}>Add to Claim</Button>
-              <Button disabled={disabled} onClick={() => onDisagree(condition)}>Disagree</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Add to Claim")}>Add to Claim</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => onDisagree(condition)}>Disagree</Button>
             </>
           ) : null}
           {condition.workflow === "prospective" ? (
             <>
-              <Button disabled={disabled} onClick={() => act("Yes")}>Yes</Button>
-              <Button disabled={disabled} onClick={() => act("No")}>No</Button>
-              <Button disabled={disabled} onClick={() => onChange(condition)}>Change</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Yes")}>Yes</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("No")}>No</Button>
+              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => onChange(condition)}>Change</Button>
             </>
           ) : null}
-          <Button variant="ghost" disabled={!editable} onClick={() => onFlag(condition)}>
+          <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>
             <Flag size={14} />
             Flag issue
           </Button>
@@ -727,9 +794,7 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
       <div className="modal">
         <header>
           <h2>{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
-            <X size={18} />
-          </button>
+          <CloseDialogButton onClick={onClose} />
         </header>
         <div className="modal-body">{children}</div>
       </div>

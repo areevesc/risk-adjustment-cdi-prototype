@@ -21,14 +21,17 @@ export function AdminPage() {
               <option value="rules">Rule-based decision support</option>
               <option value="hidden">Hidden/disabled</option>
             </select>
+            <small className="setting-help">Changes whether condition cards show simulated AI labels, rule-based decision support, or no recommendation assistance.</small>
           </label>
           <label>
             Audit sampling percentage
             <input type="number" min={0} max={100} value={settings.auditSampleRate} onChange={(event) => setAuditSampleRate(Number(event.target.value))} />
+            <small className="setting-help">Controls the deterministic percentage of completed reviews selected for prototype audit.</small>
           </label>
           <label>
             Prototype current year
             <input type="number" min={2020} max={2035} value={settings.prototypeCurrentYear} onChange={(event) => setPrototypeCurrentYear(Number(event.target.value))} />
+            <small className="setting-help">Controls current-year eligibility for prospective routing and calendar-year logic.</small>
           </label>
         </div>
         <p className="raf-note">No AI APIs, API keys, cloud model services, required local language models, EHR, payer, CMS, or scheduling integrations are used.</p>

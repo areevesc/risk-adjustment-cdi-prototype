@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { AlertTriangle, Bot, CheckCircle2, Circle, CircleHelp, FileText, Lock, Sparkles, XCircle } from "lucide-react";
+import { AlertTriangle, Bot, CheckCircle2, Circle, CircleHelp, FileText, Lock, Sparkles, X, XCircle } from "lucide-react";
 import type { Category, ProspectiveSubtype, Recommendation, AppSettings } from "../domain/types";
 import { categoryTokens, subtypeTokens } from "../domain/tokens";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
@@ -7,11 +7,20 @@ import { decisionSupportService } from "../decisionSupport/DecisionSupportServic
 export function Button({
   children,
   variant = "secondary",
+  className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" | "ghost" }) {
   return (
-    <button className={`button button-${variant}`} {...props}>
+    <button className={`button button-${variant}${className ? ` ${className}` : ""}`} {...props}>
       {children}
+    </button>
+  );
+}
+
+export function CloseDialogButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" className="icon-button modal-close-button" onClick={onClick} aria-label="Close dialog" title="Close dialog">
+      <X size={18} aria-hidden="true" />
     </button>
   );
 }

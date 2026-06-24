@@ -17,7 +17,7 @@ import {
   shouldSampleReviewForAudit,
   takeCoverage
 } from "./workflows";
-import { getDispositionSummary, getGeneratedExports, getPersonalStats, getPresentedOpportunitySummary, getRafSummary } from "./selectors";
+import { getDispositionSummary, getGeneratedExports, getPersonalStats, getPresentedOpportunitySummary, getRafSummary, getReviewScenarioTags } from "./selectors";
 import type { AppSettings, SeedData } from "./types";
 
 const settings: AppSettings = {
@@ -221,6 +221,14 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const exports = getGeneratedExports(next);
     expect(exports.filter((record) => record.id === "generated-addition")).toHaveLength(1);
     expect(exports.find((record) => record.id === "generated-addition")?.rows[0]).toMatchObject({ reviewId: "rev-100", icd10: "E11.40" });
+  });
+
+  it("derives source and scenario discovery tags from seeded review data", () => {
+    const data = cloneSeed();
+    const rev100 = data.reviews.find((item) => item.id === "rev-100")!;
+    const rev103 = data.reviews.find((item) => item.id === "rev-103")!;
+    expect(getReviewScenarioTags(data, rev100)).toEqual(expect.arrayContaining(["HIE", "MOR", "Payer Data", "Registry", "Specialist Note"]));
+    expect(getReviewScenarioTags(data, rev103)).toContain("Ineligible CPT");
   });
 });
 

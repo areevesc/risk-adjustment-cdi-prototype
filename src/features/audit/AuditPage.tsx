@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileCheck2, RotateCcw } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import { byId, getAuditForReview, getEvidenceForCondition, getRecommendation, reviewConditions } from "../../domain/selectors";
@@ -9,11 +9,25 @@ export function AuditPage() {
   const { data, currentUser, settings, actions } = useAppState();
   const [selectedReviewId, setSelectedReviewId] = useState(data.reviews.find((review) => review.queue === "Auditor Queue" || review.status === "Under Audit")?.id);
   const [comments, setComments] = useState("");
+  const [returnMessage, setReturnMessage] = useState("");
   const maps = useMemo(() => ({ patients: byId(data.patients), users: byId(data.users) }), [data]);
-  const auditReviews = data.reviews.filter((review) => review.queue === "Auditor Queue" || review.status === "Under Audit" || review.status === "Audit Complete");
+  const auditReviews = useMemo(() => data.reviews.filter((review) => review.queue === "Auditor Queue" || review.status === "Under Audit" || review.status === "Audit Complete"), [data.reviews]);
   const selected = auditReviews.find((review) => review.id === selectedReviewId) ?? auditReviews[0];
 
-  if (!selected) return <EmptyState title="No audit reviews" body="No reviews are currently in the auditor queue." />;
+  useEffect(() => {
+    if (auditReviews.length && !auditReviews.some((review) => review.id === selectedReviewId)) {
+      setSelectedReviewId(auditReviews[0].id);
+    }
+  }, [auditReviews, selectedReviewId]);
+
+  if (!selected) {
+    return (
+      <div className="page-stack">
+        {returnMessage ? <AuditReturnConfirmation message={returnMessage} /> : null}
+        <EmptyState title="No audit reviews" body="No reviews are currently in the auditor queue." />
+      </div>
+    );
+  }
 
   const patient = maps.patients.get(selected.patientId)!;
   const audit = getAuditForReview(data, selected.id);
@@ -21,8 +35,21 @@ export function AuditPage() {
   const auditComplete = audit?.status === "Complete";
   const canAct = selected.status === "Under Audit" && !auditComplete;
 
+  function returnForCorrection() {
+    if (!comments.trim()) return;
+    const recipientId = selected.assignedCoderId ?? selected.assignedCdiId;
+    const recipientName = recipientId ? maps.users.get(recipientId)?.name : undefined;
+    const message = `Review ${selected.id} was returned to ${recipientName ?? "the assigned reviewer"} for correction and is now Rework Required.`;
+    const nextReview = auditReviews.find((review) => review.id !== selected.id);
+    actions.completeAudit(selected.id, "Return for Correction", comments);
+    setComments("");
+    setReturnMessage(message);
+    setSelectedReviewId(nextReview?.id);
+  }
+
   return (
     <div className="page-stack">
+      {returnMessage ? <AuditReturnConfirmation message={returnMessage} /> : null}
       <Panel title="Audit Queue">
         <div className="audit-layout">
           <div className="audit-list">
@@ -59,7 +86,7 @@ export function AuditPage() {
                     Reopen audit
                   </Button>
                 ) : null}
-                <Button disabled={!canAct || !comments.trim()} onClick={() => actions.completeAudit(selected.id, "Return for Correction", comments)}>
+                <Button disabled={!canAct || !comments.trim()} onClick={returnForCorrection}>
                   <RotateCcw size={15} />
                   Return
                 </Button>
@@ -109,6 +136,15 @@ export function AuditPage() {
           </div>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+function AuditReturnConfirmation({ message }: { message: string }) {
+  return (
+    <div className="success-banner" role="status" aria-live="polite">
+      <FileCheck2 size={18} />
+      {message}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { useEffect, useRef } from "react";
 import type { ElementType, ReactNode } from "react";
 import { BarChart3, ClipboardList, Database, FileCheck2, Settings, ShieldCheck, Users } from "lucide-react";
 import { useAppState } from "./state/AppState";
@@ -23,6 +24,14 @@ export function App() {
   const { currentUser, resetDemo } = useAppState();
   const location = useLocation();
   const state = location.state as { authMessage?: string } | null;
+  const lastPathname = useRef(location.pathname);
+
+  useEffect(() => {
+    if (lastPathname.current !== location.pathname) {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      lastPathname.current = location.pathname;
+    }
+  }, [location.pathname]);
 
   if (location.pathname === "/") return <Navigate to="/login" replace />;
 
