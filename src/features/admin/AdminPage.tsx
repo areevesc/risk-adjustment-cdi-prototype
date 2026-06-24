@@ -1,37 +1,14 @@
 import { Download, SlidersHorizontal } from "lucide-react";
 import { useMemo } from "react";
 import { useAppState } from "../../state/AppState";
-import { byId } from "../../domain/selectors";
+import { getGeneratedExports } from "../../domain/selectors";
 import { Button, Panel, StatusChip } from "../../ui/Primitives";
 import type { ExportRecord, RecommendationMode } from "../../domain/types";
 
 export function AdminPage() {
-  const { data, settings, setRecommendationMode, setAuditSampleRate } = useAppState();
-  const maps = useMemo(() => ({ patients: byId(data.patients), payers: byId(data.payers) }), [data]);
-  const generatedExports = useMemo<ExportRecord[]>(() => {
-    const deletionRows = data.conditions
-      .filter((condition) => condition.disposition?.action === "Delete")
-      .map((condition) => {
-        const review = data.reviews.find((item) => item.id === condition.reviewId)!;
-        const patient = maps.patients.get(review.patientId)!;
-        return { memberId: patient.memberId, icd10: condition.icd10, hcc: condition.hcc, raf: condition.raf, note: "Simulated deletion list row" };
-      });
-    const additionRows = data.conditions
-      .filter((condition) => condition.disposition?.action === "Add to Claim")
-      .map((condition) => {
-        const review = data.reviews.find((item) => item.id === condition.reviewId)!;
-        const patient = maps.patients.get(review.patientId)!;
-        const payer = maps.payers.get(patient.payerId)!;
-        return { memberId: patient.memberId, icd10: condition.icd10, hcc: condition.hcc, payer: payer.name, profile: payer.asmProfile };
-      });
-    const auditRows = data.audits.map((audit) => ({ reviewId: audit.reviewId, auditorId: audit.auditorId, outcome: audit.outcome ?? "Open", note: "Simulated audit result row" }));
-    return [
-      ...data.exports,
-      { id: "generated-delete", type: "Deletion list", createdAt: new Date().toISOString(), rows: deletionRows },
-      { id: "generated-addition", type: "Addition to claim list", createdAt: new Date().toISOString(), rows: additionRows },
-      { id: "generated-audit", type: "Audit results", createdAt: new Date().toISOString(), rows: auditRows }
-    ];
-  }, [data, maps]);
+  const { data, settings, setRecommendationMode, setAuditSampleRate, setPrototypeCurrentYear } = useAppState();
+  const generatedExports = useMemo<ExportRecord[]>(() => getGeneratedExports(data), [data]);
+  const seededExamples = data.exports.filter((record) => record.seededExample);
 
   return (
     <div className="page-stack">
@@ -49,29 +26,50 @@ export function AdminPage() {
             Audit sampling percentage
             <input type="number" min={0} max={100} value={settings.auditSampleRate} onChange={(event) => setAuditSampleRate(Number(event.target.value))} />
           </label>
+          <label>
+            Prototype current year
+            <input type="number" min={2020} max={2035} value={settings.prototypeCurrentYear} onChange={(event) => setPrototypeCurrentYear(Number(event.target.value))} />
+          </label>
         </div>
         <p className="raf-note">No AI APIs, API keys, cloud model services, required local language models, EHR, payer, CMS, or scheduling integrations are used.</p>
       </Panel>
 
-      <Panel title="Simulated Exports">
-        <div className="export-grid">
-          {generatedExports.map((record) => (
-            <article key={record.id} className="export-card">
-              <header>
-                <strong>{record.type}</strong>
-                <StatusChip tone="info">Prototype export</StatusChip>
-              </header>
-              <p>{record.rows.length} row(s). CSV/JSON shape only; not a production CMS or payer submission file.</p>
-              <pre>{toCsv(record.rows)}</pre>
-              <Button onClick={() => download(`${record.type.toLowerCase().replace(/\s+/g, "-")}.csv`, toCsv(record.rows))}>
-                <Download size={15} />
-                Download CSV
-              </Button>
-            </article>
-          ))}
-        </div>
+      <Panel title="Current Generated Exports">
+        <ExportSection title="Current generated deletion list" records={generatedExports.filter((record) => record.type === "Deletion list")} />
+        <ExportSection title="Current generated addition list" records={generatedExports.filter((record) => record.type === "Addition to claim list")} />
+        <ExportSection title="Current generated payer ASM list" records={generatedExports.filter((record) => record.type === "Payer ASM export")} />
+        <ExportSection title="Audit results" records={generatedExports.filter((record) => record.type === "Audit results")} />
+        <p className="raf-note">Prototype CSV shapes only; these are not real CMS submission files or payer production extracts.</p>
+      </Panel>
+
+      <Panel title="Optional Seeded Example Files">
+        <ExportSection title="Seeded example" records={seededExamples} seeded />
       </Panel>
     </div>
+  );
+}
+
+function ExportSection({ title, records, seeded = false }: { title: string; records: ExportRecord[]; seeded?: boolean }) {
+  return (
+    <section className="export-section">
+      <h3>{title}</h3>
+      <div className="export-grid">
+        {records.map((record) => (
+          <article key={record.id} className="export-card">
+            <header>
+              <strong>{record.type}</strong>
+              <StatusChip tone={seeded ? "warn" : "info"}>{seeded ? "Seeded example" : "Current export"}</StatusChip>
+            </header>
+            <p>{record.rows.length} row(s). CSV/JSON shape only; not a production CMS or payer submission file.</p>
+            <pre>{toCsv(record.rows)}</pre>
+            <Button onClick={() => download(`${record.id}.csv`, toCsv(record.rows))}>
+              <Download size={15} />
+              Download CSV
+            </Button>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

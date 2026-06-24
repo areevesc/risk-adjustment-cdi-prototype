@@ -1,4 +1,5 @@
 import type { Category, ProspectiveSubtype } from "./types";
+import type { DispositionSummaryLabel } from "./selectors";
 
 export const categoryTokens: Record<Category, { label: string; color: string; bg: string; border: string }> = {
   validated: {
@@ -39,5 +40,51 @@ export const subtypeTokens: Record<ProspectiveSubtype, { label: string; color: s
     color: "#8a5a00",
     bg: "#fff5dd",
     border: "#f2c46d"
+  }
+};
+
+export const dispositionTokens: Record<DispositionSummaryLabel, { label: string; color: string; bg: string; border: string }> = {
+  Validated: categoryTokens.validated,
+  Deleted: {
+    label: "Deleted",
+    color: "#b42318",
+    bg: "#fff0ec",
+    border: "#ffb4a2"
+  },
+  "Added to Claim": {
+    label: "Added to Claim",
+    color: "#1264b3",
+    bg: "#eaf4ff",
+    border: "#9ccbf3"
+  },
+  "Sent to Prospective": {
+    label: "Sent to Prospective",
+    color: "#5b45bd",
+    bg: "#f0edff",
+    border: "#bcb1f4"
+  },
+  "Prospective Yes": {
+    label: "Prospective Yes",
+    color: "#5b45bd",
+    bg: "#f0edff",
+    border: "#bcb1f4"
+  },
+  "Prospective No": {
+    label: "Prospective No",
+    color: "#8a5a00",
+    bg: "#fff5dd",
+    border: "#f2c46d"
+  },
+  Changed: {
+    label: "Changed",
+    color: "#1264b3",
+    bg: "#eaf4ff",
+    border: "#9ccbf3"
+  },
+  Unresolved: {
+    label: "Unresolved",
+    color: "#475569",
+    bg: "#f1f5f9",
+    border: "#cbd5e1"
   }
 };

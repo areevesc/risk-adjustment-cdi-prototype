@@ -158,6 +158,20 @@ button:disabled {
   white-space: nowrap;
 }
 
+.auth-banner,
+.read-only-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 24px 0;
+  padding: 10px 12px;
+  color: #8a5a00;
+  background: #fff5dd;
+  border: 1px solid #f2c46d;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
 .page-stack {
   display: grid;
   gap: 18px;
@@ -371,7 +385,7 @@ button:disabled {
 
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(240px, 1.6fr) repeat(4, minmax(140px, 0.8fr)) auto;
+  grid-template-columns: minmax(260px, 1.6fr) repeat(4, minmax(150px, 0.8fr)) auto auto;
   gap: 10px;
   align-items: center;
   margin-bottom: 14px;
@@ -437,9 +451,15 @@ label {
   overflow-x: auto;
 }
 
+.queue-count {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-weight: 800;
+}
+
 .data-table {
   width: 100%;
-  min-width: 1050px;
+  min-width: 1280px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 0.9rem;
@@ -450,7 +470,8 @@ label {
   padding: 11px 10px;
   vertical-align: middle;
   border-bottom: 1px solid var(--border);
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .data-table th:nth-child(11),
@@ -502,6 +523,7 @@ label {
 .patient-cell {
   display: grid;
   gap: 3px;
+  min-width: 170px;
 }
 
 .patient-cell span {
@@ -562,9 +584,13 @@ label {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.disposition-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
 }
 
 .summary-card.strong {
@@ -573,11 +599,47 @@ label {
   border-color: #9ccbf3;
 }
 
+.summary-label {
+  margin: 10px 0 7px;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.presented-summary,
+.source-eligibility-row,
+.raf-metric-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.source-eligibility-row.compact {
+  margin: 0;
+}
+
+.raf-metric-grid span {
+  padding: 6px 8px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .split-workspace {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(460px, 1.1fr);
   gap: 18px;
   align-items: start;
+}
+
+.review-page .split-workspace > .panel {
+  max-height: calc(100vh - 168px);
+  overflow: auto;
 }
 
 .document-viewer {
@@ -646,6 +708,17 @@ label {
 
 .document-section.selected-evidence {
   outline: 3px solid rgba(18, 100, 179, 0.35);
+}
+
+.evidence-span {
+  padding: 1px 3px;
+  border: 1px solid;
+  border-radius: 4px;
+}
+
+.evidence-span.selected {
+  outline: 3px solid rgba(18, 100, 179, 0.38);
+  outline-offset: 2px;
 }
 
 .condition-groups {
@@ -739,6 +812,19 @@ label {
   color: var(--text-muted);
 }
 
+.condition-history,
+.assignment-context {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .evidence-list {
   display: grid;
   gap: 7px;
@@ -792,6 +878,11 @@ label {
   border: 1px solid #f2c46d;
   border-radius: 8px;
   font-weight: 800;
+}
+
+.patient-header .read-only-banner,
+.audit-detail .read-only-banner {
+  margin: 0 0 10px;
 }
 
 .timeline {
@@ -850,6 +941,11 @@ label {
   display: grid;
   gap: 12px;
   padding: 16px;
+}
+
+.modal-copy {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .modal-actions {
@@ -912,6 +1008,19 @@ label {
   gap: 12px;
 }
 
+.export-section {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.export-section h3 {
+  margin: 0;
+  color: #475569;
+  font-size: 0.86rem;
+  text-transform: uppercase;
+}
+
 .export-card pre {
   max-height: 190px;
   overflow: auto;
@@ -941,6 +1050,10 @@ label {
 
   .patient-header {
     position: static;
+  }
+
+  .review-page .split-workspace > .panel {
+    max-height: none;
   }
 }
 

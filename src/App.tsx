@@ -1,4 +1,5 @@
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import type { ElementType, ReactNode } from "react";
 import { BarChart3, ClipboardList, Database, FileCheck2, Settings, ShieldCheck, Users } from "lucide-react";
 import { useAppState } from "./state/AppState";
 import { LoginPage } from "./features/login/LoginPage";
@@ -8,10 +9,20 @@ import { AuditPage } from "./features/audit/AuditPage";
 import { ManagerPage } from "./features/dashboard/ManagerPage";
 import { AdminPage } from "./features/admin/AdminPage";
 import { Button, StatusChip } from "./ui/Primitives";
+import { canAccessRoute, getFirstPermittedRoute, getRouteDenialMessage, routePathByKey, type AppRouteKey } from "./domain/auth";
+
+const navItems: { route: AppRouteKey; label: string; icon: ElementType }[] = [
+  { route: "login", label: "Login", icon: ShieldCheck },
+  { route: "queue", label: "Work Queue", icon: ClipboardList },
+  { route: "audit", label: "Audit", icon: FileCheck2 },
+  { route: "manager", label: "Manager", icon: BarChart3 },
+  { route: "admin", label: "Admin", icon: Settings }
+];
 
 export function App() {
   const { currentUser, resetDemo } = useAppState();
   const location = useLocation();
+  const state = location.state as { authMessage?: string } | null;
 
   if (location.pathname === "/") return <Navigate to="/login" replace />;
 
@@ -26,26 +37,17 @@ export function App() {
           </div>
         </div>
         <nav>
-          <NavLink to="/login">
-            <ShieldCheck size={18} />
-            Login
-          </NavLink>
-          <NavLink to="/queue">
-            <ClipboardList size={18} />
-            Work Queue
-          </NavLink>
-          <NavLink to="/audit">
-            <FileCheck2 size={18} />
-            Audit
-          </NavLink>
-          <NavLink to="/manager">
-            <BarChart3 size={18} />
-            Manager
-          </NavLink>
-          <NavLink to="/admin">
-            <Settings size={18} />
-            Admin
-          </NavLink>
+          {navItems
+            .filter((item) => canAccessRoute(currentUser, item.route))
+            .map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.route} to={routePathByKey[item.route]}>
+                  <Icon size={18} />
+                  {item.label}
+                </NavLink>
+              );
+            })}
         </nav>
         <div className="sidebar-footer">
           <StatusChip tone="info">{currentUser.primaryRole}</StatusChip>
@@ -67,15 +69,60 @@ export function App() {
             <span>{currentUser.name}</span>
           </div>
         </header>
+        {state?.authMessage ? <div className="auth-banner">{state.authMessage}</div> : null}
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/queue" element={<QueuePage />} />
-          <Route path="/review/:reviewId" element={<ReviewPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/manager" element={<ManagerPage />} />
-          <Route path="/admin" element={<AdminPage />} />
+          <Route
+            path="/queue"
+            element={
+              <ProtectedRoute route="queue">
+                <QueuePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/review/:reviewId"
+            element={
+              <ProtectedRoute route="review">
+                <ReviewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/audit"
+            element={
+              <ProtectedRoute route="audit">
+                <AuditPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/manager"
+            element={
+              <ProtectedRoute route="manager">
+                <ManagerPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute route="admin">
+                <AdminPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </main>
     </div>
   );
+}
+
+function ProtectedRoute({ route, children }: { route: AppRouteKey; children: ReactNode }) {
+  const { currentUser } = useAppState();
+  if (!canAccessRoute(currentUser, route)) {
+    return <Navigate to={getFirstPermittedRoute(currentUser)} replace state={{ authMessage: getRouteDenialMessage(route) }} />;
+  }
+  return <>{children}</>;
 }

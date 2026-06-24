@@ -6,9 +6,45 @@ export interface DecisionSupportService {
 }
 
 export class PrototypeDecisionSupportService implements DecisionSupportService {
-  getRecommendation(condition: Condition, review: PatientReview, _data: SeedData, settings: AppSettings): Recommendation | undefined {
+  getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (settings.recommendationMode === "hidden") return undefined;
     if (condition.seededRecommendation) return condition.seededRecommendation;
+    const claim = data.claims.find((item) => item.reviewId === review.id);
+    const riskEligibleSource =
+      claim?.riskEligible !== false &&
+      claim?.cptSourceEligible !== false &&
+      claim?.providerTypeEligible !== false &&
+      claim?.faceToFace !== false &&
+      claim?.providerSignatureValid !== false;
+    const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
+
+    if (!riskEligibleSource && condition.workflow !== "prospective") {
+      return {
+        action: "Disagree",
+        confidence: "High",
+        source: "rules",
+        rationale: "The structured prototype source indicators mark this evidence as not risk eligible for direct claim action."
+      };
+    }
+
+    if (condition.acuteCondition || condition.sdohCode || condition.qualityExclusionCode) {
+      return {
+        action: "Disagree",
+        confidence: "High",
+        source: "rules",
+        rationale: "The condition is tagged as acute, SDoH, or quality-exclusion logic in the synthetic rules."
+      };
+    }
+
+    if (condition.trumpedByCode) {
+      return {
+        action: "Change",
+        confidence: "Medium",
+        source: "rules",
+        replacementCode: condition.trumpedByCode,
+        rationale: "Synthetic trumping logic found a more specific or dominant code for the same condition family."
+      };
+    }
 
     if (condition.resolvedFlag) {
       return {
@@ -47,7 +83,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "The code is on a risk-eligible claim and current documentation supports MEAT."
         };
       }
-      if (condition.currentYear && condition.hasOtherSupportingEvidence) {
+      if (currentPrototypeYear && condition.hasOtherSupportingEvidence) {
         return {
           action: "Send to Prospective",
           confidence: "Medium",

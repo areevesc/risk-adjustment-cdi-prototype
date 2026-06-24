@@ -1,15 +1,36 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, FileWarning, Flag, Send, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole, X } from "lucide-react";
 import { useAppState } from "../../state/AppState";
-import { byId, canEditReview, getCategorySummary, getEvidenceForCondition, getProspectiveCounts, getRafSummary, getRecommendation, getUnresolvedConditions, reviewConditions } from "../../domain/selectors";
+import {
+  byId,
+  canEditReview,
+  getClaimForReview,
+  getDispositionSummary,
+  getDownstreamTaskForCondition,
+  getEvidenceForCondition,
+  getPresentedOpportunitySummary,
+  getProspectiveCounts,
+  getRafSummary,
+  getRecommendation,
+  isPrototypeCurrentYear,
+  reviewConditions
+} from "../../domain/selectors";
 import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, SourceDocument } from "../../domain/types";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
-import { categoryTokens, subtypeTokens } from "../../domain/tokens";
+import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
+import { canOverrideLock, canReleaseReviewLock, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
 
 const disagreeReasons: DisagreeReason[] = ["Not Enough MEAT", "Condition Resolved", "Conflicting Evidence", "Other"];
-const documentationIssues: DocumentationIssue[] = ["Not risk eligible CPT source", "Not risk eligible provider type", "Not a face-to-face service", "Provider education"];
+const documentationIssues: DocumentationIssue[] = [
+  "Not risk eligible CPT source",
+  "Not risk eligible provider type",
+  "Not a face-to-face service",
+  "Invalid or missing provider signature",
+  "Provider education"
+];
 
 export function ReviewPage() {
   const { reviewId } = useParams();
@@ -21,6 +42,8 @@ export function ReviewPage() {
   const [disagreeCondition, setDisagreeCondition] = useState<Condition | null>(null);
   const [changeCondition, setChangeCondition] = useState<Condition | null>(null);
   const [flagCondition, setFlagCondition] = useState<Condition | null>(null);
+  const [overrideRequested, setOverrideRequested] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(true);
   const [completionWarnings, setCompletionWarnings] = useState<string[]>([]);
 
   const maps = useMemo(
@@ -37,6 +60,9 @@ export function ReviewPage() {
   );
 
   if (!review) return <EmptyState title="Review not found" body="The selected patient review does not exist in the prototype data." />;
+  if (!canViewReview(data, review, currentUser)) {
+    return <Navigate to={getFirstPermittedRoute(currentUser)} replace state={{ authMessage: "That patient review is not available to your simulated role." }} />;
+  }
 
   const activeReview = review;
 
@@ -49,15 +75,22 @@ export function ReviewPage() {
   const documents = data.documents.filter((document) => document.reviewId === activeReview.id);
   const activeDocument = documents.find((document) => document.id === selectedDocumentId) ?? documents[0];
   const editable = canEditReview(activeReview, currentUser);
-  const categorySummary = getCategorySummary(data, activeReview);
+  const presentedSummary = getPresentedOpportunitySummary(data, activeReview);
+  const dispositionSummary = getDispositionSummary(data, activeReview);
   const prospectiveCounts = getProspectiveCounts(data, activeReview);
   const rafSummary = getRafSummary(data, activeReview);
+  const claim = getClaimForReview(data, activeReview.id);
   const lockOwner = activeReview.lock ? maps.users.get(activeReview.lock.lockedByUserId)?.name : undefined;
+  const canRelease = canReleaseReviewLock(activeReview, currentUser);
+  const canUseProspectiveActions = isPrototypeCurrentYear(activeReview, settings);
 
   function jumpToEvidence(evidence: EvidencePassage) {
     setSelectedEvidenceId(evidence.id);
     setSelectedDocumentId(evidence.documentId);
-    window.setTimeout(() => document.getElementById(evidence.anchorId)?.scrollIntoView({ behavior: "smooth", block: "center" }), 30);
+    window.setTimeout(() => {
+      const target = document.getElementById(`span-${evidence.id}`) ?? document.getElementById(evidence.anchorId);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 30);
   }
 
   function stepEvidence(direction: "prev" | "next") {
@@ -89,18 +122,29 @@ export function ReviewPage() {
             ) : (
               <StatusChip>Unlocked</StatusChip>
             )}
-            {!editable && (
-              <Button variant="secondary" onClick={() => actions.overrideLock(review.id, "Manager/admin override from patient workspace.")}>
-                Override lock
+            {!review.lock ? (
+              <Button variant="secondary" onClick={() => actions.openReview(review.id)}>
+                <LockKeyhole size={15} />
+                Open chart
               </Button>
-            )}
-            <Button onClick={() => actions.pendReview(review.id)}>Pend</Button>
-            <Button onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
-            <Button onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
-            <Button variant="primary" onClick={complete}>
+            ) : null}
+            {review.lock && !editable && canOverrideLock(review, currentUser, "override") ? (
+              <Button variant="secondary" onClick={() => setOverrideRequested(true)}>
+                <LockKeyhole size={15} />
+                Override Lock
+              </Button>
+            ) : null}
+            <Button onClick={() => setSummaryExpanded((value) => !value)} variant="ghost">
+              {summaryExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              Summary
+            </Button>
+            <Button disabled={!editable} onClick={() => actions.pendReview(review.id)}>Pend</Button>
+            <Button disabled={!editable} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
+            <Button disabled={!editable} onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
+            <Button disabled={!editable} variant="primary" onClick={complete}>
               Complete review
             </Button>
-            <Button variant="ghost" onClick={exitAndRelease}>Exit/release</Button>
+            <Button disabled={!canRelease} variant="ghost" onClick={exitAndRelease}>Exit/release</Button>
           </div>
         }
       >
@@ -119,28 +163,63 @@ export function ReviewPage() {
             <span>Assigned: {[review.assignedCoderId, review.assignedCdiId].map((id) => (id ? maps.users.get(id)?.name : undefined)).filter(Boolean).join(" / ")}</span>
           </div>
         </div>
-        <div className="summary-grid">
-          {Object.entries(categorySummary).map(([category, summary]) => (
-            <div className="summary-card" key={category}>
-              <span>{categoryTokens[category as keyof typeof categoryTokens].label}</span>
-              <strong>{summary.count}</strong>
-              <small>RAF {formatRaf(summary.raf)}</small>
+        {!editable ? (
+          <div className="read-only-banner">
+            <AlertTriangle size={16} />
+            Read-only view. {review.lock ? `Current lock owner: ${lockOwner}.` : "Open the chart to acquire an edit lock."}
+          </div>
+        ) : null}
+        {activeReview.auditReturn ? (
+          <div className="warning-banner">
+            <AlertTriangle size={18} />
+            Rework requested by {maps.users.get(activeReview.auditReturn.returnedByUserId)?.name}: {activeReview.auditReturn.comments}
+          </div>
+        ) : null}
+        {summaryExpanded ? (
+          <>
+            <div className="summary-label">Current dispositions</div>
+            <div className="summary-grid disposition-summary-grid">
+              {Object.entries(dispositionSummary).map(([label, summary]) => {
+                const token = dispositionTokens[label as keyof typeof dispositionTokens];
+                return (
+                  <div className="summary-card" key={label} style={{ color: token.color, background: token.bg, borderColor: token.border }}>
+                    <span>{token.label}</span>
+                    <strong>{summary.count}</strong>
+                    <small>RAF {formatRaf(summary.raf)}</small>
+                  </div>
+                );
+              })}
+              <div className="summary-card strong">
+                <span>Projected RAF</span>
+                <strong>{formatRaf(rafSummary.projectedRaf)}</strong>
+                <small>Demo {formatRaf(rafSummary.demographicRaf)} + captured {formatRaf(rafSummary.validatedCapturedRaf)}</small>
+              </div>
             </div>
-          ))}
-          <div className="summary-card">
-            <span>Recapture / Suspect</span>
-            <strong>
-              {prospectiveCounts.recapture} / {prospectiveCounts.suspect}
-            </strong>
-            <small>Prospective RAF {formatRaf(rafSummary.prospectiveRaf)}</small>
-          </div>
-          <div className="summary-card strong">
-            <span>Total Demo RAF</span>
-            <strong>{formatRaf(rafSummary.totalRaf)}</strong>
-            <small>Includes demographic RAF {formatRaf(rafSummary.demographicRaf)}</small>
-          </div>
-        </div>
-        <div className="raf-note">RAF values are fixed synthetic prototype values and are not an authoritative CMS risk calculation.</div>
+            <div className="summary-label">Originally presented opportunities</div>
+            <div className="presented-summary">
+              {Object.entries(presentedSummary).map(([category, summary]) => (
+                <CategoryBadge key={category} category={category as keyof typeof categoryTokens} count={summary.count} />
+              ))}
+              <StatusChip tone="purple">Recapture {prospectiveCounts.recapture}</StatusChip>
+              <StatusChip tone="warn">Suspect {prospectiveCounts.suspect}</StatusChip>
+            </div>
+            <div className="raf-metric-grid">
+              <span>Unresolved potential RAF {formatRaf(rafSummary.unresolvedPotentialRaf)}</span>
+              <span>Potential addition RAF {formatRaf(rafSummary.potentialAdditionRaf)}</span>
+              <span>Potential deletion RAF {formatRaf(rafSummary.potentialDeletionRaf)}</span>
+              <span>Prospective Recapture RAF {formatRaf(rafSummary.prospectiveRecaptureRaf)}</span>
+              <span>Prospective Suspect RAF {formatRaf(rafSummary.prospectiveSuspectRaf)}</span>
+            </div>
+            <div className="source-eligibility-row">
+              <EligibilityChip label="Risk-eligible source" ok={claim?.riskEligible !== false} />
+              <EligibilityChip label="Risk-eligible CPT" ok={claim?.cptSourceEligible !== false} />
+              <EligibilityChip label="Risk-eligible provider type" ok={claim?.providerTypeEligible !== false} />
+              <EligibilityChip label="Face-to-face service" ok={claim?.faceToFace !== false} />
+              <EligibilityChip label="Valid provider signature" ok={claim?.providerSignatureValid !== false} />
+            </div>
+          </>
+        ) : null}
+        <div className="raf-note">Synthetic prototype values — not an authoritative CMS RAF calculation.</div>
         {appointment ? (
           <StatusChip tone="good">Next visit: {formatDate(appointment.date)} - {appointment.type}</StatusChip>
         ) : (
@@ -187,6 +266,7 @@ export function ReviewPage() {
               conditions={conditions.filter((condition) => condition.workflow === "codesOnClaim")}
               review={review}
               editable={editable}
+              canUseProspectiveActions={canUseProspectiveActions}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -198,6 +278,7 @@ export function ReviewPage() {
               conditions={conditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
               review={review}
               editable={editable}
+              canUseProspectiveActions={canUseProspectiveActions}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -209,6 +290,7 @@ export function ReviewPage() {
               conditions={conditions.filter((condition) => condition.workflow === "prospective")}
               review={review}
               editable={editable}
+              canUseProspectiveActions={canUseProspectiveActions}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
               onDisagree={setDisagreeCondition}
@@ -238,6 +320,7 @@ export function ReviewPage() {
       {disagreeCondition ? <DisagreeModal condition={disagreeCondition} reviewId={review.id} onClose={() => setDisagreeCondition(null)} /> : null}
       {changeCondition ? <ChangeModal condition={changeCondition} reviewId={review.id} onClose={() => setChangeCondition(null)} /> : null}
       {flagCondition ? <FlagModal condition={flagCondition} reviewId={review.id} onClose={() => setFlagCondition(null)} /> : null}
+      {overrideRequested ? <OverrideLockModal reviewId={review.id} onClose={() => setOverrideRequested(false)} /> : null}
     </div>
   );
 }
@@ -272,18 +355,18 @@ function DocumentViewer({
           <StatusChip tone={activeDocument.isCurrentYear ? "info" : "warn"}>{activeDocument.isCurrentYear ? "Current calendar year" : "Historical evidence"}</StatusChip>
         </header>
         {activeDocument.sections.map((section) => {
-          const firstEvidence = section.evidenceIds[0];
+          const sectionEvidence = section.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
+          const firstEvidence = sectionEvidence[0];
           const isSelected = section.evidenceIds.includes(selectedEvidenceId ?? "");
-          const sectionEvidence = firstEvidence ? evidenceMap.get(firstEvidence) : undefined;
-          const token = sectionEvidence?.subtype ? subtypeTokens[sectionEvidence.subtype] : sectionEvidence ? categoryTokens[sectionEvidence.category] : undefined;
+          const token = firstEvidence?.subtype ? subtypeTokens[firstEvidence.subtype] : firstEvidence ? categoryTokens[firstEvidence.category] : undefined;
           return (
             <p
               id={section.id}
               key={section.id}
               className={`document-section ${section.evidenceIds.length ? "has-evidence" : ""} ${isSelected ? "selected-evidence" : ""}`}
-              style={token ? { borderColor: token.border, background: token.bg } : undefined}
+              style={token ? { borderColor: token.border } : undefined}
             >
-              {section.text}
+              {renderEvidenceSpans(section.text, sectionEvidence, selectedEvidenceId)}
             </p>
           );
         })}
@@ -292,11 +375,44 @@ function DocumentViewer({
   );
 }
 
+function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], selectedEvidenceId?: string) {
+  const spans = evidence
+    .map((item) => {
+      const exactText = item.exactText ?? item.text;
+      const start = typeof item.startOffset === "number" ? item.startOffset : sectionText.toLowerCase().indexOf(exactText.toLowerCase());
+      const end = typeof item.endOffset === "number" ? item.endOffset : start + exactText.length;
+      return start >= 0 && end > start ? { item, start, end } : undefined;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a!.start - b!.start) as { item: EvidencePassage; start: number; end: number }[];
+  const pieces: ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach((span) => {
+    if (span.start < cursor) return;
+    const token = span.item.subtype ? subtypeTokens[span.item.subtype] : categoryTokens[span.item.category];
+    if (span.start > cursor) pieces.push(sectionText.slice(cursor, span.start));
+    pieces.push(
+      <mark
+        id={`span-${span.item.id}`}
+        key={span.item.id}
+        className={`evidence-span ${selectedEvidenceId === span.item.id ? "selected" : ""}`}
+        style={{ color: token.color, background: token.bg, borderColor: token.border }}
+      >
+        {sectionText.slice(span.start, span.end)}
+      </mark>
+    );
+    cursor = span.end;
+  });
+  if (cursor < sectionText.length) pieces.push(sectionText.slice(cursor));
+  return pieces.length ? pieces : sectionText;
+}
+
 function ConditionGroup({
   title,
   conditions,
   review,
   editable,
+  canUseProspectiveActions,
   warningIds,
   jumpToEvidence,
   onDisagree,
@@ -307,6 +423,7 @@ function ConditionGroup({
   conditions: Condition[];
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
+  canUseProspectiveActions: boolean;
   warningIds: string[];
   jumpToEvidence: (evidence: EvidencePassage) => void;
   onDisagree: (condition: Condition) => void;
@@ -323,6 +440,7 @@ function ConditionGroup({
           condition={condition}
           review={review}
           editable={editable}
+          canUseProspectiveActions={canUseProspectiveActions}
           isWarning={warningIds.includes(condition.id)}
           jumpToEvidence={jumpToEvidence}
           onDisagree={onDisagree}
@@ -338,6 +456,7 @@ function ConditionCard({
   condition,
   review,
   editable,
+  canUseProspectiveActions,
   isWarning,
   jumpToEvidence,
   onDisagree,
@@ -347,6 +466,7 @@ function ConditionCard({
   condition: Condition;
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
+  canUseProspectiveActions: boolean;
   isWarning: boolean;
   jumpToEvidence: (evidence: EvidencePassage) => void;
   onDisagree: (condition: Condition) => void;
@@ -357,6 +477,9 @@ function ConditionCard({
   const evidence = getEvidenceForCondition(data, condition);
   const recommendation = getRecommendation(condition, review, data, settings);
   const disabled = !editable || !!condition.disabledReason;
+  const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
+  const claim = getClaimForReview(data, review.id);
+  const showActionControls = !condition.disposition || review.status === "Rework Required";
 
   function act(action: RecommendationAction) {
     const agreed = recommendation ? recommendation.action === action : undefined;
@@ -378,6 +501,20 @@ function ConditionCard({
         <CategoryBadge category={condition.category} subtype={condition.subtype} />
       </div>
       <RecommendationBox recommendation={recommendation} settings={settings} />
+      <div className="source-eligibility-row compact">
+        <EligibilityChip label="Risk source" ok={claim?.riskEligible !== false} />
+        <EligibilityChip label="CPT" ok={claim?.cptSourceEligible !== false} />
+        <EligibilityChip label="Provider type" ok={claim?.providerTypeEligible !== false} />
+        <EligibilityChip label="F2F" ok={claim?.faceToFace !== false} />
+        <EligibilityChip label="Signature" ok={claim?.providerSignatureValid !== false} />
+      </div>
+      <div className="condition-history">
+        <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
+        <span>Recommendation: {recommendation?.action ?? condition.originalRecommendation ?? "None"} ({recommendation?.source ?? condition.recommendationSource ?? "rules"})</span>
+        <span>User decision: {condition.disposition ? condition.disposition.action : "Unresolved"}</span>
+        <span>Downstream task: {downstreamTask ? `${downstreamTask.type} - ${downstreamTask.status}` : "None"}</span>
+        <span>Auditor decision: {condition.auditorDisposition?.outcome ?? "None"}</span>
+      </div>
       <div className="evidence-list">
         {evidence.map((item) => (
           <button key={item.id} type="button" onClick={() => jumpToEvidence(item)}>
@@ -407,13 +544,14 @@ function ConditionCard({
           {condition.disposition.replacementCode ? <span className="mono">{condition.disposition.replacementCode}</span> : null}
           <small>{formatDateTime(condition.disposition.decidedAt)}</small>
         </div>
-      ) : (
+      ) : null}
+      {showActionControls ? (
         <div className="action-row">
           {condition.workflow === "codesOnClaim" ? (
             <>
               <Button disabled={disabled} onClick={() => act("Validate")}>Validate</Button>
               <Button variant="danger" disabled={disabled || condition.hasOtherSupportingEvidence} onClick={() => act("Delete")}>Delete</Button>
-              <Button disabled={disabled || !condition.currentYear} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
+              <Button disabled={disabled || !condition.currentYear || !canUseProspectiveActions} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
             </>
           ) : null}
           {condition.workflow === "codesNotOnClaim" ? (
@@ -434,7 +572,7 @@ function ConditionCard({
             Flag issue
           </Button>
         </div>
-      )}
+      ) : null}
     </article>
   );
 }
@@ -534,6 +672,7 @@ function FlagModal({ condition, reviewId, onClose }: { condition: Condition; rev
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
+          disabled={issue === "Provider education" && !comments.trim()}
           onClick={() => {
             actions.flagDocumentationIssue(reviewId, condition.id, issue, comments);
             onClose();
@@ -546,7 +685,43 @@ function FlagModal({ condition, reviewId, onClose }: { condition: Condition; rev
   );
 }
 
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function OverrideLockModal({ reviewId, onClose }: { reviewId: string; onClose: () => void }) {
+  const { actions } = useAppState();
+  const [reason, setReason] = useState("");
+  return (
+    <Modal title="Override Lock" onClose={onClose}>
+      <p className="modal-copy">This will transfer the active chart lock to you and record the prior owner, time, and reason in activity history.</p>
+      <label>
+        Override reason
+        <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Required reason for manager/admin lock override" />
+      </label>
+      <div className="modal-actions">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={!reason.trim()}
+          onClick={() => {
+            actions.overrideLock(reviewId, reason);
+            onClose();
+          }}
+        >
+          Confirm override
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function EligibilityChip({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <StatusChip tone={ok ? "good" : "bad"}>
+      {ok ? <Check size={13} /> : <AlertTriangle size={13} />}
+      {label}
+    </StatusChip>
+  );
+}
+
+function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
       <div className="modal">

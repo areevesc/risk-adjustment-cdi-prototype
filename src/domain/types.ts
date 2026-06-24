@@ -5,6 +5,7 @@ export type WorkflowStatus =
   | "In Progress"
   | "Pended"
   | "Awaiting Review"
+  | "Rework Required"
   | "Completed"
   | "Under Audit"
   | "Audit Complete";
@@ -38,7 +39,23 @@ export type DocumentationIssue =
   | "Not risk eligible CPT source"
   | "Not risk eligible provider type"
   | "Not a face-to-face service"
+  | "Invalid or missing provider signature"
   | "Provider education";
+export type DownstreamTaskType =
+  | "Prospective CDI Review"
+  | "Addition to Claim"
+  | "Deletion"
+  | "Auditor Exception"
+  | "Manager Exception"
+  | "Provider Education";
+export type DownstreamTaskStatus = "Open" | "In Progress" | "Completed" | "Cancelled";
+export type DownstreamTaskQueue =
+  | "Prospective Review Queue"
+  | "Auditor Queue"
+  | "Manager Review Queue"
+  | "Provider Education Queue"
+  | "Export List";
+export type AssignmentMode = "Coverage" | "Permanent reassignment";
 
 export interface User {
   id: string;
@@ -104,15 +121,26 @@ export interface PatientReview {
   lock?: Lock;
   appointmentId?: string;
   conditionIds: string[];
+  auditReturn?: {
+    auditId: string;
+    returnedByUserId: string;
+    returnedAt: string;
+    comments: string;
+  };
 }
 
 export interface SourceDocument {
   id: string;
   reviewId: string;
-  type: "Progress Note" | "Lab" | "Pathology" | "Imaging" | "Claims" | "Registry" | "HIE" | "Specialist Note";
+  type: "Progress Note" | "Lab" | "Pathology" | "Imaging" | "Claims" | "MOR" | "Payer Data" | "Registry" | "HIE" | "Specialist Note";
   title: string;
   date: string;
   isCurrentYear: boolean;
+  riskEligibleSource?: boolean;
+  cptSourceEligible?: boolean;
+  providerTypeEligible?: boolean;
+  faceToFace?: boolean;
+  providerSignatureValid?: boolean;
   sections: DocumentSection[];
 }
 
@@ -127,7 +155,12 @@ export interface EvidencePassage {
   reviewId: string;
   documentId: string;
   anchorId: string;
+  sectionId?: string;
+  stableSpanId?: string;
   text: string;
+  exactText?: string;
+  startOffset?: number;
+  endOffset?: number;
   date: string;
   category: Category;
   subtype?: ProspectiveSubtype;
@@ -143,6 +176,7 @@ export interface Claim {
   cptSourceEligible: boolean;
   providerTypeEligible: boolean;
   faceToFace: boolean;
+  providerSignatureValid: boolean;
   icd10Codes: string[];
 }
 
@@ -164,12 +198,25 @@ export interface UserDisposition {
   agreedWithRecommendation?: boolean;
 }
 
+export interface AuditorDisposition {
+  outcome: "Agree" | "Disagree" | "Return for Correction";
+  comments?: string;
+  auditorId: string;
+  decidedAt: string;
+  agreedWithUser?: boolean;
+}
+
 export interface Condition {
   id: string;
   reviewId: string;
   workflow: ConditionWorkflow;
   category: Category;
   subtype?: ProspectiveSubtype;
+  originalWorkflowClassification?: ConditionWorkflow;
+  originalCategory?: Category;
+  originalSubtype?: ProspectiveSubtype;
+  originalRecommendation?: RecommendationAction;
+  recommendationSource?: RecommendationSource;
   icd10: string;
   description: string;
   hcc: string;
@@ -188,8 +235,12 @@ export interface Condition {
   conflictingEvidence?: boolean;
   acuteCondition?: boolean;
   trumpedByCode?: string;
+  sdohCode?: boolean;
+  qualityExclusionCode?: boolean;
   seededRecommendation?: Recommendation;
   disposition?: UserDisposition;
+  auditorDisposition?: AuditorDisposition;
+  agreementWithAuditor?: boolean;
   documentationIssues: DocumentationFlag[];
   disabledReason?: string;
 }
@@ -217,6 +268,7 @@ export interface Audit {
   outcome?: "Agree" | "Disagree" | "Return for Correction";
   comments?: string;
   completedAt?: string;
+  reopenedAt?: string;
 }
 
 export interface ActionHistory {
@@ -233,12 +285,27 @@ export interface ExportRecord {
   id: string;
   type: "Deletion list" | "Addition to claim list" | "Payer ASM export" | "Audit results";
   createdAt: string;
+  seededExample?: boolean;
   rows: Record<string, string | number>[];
 }
 
 export interface AppSettings {
   recommendationMode: RecommendationMode;
   auditSampleRate: number;
+  prototypeCurrentYear: number;
+}
+
+export interface DownstreamTask {
+  id: string;
+  reviewId: string;
+  conditionId: string;
+  type: DownstreamTaskType;
+  status: DownstreamTaskStatus;
+  queue: DownstreamTaskQueue;
+  assignedUserId?: string;
+  createdByUserId: string;
+  createdAt: string;
+  comments?: string;
 }
 
 export interface SeedData {
@@ -255,6 +322,7 @@ export interface SeedData {
   conditions: Condition[];
   appointments: UpcomingAppointment[];
   audits: Audit[];
+  downstreamTasks: DownstreamTask[];
   history: ActionHistory[];
   exports: ExportRecord[];
 }

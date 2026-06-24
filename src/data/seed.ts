@@ -271,7 +271,86 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
       section(`sec-${review.id}-hist-1`, "Prior capture history, registry flags, specialist referrals, and HIE data are summarized for three-year lookback review.", [`ev-${review.id}-f`]),
       section(`sec-${review.id}-hist-2`, "Historical evidence is shown separately from current-calendar-year documentation.", [])
     ]
-  }
+  },
+  ...(review.id === "rev-100"
+    ? [
+        {
+          id: `doc-${review.id}-mor`,
+          reviewId: review.id,
+          type: "MOR" as const,
+          title: "CMS MOR and payer return file indicators",
+          date: `${review.calendarYear}-01-18`,
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [
+            section(`sec-${review.id}-mor-1`, "MOR lists prior HCC 222 recapture and payer data lists a diabetes suspect opportunity.", [
+              `ev-${review.id}-mor`,
+              `ev-${review.id}-payer`
+            ])
+          ]
+        },
+        {
+          id: `doc-${review.id}-specialist`,
+          reviewId: review.id,
+          type: "Specialist Note" as const,
+          title: "Cardiology specialist note",
+          date: `${review.calendarYear}-02-09`,
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-spec-1`, "Cardiology documents stable chronic diastolic heart failure with medication monitoring.", [`ev-${review.id}-specialist`])]
+        },
+        {
+          id: `doc-${review.id}-hie`,
+          reviewId: review.id,
+          type: "HIE" as const,
+          title: "HIE registry and external data",
+          date: `${review.calendarYear}-02-22`,
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-hie-1`, "HIE payload includes registry diabetic eye disease history and an SDoH transportation code.", [`ev-${review.id}-hie`])]
+        },
+        {
+          id: `doc-${review.id}-pathology`,
+          reviewId: review.id,
+          type: "Pathology" as const,
+          title: "Pathology report",
+          date: `${review.calendarYear}-05-04`,
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-path-1`, "Pathology confirms no active malignancy and should not trump chronic condition capture.", [`ev-${review.id}-pathology`])]
+        },
+        {
+          id: `doc-${review.id}-imaging`,
+          reviewId: review.id,
+          type: "Imaging" as const,
+          title: "Imaging report",
+          date: `${review.calendarYear}-05-11`,
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-image-1`, "Imaging shows acute bronchitis only; quality-exclusion logic keeps it out of RAF capture.", [`ev-${review.id}-imaging`])]
+        }
+      ]
+    : [])
 ]);
 
 export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
@@ -280,7 +359,9 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-2`,
+    sectionId: `sec-${review.id}-note-2`,
     text: "Assessment includes diabetes, chronic kidney disease, heart failure symptoms, and medication adherence review.",
+    exactText: "diabetes, chronic kidney disease",
     date: `${review.calendarYear}-04-12`,
     category: "validated",
     conditionIds: review.conditionIds.slice(0, 2),
@@ -291,7 +372,9 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-2`,
+    sectionId: `sec-${review.id}-note-2`,
     text: "Heart failure symptoms and medication adherence review.",
+    exactText: "heart failure symptoms",
     date: `${review.calendarYear}-04-12`,
     category: "prospective",
     subtype: "recapture",
@@ -303,7 +386,9 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-3`,
+    sectionId: `sec-${review.id}-note-3`,
     text: "Address open risk adjustment items at upcoming encounter.",
+    exactText: "address open risk adjustment items",
     date: `${review.calendarYear}-04-12`,
     category: "prospective",
     subtype: "suspect",
@@ -315,7 +400,9 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-lab`,
     anchorId: `sec-${review.id}-lab-1`,
+    sectionId: `sec-${review.id}-lab-1`,
     text: "A1c, kidney function, lipid panel, and urine microalbumin were reviewed.",
+    exactText: "kidney function, lipid panel, and urine microalbumin",
     date: `${review.calendarYear}-03-05`,
     category: "potentialAddition",
     conditionIds: review.conditionIds.slice(1, 4),
@@ -326,7 +413,9 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-lab`,
     anchorId: `sec-${review.id}-lab-2`,
+    sectionId: `sec-${review.id}-lab-2`,
     text: "Abnormal values are pre-annotated for prototype evidence navigation.",
+    exactText: "Abnormal values",
     date: `${review.calendarYear}-03-05`,
     category: "potentialDelete",
     conditionIds: review.conditionIds.slice(0, 1),
@@ -337,13 +426,100 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     reviewId: review.id,
     documentId: `doc-${review.id}-history`,
     anchorId: `sec-${review.id}-hist-1`,
+    sectionId: `sec-${review.id}-hist-1`,
     text: "Prior capture history, registry flags, specialist referrals, and HIE data are summarized.",
+    exactText: "registry flags, specialist referrals, and HIE data",
     date: `${review.calendarYear - 1}-10-20`,
     category: "prospective",
     subtype: "recapture",
     conditionIds: review.conditionIds.slice(2, 5),
     summary: "Historical lookback evidence supports recapture or suspect review."
-  }
+  },
+  ...(review.id === "rev-100"
+    ? [
+        {
+          id: `ev-${review.id}-mor`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-mor`,
+          anchorId: `sec-${review.id}-mor-1`,
+          sectionId: `sec-${review.id}-mor-1`,
+          text: "MOR lists prior HCC 222 recapture.",
+          exactText: "MOR lists prior HCC 222 recapture",
+          date: `${review.calendarYear}-01-18`,
+          category: "prospective" as const,
+          subtype: "recapture" as const,
+          conditionIds: ["cond-100-c"],
+          summary: "MOR recapture example for prior HCC 222."
+        },
+        {
+          id: `ev-${review.id}-payer`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-mor`,
+          anchorId: `sec-${review.id}-mor-1`,
+          sectionId: `sec-${review.id}-mor-1`,
+          text: "Payer data lists a diabetes suspect opportunity.",
+          exactText: "payer data lists a diabetes suspect opportunity",
+          date: `${review.calendarYear}-01-18`,
+          category: "prospective" as const,
+          subtype: "suspect" as const,
+          conditionIds: ["cond-100-f"],
+          summary: "Payer data suspect example."
+        },
+        {
+          id: `ev-${review.id}-specialist`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-specialist`,
+          anchorId: `sec-${review.id}-spec-1`,
+          sectionId: `sec-${review.id}-spec-1`,
+          text: "Cardiology documents stable chronic diastolic heart failure.",
+          exactText: "stable chronic diastolic heart failure",
+          date: `${review.calendarYear}-02-09`,
+          category: "validated" as const,
+          conditionIds: ["cond-100-c"],
+          summary: "Specialist note supports a chronic heart failure example."
+        },
+        {
+          id: `ev-${review.id}-hie`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-hie`,
+          anchorId: `sec-${review.id}-hie-1`,
+          sectionId: `sec-${review.id}-hie-1`,
+          text: "HIE payload includes registry diabetic eye disease history and an SDoH transportation code.",
+          exactText: "SDoH transportation code",
+          date: `${review.calendarYear}-02-22`,
+          category: "prospective" as const,
+          subtype: "suspect" as const,
+          conditionIds: ["cond-100-f"],
+          summary: "HIE and SDoH source example."
+        },
+        {
+          id: `ev-${review.id}-pathology`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-pathology`,
+          anchorId: `sec-${review.id}-path-1`,
+          sectionId: `sec-${review.id}-path-1`,
+          text: "Pathology confirms no active malignancy.",
+          exactText: "no active malignancy",
+          date: `${review.calendarYear}-05-04`,
+          category: "potentialDelete" as const,
+          conditionIds: ["cond-100-e"],
+          summary: "Pathology source and trumping-control example."
+        },
+        {
+          id: `ev-${review.id}-imaging`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-imaging`,
+          anchorId: `sec-${review.id}-image-1`,
+          sectionId: `sec-${review.id}-image-1`,
+          text: "Imaging shows acute bronchitis only.",
+          exactText: "acute bronchitis only",
+          date: `${review.calendarYear}-05-11`,
+          category: "potentialDelete" as const,
+          conditionIds: ["cond-100-b"],
+          summary: "Imaging acute-condition and quality-exclusion example."
+        }
+      ]
+    : [])
 ]);
 
 export const claims: Claim[] = reviews.map((review) => ({
@@ -354,6 +530,7 @@ export const claims: Claim[] = reviews.map((review) => ({
   cptSourceEligible: review.id !== "rev-103",
   providerTypeEligible: review.id !== "rev-106",
   faceToFace: review.id !== "rev-107",
+  providerSignatureValid: review.id !== "rev-108",
   icd10Codes: review.conditionIds.slice(0, 2).map((id) => id.replace("cond-", "DX-"))
 }));
 
@@ -476,6 +653,7 @@ export const conditions: Condition[] = [
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
     conflictingEvidence: true,
+    sdohCode: true,
     seededRecommendation: {
       action: "Disagree",
       confidence: "Low",
@@ -504,6 +682,7 @@ export const conditions: Condition[] = [
     hadPriorCapture: false,
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
+    trumpedByCode: "E11.311",
     seededRecommendation: {
       action: "Change",
       confidence: "Medium",
@@ -536,6 +715,7 @@ export const conditions: Condition[] = [
           hadPriorCapture: true,
           hasCurrentYearCapture: true,
           hasClinicalIndicators: true,
+          sdohCode: review.id === "rev-103",
           disposition: review.status === "Completed" || review.status === "Under Audit" || review.status === "Audit Complete" ? disposed(index % 3 === 0 ? "Delete" : "Validate") : undefined,
           documentationIssues: []
         },
@@ -559,6 +739,8 @@ export const conditions: Condition[] = [
           hadPriorCapture: index % 2 !== 0,
           hasCurrentYearCapture: false,
           hasClinicalIndicators: true,
+          acuteCondition: review.id === "rev-107",
+          qualityExclusionCode: review.id === "rev-109",
           resolvedFlag: review.id === "rev-103",
           disposition: review.status === "Completed" || review.status === "Under Audit" || review.status === "Audit Complete" ? disposed(index % 2 === 0 ? "Add to Claim" : "Yes", "u-cdi-1") : undefined,
           documentationIssues: review.id === "rev-103" ? [{ issue: "Provider education", comments: "Clarify specificity for future encounter.", userId: "u-cdi-4", createdAt: now }] : []
@@ -587,6 +769,7 @@ export const conditions: Condition[] = [
           hadPriorCapture: extraIndex % 2 === 0,
           hasCurrentYearCapture: false,
           hasClinicalIndicators: true,
+          trumpedByCode: review.id === "rev-106" ? "J44.89" : undefined,
           seededRecommendation: extraIndex % 2 === 1
             ? { action: "Yes", confidence: "Medium", source: "seeded", rationale: "Registry and specialist pattern support physician-facing suspect review." }
             : undefined,
@@ -612,12 +795,14 @@ export const exportsSeed: ExportRecord[] = [
     id: "export-delete-demo",
     type: "Deletion list",
     createdAt: "2026-06-22T15:00:00.000Z",
+    seededExample: true,
     rows: [{ memberId: "HB-204481", icd10: "N18.4", hcc: "HCC 328", note: "Simulated delete-file row" }]
   },
   {
     id: "export-asm-demo",
     type: "Payer ASM export",
     createdAt: "2026-06-22T15:05:00.000Z",
+    seededExample: true,
     rows: [{ memberId: "SM-390114", icd10: "E66.01", payer: "Summit Medicare Advantage", profile: "SUMMIT-ASM-V2" }]
   }
 ];
@@ -636,6 +821,7 @@ export const seedData: SeedData = {
   conditions,
   appointments,
   audits,
+  downstreamTasks: [],
   history,
   exports: exportsSeed
 };

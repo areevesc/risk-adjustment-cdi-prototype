@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { seedData } from "../data/seed";
-import type { AppSettings, DocumentationIssue, PatientReview, RecommendationAction, SeedData, User } from "../domain/types";
+import type { AppSettings, AssignmentMode, DocumentationIssue, PatientReview, RecommendationAction, SeedData, User } from "../domain/types";
 import {
   assignReview,
   completeAudit,
@@ -10,6 +10,7 @@ import {
   overrideLock,
   pendReview,
   releaseReview,
+  reopenAudit,
   routeReview,
   setDisposition,
   startAudit,
@@ -31,6 +32,7 @@ interface AppStateValue extends PersistedState {
   setCurrentUserId: (userId: string) => void;
   setRecommendationMode: (mode: RecommendationMode) => void;
   setAuditSampleRate: (rate: number) => void;
+  setPrototypeCurrentYear: (year: number) => void;
   resetDemo: () => void;
   actions: {
     openReview: (reviewId: string) => void;
@@ -39,7 +41,7 @@ interface AppStateValue extends PersistedState {
     pendReview: (reviewId: string) => void;
     routeReview: (reviewId: string, queue: PatientReview["queue"]) => void;
     completeReview: (reviewId: string) => string[];
-    assignReview: (reviewId: string, assignedUserId: string) => void;
+    assignReview: (reviewId: string, assignedUserId: string, mode?: AssignmentMode, reason?: string) => void;
     takeCoverage: (reviewId: string) => void;
     setDisposition: (
       reviewId: string,
@@ -53,12 +55,14 @@ interface AppStateValue extends PersistedState {
     flagDocumentationIssue: (reviewId: string, conditionId: string, issue: DocumentationIssue, comments?: string) => void;
     startAudit: (reviewId: string) => void;
     completeAudit: (reviewId: string, outcome: "Agree" | "Disagree" | "Return for Correction", comments?: string) => void;
+    reopenAudit: (reviewId: string) => void;
   };
 }
 
 const defaultSettings: AppSettings = {
   recommendationMode: "simulated",
-  auditSampleRate: 25
+  auditSampleRate: 25,
+  prototypeCurrentYear: 2026
 };
 
 const initialState: PersistedState = {
@@ -73,7 +77,11 @@ function loadInitialState(): PersistedState {
     if (!raw) return initialState;
     const parsed = JSON.parse(raw) as PersistedState;
     if (!parsed.data?.reviews?.length) return initialState;
-    return parsed;
+    return {
+      currentUserId: parsed.currentUserId ?? initialState.currentUserId,
+      settings: { ...defaultSettings, ...parsed.settings },
+      data: { ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] }
+    };
   } catch {
     return initialState;
   }
@@ -102,7 +110,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       currentUser,
       setCurrentUserId: (userId) => commit({ ...state, currentUserId: userId }),
       setRecommendationMode: (mode) => commit({ ...state, settings: { ...state.settings, recommendationMode: mode } }),
-      setAuditSampleRate: (rate) => commit({ ...state, settings: { ...state.settings, auditSampleRate: rate } }),
+      setAuditSampleRate: (rate) => commit({ ...state, settings: { ...state.settings, auditSampleRate: Math.max(0, Math.min(100, Number.isFinite(rate) ? rate : 0)) } }),
+      setPrototypeCurrentYear: (year) =>
+        commit({
+          ...state,
+          settings: { ...state.settings, prototypeCurrentYear: Math.max(2020, Math.min(2035, Math.trunc(Number.isFinite(year) ? year : 2026))) }
+        }),
       resetDemo: () => commit(initialState),
       actions: {
         openReview: (reviewId) => withData((data) => openReview(data, reviewId, currentUser)),
@@ -111,17 +124,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         pendReview: (reviewId) => withData((data) => pendReview(data, reviewId, currentUser)),
         routeReview: (reviewId, queue) => withData((data) => routeReview(data, reviewId, currentUser, queue)),
         completeReview: (reviewId) => {
-          const result = completeReview(state.data, reviewId, currentUser);
+          const result = completeReview(state.data, reviewId, currentUser, state.settings);
           if (result.unresolved.length === 0) commit({ ...state, data: result.data });
           return result.unresolved.map((condition) => condition.id);
         },
-        assignReview: (reviewId, assignedUserId) => withData((data) => assignReview(data, reviewId, currentUser, assignedUserId)),
+        assignReview: (reviewId, assignedUserId, mode, reason) => withData((data) => assignReview(data, reviewId, currentUser, assignedUserId, mode, reason)),
         takeCoverage: (reviewId) => withData((data) => takeCoverage(data, reviewId, currentUser)),
         setDisposition: (reviewId, conditionId, action, agreed, reason, comments, replacementCode) =>
-          withData((data) => setDisposition(data, reviewId, conditionId, currentUser, action, agreed, reason, comments, replacementCode)),
+          withData((data) => setDisposition(data, reviewId, conditionId, currentUser, action, agreed, state.settings, reason, comments, replacementCode)),
         flagDocumentationIssue: (reviewId, conditionId, issue, comments) => withData((data) => flagDocumentationIssue(data, reviewId, conditionId, currentUser, issue, comments)),
         startAudit: (reviewId) => withData((data) => startAudit(data, reviewId, currentUser)),
-        completeAudit: (reviewId, outcome, comments) => withData((data) => completeAudit(data, reviewId, currentUser, outcome, comments))
+        completeAudit: (reviewId, outcome, comments) => withData((data) => completeAudit(data, reviewId, currentUser, outcome, comments)),
+        reopenAudit: (reviewId) => withData((data) => reopenAudit(data, reviewId, currentUser))
       }
     };
   }, [currentUser, state]);

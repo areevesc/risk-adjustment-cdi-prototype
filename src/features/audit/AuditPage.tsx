@@ -6,7 +6,7 @@ import { formatDate, formatDateTime } from "../../domain/format";
 import { Button, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 
 export function AuditPage() {
-  const { data, settings, actions } = useAppState();
+  const { data, currentUser, settings, actions } = useAppState();
   const [selectedReviewId, setSelectedReviewId] = useState(data.reviews.find((review) => review.queue === "Auditor Queue" || review.status === "Under Audit")?.id);
   const [comments, setComments] = useState("");
   const maps = useMemo(() => ({ patients: byId(data.patients), users: byId(data.users) }), [data]);
@@ -18,6 +18,8 @@ export function AuditPage() {
   const patient = maps.patients.get(selected.patientId)!;
   const audit = getAuditForReview(data, selected.id);
   const conditions = reviewConditions(data, selected);
+  const auditComplete = audit?.status === "Complete";
+  const canAct = selected.status === "Under Audit" && !auditComplete;
 
   return (
     <div className="page-stack">
@@ -47,21 +49,33 @@ export function AuditPage() {
                 </p>
               </div>
               <div className="header-actions">
-                <Button onClick={() => actions.startAudit(selected.id)}>
+                <Button disabled={auditComplete} onClick={() => actions.startAudit(selected.id)}>
                   <FileCheck2 size={15} />
                   Start audit
                 </Button>
-                <Button onClick={() => actions.completeAudit(selected.id, "Return for Correction", comments)}>
+                {auditComplete ? (
+                  <Button onClick={() => actions.reopenAudit(selected.id)}>
+                    <RotateCcw size={15} />
+                    Reopen audit
+                  </Button>
+                ) : null}
+                <Button disabled={!canAct || !comments.trim()} onClick={() => actions.completeAudit(selected.id, "Return for Correction", comments)}>
                   <RotateCcw size={15} />
                   Return
                 </Button>
-                <Button variant="primary" onClick={() => actions.completeAudit(selected.id, "Agree", comments)}>Agree complete</Button>
-                <Button variant="danger" onClick={() => actions.completeAudit(selected.id, "Disagree", comments)}>Disagree complete</Button>
+                <Button disabled={!canAct} variant="primary" onClick={() => actions.completeAudit(selected.id, "Agree", comments)}>Agree complete</Button>
+                <Button disabled={!canAct} variant="danger" onClick={() => actions.completeAudit(selected.id, "Disagree", comments)}>Disagree complete</Button>
               </div>
             </div>
+            {auditComplete ? <div className="read-only-banner">Audit complete. Use Reopen audit before making another audit decision.</div> : null}
+            {selected.auditReturn ? <div className="warning-banner">Returned for correction: {selected.auditReturn.comments}</div> : null}
             <label>
               Auditor comments
-              <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Record audit rationale, correction request, or agreement notes" />
+              <textarea
+                value={comments}
+                onChange={(event) => setComments(event.target.value)}
+                placeholder={`Record audit rationale, correction request, or agreement notes as ${currentUser.name}`}
+              />
             </label>
             <div className="audit-condition-list">
               {conditions.map((condition) => {

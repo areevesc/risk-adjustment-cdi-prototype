@@ -3,11 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table";
 import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
 import { useAppState } from "../../state/AppState";
-import { byId, getCategorySummary, getProspectiveCounts, isAssignedToUser } from "../../domain/selectors";
+import { byId, getPersonalStats, getPresentedOpportunitySummary, getProspectiveCounts, isAssignedToUser } from "../../domain/selectors";
 import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
 import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens } from "../../domain/tokens";
+import { canTakeCoverage, getVisibleReviews } from "../../domain/auth";
 
 interface QueueRow {
   review: PatientReview;
@@ -23,7 +24,7 @@ interface QueueRow {
   status: WorkflowStatus;
   queue: string;
   lockedBy: string;
-  categories: ReturnType<typeof getCategorySummary>;
+  categories: ReturnType<typeof getPresentedOpportunitySummary>;
   recapture: number;
   suspect: number;
   noVisit: boolean;
@@ -55,13 +56,13 @@ export function QueuePage() {
   );
 
   const rows = useMemo<QueueRow[]>(() => {
-    return data.reviews.map((review) => {
+    return getVisibleReviews(data, currentUser).map((review) => {
       const patient = maps.patients.get(review.patientId)!;
       const assignedUsers = [review.assignedCoderId, review.assignedCdiId, review.assignedAuditorId]
         .map((id) => (id ? maps.users.get(id)?.name : undefined))
         .filter(Boolean)
         .join(" / ");
-      const categories = getCategorySummary(data, review);
+      const categories = getPresentedOpportunitySummary(data, review);
       const counts = getProspectiveCounts(data, review);
       return {
         review,
@@ -83,7 +84,7 @@ export function QueuePage() {
         noVisit: !maps.appointments.has(patient.id)
       };
     });
-  }, [data, maps]);
+  }, [currentUser, data, maps]);
 
   const filteredRows = rows.filter((row) => {
     const search = query.trim().toLowerCase();
@@ -99,10 +100,19 @@ export function QueuePage() {
       row.review.assignedAuditorId === teamMemberFilter;
     const matchesCategory = categoryFilter === "All" || row.categories[categoryFilter as keyof typeof row.categories]?.count > 0;
     const matchesVisit = !noVisitOnly || row.noVisit;
-    const restricted = currentUser.roles.includes("Coder") || currentUser.roles.includes("CDI Specialist");
-    const matchesCoverage = !restricted || isAssignedToUser(row.review, currentUser) || row.review.queue === "Unassigned Team Queue" || row.review.queue === "Prospective Review Queue";
-    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesVisit && matchesCoverage;
+    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesVisit;
   });
+
+  const personalStats = getPersonalStats(data, currentUser);
+
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("All");
+    setReviewTypeFilter("All");
+    setTeamMemberFilter("All");
+    setCategoryFilter("All");
+    setNoVisitOnly(false);
+  }
 
   function open(reviewId: string) {
     actions.openReview(reviewId);
@@ -175,7 +185,7 @@ export function QueuePage() {
           <Button variant="primary" onClick={() => open(info.row.original.review.id)}>
             Open
           </Button>
-          {!info.row.original.review.lock && !isAssignedToUser(info.row.original.review, currentUser) ? (
+          {canTakeCoverage(data, info.row.original.review, currentUser) && !isAssignedToUser(info.row.original.review, currentUser) ? (
             <Button variant="secondary" onClick={() => actions.takeCoverage(info.row.original.review.id)}>
               <UserPlus size={14} />
               Cover
@@ -242,7 +252,11 @@ export function QueuePage() {
             <input type="checkbox" checked={noVisitOnly} onChange={(event) => setNoVisitOnly(event.target.checked)} />
             No upcoming visit
           </label>
+          <Button variant="ghost" onClick={clearFilters}>
+            Clear Filters
+          </Button>
         </div>
+        <div className="queue-count">{filteredRows.length} result(s)</div>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -273,22 +287,31 @@ export function QueuePage() {
       </Panel>
       <Panel title="Personal Statistics">
         <div className="stat-grid">
-          <Stat label="Visible Reviews" value={filteredRows.length} />
-          <Stat label="Completed" value={filteredRows.filter((row) => row.status === "Completed" || row.status === "Audit Complete").length} />
-          <Stat label="Pended" value={filteredRows.filter((row) => row.status === "Pended").length} />
-          <Stat label="No Upcoming Visit" value={filteredRows.filter((row) => row.noVisit).length} />
-          <Stat label="AI Agreements" value={data.conditions.filter((condition) => condition.disposition?.agreedWithRecommendation).length} />
+          <Stat label="Assigned Reviews" value={personalStats.assignedReviews} />
+          <Stat label="Completed" value={personalStats.completedReviews} />
+          <Stat label="Pended" value={personalStats.pendedReviews} />
+          <Stat label="Validations" value={personalStats.validations} />
+          <Stat label="Deletions" value={personalStats.deletions} />
+          <Stat label="Additions" value={personalStats.additions} />
+          <Stat label="Prospective Decisions" value={personalStats.prospectiveDecisions} />
+          <Stat label="Recapture Decisions" value={personalStats.recaptureDecisions} />
+          <Stat label="Suspect Decisions" value={personalStats.suspectDecisions} />
+          <Stat label="Recommendation Agreement" value={personalStats.recommendationAgreement} suffix="%" />
+          <Stat label="Audit Agreement" value={personalStats.auditAgreement} suffix="%" />
         </div>
       </Panel>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, suffix = "" }: { label: string; value: number; suffix?: string }) {
   return (
     <div className="stat">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>
+        {value}
+        {suffix}
+      </strong>
     </div>
   );
 }
