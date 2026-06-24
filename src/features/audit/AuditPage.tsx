@@ -1,0 +1,100 @@
+import { useMemo, useState } from "react";
+import { FileCheck2, RotateCcw } from "lucide-react";
+import { useAppState } from "../../state/AppState";
+import { byId, getAuditForReview, getEvidenceForCondition, getRecommendation, reviewConditions } from "../../domain/selectors";
+import { formatDate, formatDateTime } from "../../domain/format";
+import { Button, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
+
+export function AuditPage() {
+  const { data, settings, actions } = useAppState();
+  const [selectedReviewId, setSelectedReviewId] = useState(data.reviews.find((review) => review.queue === "Auditor Queue" || review.status === "Under Audit")?.id);
+  const [comments, setComments] = useState("");
+  const maps = useMemo(() => ({ patients: byId(data.patients), users: byId(data.users) }), [data]);
+  const auditReviews = data.reviews.filter((review) => review.queue === "Auditor Queue" || review.status === "Under Audit" || review.status === "Audit Complete");
+  const selected = auditReviews.find((review) => review.id === selectedReviewId) ?? auditReviews[0];
+
+  if (!selected) return <EmptyState title="No audit reviews" body="No reviews are currently in the auditor queue." />;
+
+  const patient = maps.patients.get(selected.patientId)!;
+  const audit = getAuditForReview(data, selected.id);
+  const conditions = reviewConditions(data, selected);
+
+  return (
+    <div className="page-stack">
+      <Panel title="Audit Queue">
+        <div className="audit-layout">
+          <div className="audit-list">
+            {auditReviews.map((review) => {
+              const itemPatient = maps.patients.get(review.patientId)!;
+              const itemAudit = getAuditForReview(data, review.id);
+              return (
+                <button key={review.id} type="button" className={selected.id === review.id ? "active" : ""} onClick={() => setSelectedReviewId(review.id)}>
+                  <strong>{itemPatient.name}</strong>
+                  <span>
+                    CY {review.calendarYear} - {review.reviewType}
+                  </span>
+                  <StatusChip tone={review.status.includes("Complete") ? "good" : "purple"}>{itemAudit?.status ?? review.status}</StatusChip>
+                </button>
+              );
+            })}
+          </div>
+          <div className="audit-detail">
+            <div className="audit-heading">
+              <div>
+                <h2>{patient.name}</h2>
+                <p>
+                  Member {patient.memberId} - Audit status {audit?.status ?? "Not Started"}
+                </p>
+              </div>
+              <div className="header-actions">
+                <Button onClick={() => actions.startAudit(selected.id)}>
+                  <FileCheck2 size={15} />
+                  Start audit
+                </Button>
+                <Button onClick={() => actions.completeAudit(selected.id, "Return for Correction", comments)}>
+                  <RotateCcw size={15} />
+                  Return
+                </Button>
+                <Button variant="primary" onClick={() => actions.completeAudit(selected.id, "Agree", comments)}>Agree complete</Button>
+                <Button variant="danger" onClick={() => actions.completeAudit(selected.id, "Disagree", comments)}>Disagree complete</Button>
+              </div>
+            </div>
+            <label>
+              Auditor comments
+              <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Record audit rationale, correction request, or agreement notes" />
+            </label>
+            <div className="audit-condition-list">
+              {conditions.map((condition) => {
+                const recommendation = getRecommendation(condition, selected, data, settings);
+                return (
+                  <article key={condition.id} className="audit-condition">
+                    <header>
+                      <strong>
+                        {condition.icd10} - {condition.description}
+                      </strong>
+                      <StatusChip tone={condition.disposition ? "good" : "warn"}>{condition.disposition?.action ?? "No disposition"}</StatusChip>
+                    </header>
+                    <RecommendationBox recommendation={recommendation} settings={settings} />
+                    <div className="compact-list">
+                      {getEvidenceForCondition(data, condition).map((item) => (
+                        <span key={item.id}>
+                          {formatDate(item.date)} - {item.summary}
+                        </span>
+                      ))}
+                    </div>
+                    {condition.disposition ? (
+                      <p>
+                        User decision by {maps.users.get(condition.disposition.userId)?.name}: {condition.disposition.action}
+                        {condition.disposition.reason ? ` - ${condition.disposition.reason}` : ""} at {formatDateTime(condition.disposition.decidedAt)}
+                      </p>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}

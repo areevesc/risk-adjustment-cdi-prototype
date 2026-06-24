@@ -1,0 +1,10 @@
+node_modules/
+dist/
+_plan_docx_extract/
+_plan_docx_render/
+.agents/
+
+.env
+.env.*
+*.log
+.DS_Store
