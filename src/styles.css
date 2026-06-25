@@ -823,11 +823,19 @@ label {
 
 .presented-summary,
 .source-eligibility-row,
+.outreach-status-row,
 .raf-metric-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: 8px 0;
+}
+
+.outreach-status-row {
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
 }
 
 .source-eligibility-row.compact {
@@ -1080,6 +1088,46 @@ label {
   background: #fff5dd;
   border: 1px solid #f2c46d;
   border-radius: 7px;
+}
+
+.rule-message-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.rule-info {
+  padding: 8px 10px;
+  color: #24536f;
+  background: #e8f4fb;
+  border: 1px solid #b7d7ea;
+  border-radius: 7px;
+  font-weight: 800;
+}
+
+.compact-warning {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+}
+
+.rule-evidence-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.rule-evidence-links button {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.rule-evidence-links button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .warning-banner {

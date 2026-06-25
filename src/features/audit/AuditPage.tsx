@@ -63,6 +63,7 @@ export function AuditPage() {
                     CY {review.calendarYear} - {review.reviewType}
                   </span>
                   <StatusChip tone={review.status.includes("Complete") ? "good" : "purple"}>{itemAudit?.status ?? review.status}</StatusChip>
+                  {itemAudit?.selectionSource ? <small>{itemAudit.selectionSource === "deterministic-sample" ? "Sampled" : "Manual"}</small> : null}
                 </button>
               );
             })}
@@ -74,6 +75,13 @@ export function AuditPage() {
                 <p>
                   Member {patient.memberId} - Audit status {audit?.status ?? "Not Started"}
                 </p>
+                {audit?.selectionSource ? (
+                  <p>
+                    {audit.selectionSource === "deterministic-sample" ? "Deterministic sample" : "Manual audit"}{" "}
+                    {audit.sampleRate !== undefined ? `- rate ${audit.sampleRate}% - bucket ${audit.sampleBucket}` : ""}
+                    {audit.sampleCategories?.length ? ` - categories ${audit.sampleCategories.join(", ")}` : ""}
+                  </p>
+                ) : null}
               </div>
               <div className="header-actions">
                 <Button disabled={auditComplete} onClick={() => actions.startAudit(selected.id)}>
@@ -113,7 +121,12 @@ export function AuditPage() {
                       <strong>
                         {condition.icd10} - {condition.description}
                       </strong>
-                      <StatusChip tone={condition.disposition ? "good" : "warn"}>{condition.disposition?.action ?? "No disposition"}</StatusChip>
+                      <StatusChip tone={condition.disposition || condition.ruleOutcome?.source === "rule-resolved" ? "good" : condition.ruleOutcome ? "purple" : "warn"}>
+                        {condition.disposition?.action ??
+                          (condition.ruleOutcome
+                            ? `${condition.ruleOutcome.source === "rule-resolved" ? "Rule-resolved" : "Rule-suppressed"}${condition.ruleOutcome.action ? ` - ${condition.ruleOutcome.action}` : ""}`
+                            : "No disposition")}
+                      </StatusChip>
                     </header>
                     <RecommendationBox recommendation={recommendation} settings={settings} />
                     <div className="compact-list">
@@ -127,6 +140,12 @@ export function AuditPage() {
                       <p>
                         User decision by {maps.users.get(condition.disposition.userId)?.name}: {condition.disposition.action}
                         {condition.disposition.reason ? ` - ${condition.disposition.reason}` : ""} at {formatDateTime(condition.disposition.decidedAt)}
+                      </p>
+                    ) : null}
+                    {condition.ruleOutcome ? (
+                      <p>
+                        Rule outcome: {condition.ruleOutcome.source === "rule-resolved" ? "Rule-resolved" : "Rule-suppressed"}
+                        {condition.ruleOutcome.action ? ` - ${condition.ruleOutcome.action}` : ""} at {formatDateTime(condition.ruleOutcome.createdAt)}. {condition.ruleOutcome.explanation}
                       </p>
                     ) : null}
                   </article>

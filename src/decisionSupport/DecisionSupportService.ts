@@ -1,13 +1,178 @@
-import type { AppSettings, Condition, PatientReview, Recommendation, SeedData } from "../domain/types";
+import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
 
 export interface DecisionSupportService {
   getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined;
+  evaluateRules(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): RuleResult;
   getDisplayLabel(recommendation: Recommendation, settings: AppSettings): string;
 }
 
 export class PrototypeDecisionSupportService implements DecisionSupportService {
   getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (settings.recommendationMode === "hidden") return undefined;
+    return this.getBaseRecommendation(condition, review, data, settings);
+  }
+
+  evaluateRules(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): RuleResult {
+    const recommendation = this.getBaseRecommendation(condition, review, data, settings);
+    const disabledActions: RuleActionSuppression[] = [];
+    const warnings: RuleResult["warnings"] = [];
+    const supportingEvidenceIds = new Set<string>(condition.supportingEvidenceIds ?? []);
+    const conflictingEvidenceIds = new Set<string>(condition.conflictingEvidenceIds ?? []);
+    const acuteExclusion = evaluateAcuteOnlyRecaptureExclusion(condition);
+    const hierarchy = evaluateHierarchySuppression(condition, review, data);
+    const contextualExclusion = evaluateContextualExclusion(condition);
+    const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
+
+    const deleteSafety = evaluateDeleteSafety(condition, review, data);
+    deleteSafety.supportingEvidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+    deleteSafety.conflictingEvidenceIds.forEach((id) => conflictingEvidenceIds.add(id));
+    acuteExclusion.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+    hierarchy.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+    contextualExclusion.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+    lookback.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+
+    if (condition.ruleOutcome) {
+      if (condition.ruleOutcome.action) {
+        disabledActions.push({
+          action: condition.ruleOutcome.action,
+          reason: condition.ruleOutcome.explanation,
+          ruleId: condition.ruleOutcome.ruleId,
+          source: condition.ruleOutcome.source,
+          supportingEvidenceIds: condition.ruleOutcome.supportingEvidenceIds,
+          conflictingEvidenceIds: condition.ruleOutcome.conflictingEvidenceIds
+        });
+      }
+      condition.ruleOutcome.supportingEvidenceIds?.forEach((id) => supportingEvidenceIds.add(id));
+      condition.ruleOutcome.conflictingEvidenceIds?.forEach((id) => conflictingEvidenceIds.add(id));
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesNotOnClaim") {
+      const selectedDuplicate = getSamePatientYearHccConditions(data, review, condition.hcc).find(
+        (item) => item.id !== condition.id && item.workflow === "codesNotOnClaim" && item.disposition?.action === "Add to Claim"
+      );
+      if (selectedDuplicate) {
+        selectedDuplicate.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+        disabledActions.push({
+          action: "Add to Claim",
+          reason: `Add to Claim unavailable because ${selectedDuplicate.icd10} was already selected for the same patient, calendar year, and ${condition.hcc}.`,
+          ruleId: "same-hcc-duplicate-add",
+          source: "rule-suppressed",
+          supportingEvidenceIds: selectedDuplicate.evidenceIds
+        });
+      }
+    }
+
+    if (condition.workflow === "codesOnClaim" && deleteSafety.supportingEvidenceIds.length > 0) {
+      disabledActions.push({
+        action: "Delete",
+        reason: "Delete unavailable because current-year supporting evidence exists for this condition or same HCC.",
+        ruleId: "delete-safety-current-year-support",
+        source: "rule-suppressed",
+        supportingEvidenceIds: deleteSafety.supportingEvidenceIds
+      });
+    }
+
+    if (condition.workflow === "codesOnClaim" && deleteSafety.conflictingEvidenceIds.length > 0) {
+      warnings.push({
+        message: "Conflicting or ambiguous current-year evidence exists. Escalate to manager or auditor review when needed.",
+        severity: "warning",
+        evidenceIds: deleteSafety.conflictingEvidenceIds
+      });
+    }
+
+    if (condition.workflow === "codesOnClaim" && (review.calendarYear !== settings.prototypeCurrentYear || !condition.currentYear)) {
+      disabledActions.push({
+        action: "Send to Prospective",
+        reason: "Send to Prospective is unavailable because this is not the configured prototype current calendar year.",
+        ruleId: "current-year-prospective-routing",
+        source: "rule-suppressed"
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "prospective" && condition.subtype === "recapture" && lookback.hasCurrentYearCapture) {
+      disabledActions.push({
+        action: "Yes",
+        reason: `${condition.hcc} already has a current-year capture for this patient and calendar year, so prospective recapture is suppressed.`,
+        ruleId: "current-year-hcc-captured",
+        source: "rule-suppressed",
+        supportingEvidenceIds: lookback.currentCaptureEvidenceIds
+      });
+      lookback.currentCaptureEvidenceIds.forEach((id) => supportingEvidenceIds.add(id));
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && acuteExclusion.applies) {
+      disabledActions.push({
+        action: "Yes",
+        reason: "Prospective recapture is unavailable because this opportunity is explicitly marked acute-only in the synthetic scenario.",
+        ruleId: "acute-only-recapture-exclusion",
+        source: "rule-suppressed",
+        supportingEvidenceIds: acuteExclusion.evidenceIds
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && hierarchy.applies) {
+      hierarchy.disabledActions.forEach((action) =>
+        disabledActions.push({
+          action,
+          reason: hierarchy.reason,
+          ruleId: "hierarchy-trumping-suppression",
+          source: "rule-suppressed",
+          supportingEvidenceIds: hierarchy.evidenceIds
+        })
+      );
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && contextualExclusion.applies) {
+      contextualExclusion.disabledActions.forEach((action) =>
+        disabledActions.push({
+          action,
+          reason: contextualExclusion.reason,
+          ruleId: contextualExclusion.ruleId,
+          source: "rule-suppressed",
+          supportingEvidenceIds: contextualExclusion.evidenceIds
+        })
+      );
+      warnings.push({
+        message: contextualExclusion.reason,
+        severity: "info",
+        evidenceIds: contextualExclusion.evidenceIds
+      });
+    }
+
+    const threshold = clampThreshold(settings.sameHccValidationThreshold);
+    const sameHccValidations = getSamePatientYearHccConditions(data, review, condition.hcc).filter((item) => item.disposition?.action === "Validate").length;
+    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesOnClaim" && sameHccValidations >= threshold) {
+      disabledActions.push({
+        action: "Delete",
+        reason: `${condition.hcc} already reached the same-HCC validation threshold for this patient and calendar year.`,
+        ruleId: "same-hcc-validation-threshold",
+        source: "rule-resolved"
+      });
+    }
+
+    return {
+      ruleId:
+        condition.ruleOutcome?.ruleId ??
+        (acuteExclusion.applies
+          ? "acute-only-recapture-exclusion"
+          : hierarchy.applies
+            ? "hierarchy-trumping-suppression"
+            : contextualExclusion.applies
+              ? contextualExclusion.ruleId
+              : lookback.qualifies
+                ? "three-year-lookback-recapture"
+                : "condition-action-rules"),
+      recommendedAction: recommendation?.action,
+      explanation: condition.ruleOutcome?.explanation ?? recommendation?.rationale ?? "No rule-based recommendation is available for this condition.",
+      supportingEvidenceIds: Array.from(supportingEvidenceIds),
+      conflictingEvidenceIds: Array.from(conflictingEvidenceIds),
+      disabledActions: dedupeDisabledActions(disabledActions),
+      warnings,
+      outcomeSource: condition.ruleOutcome?.source
+    };
+  }
+
+  private getBaseRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (condition.seededRecommendation) return condition.seededRecommendation;
     const claim = data.claims.find((item) => item.reviewId === review.id);
     const riskEligibleSource =
@@ -27,12 +192,36 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       };
     }
 
-    if (condition.acuteCondition || condition.sdohCode || condition.qualityExclusionCode) {
+    const acuteExclusion = evaluateAcuteOnlyRecaptureExclusion(condition);
+    if (acuteExclusion.applies) {
       return {
-        action: "Disagree",
+        action: "No",
         confidence: "High",
         source: "rules",
-        rationale: "The condition is tagged as acute, SDoH, or quality-exclusion logic in the synthetic rules."
+        rationale: "Excluded from prospective recapture because the curated prototype scenario marks this as acute-only, with no explicit later evidence showing continued relevance."
+      };
+    }
+
+    const hierarchy = evaluateHierarchySuppression(condition, review, data);
+    if (hierarchy.applies) {
+      return {
+        action: "Change",
+        confidence: hierarchy.capturedReplacement ? "High" : "Medium",
+        source: "rules",
+        replacementCode: condition.trumpedByCode,
+        rationale: hierarchy.capturedReplacement
+          ? `${condition.trumpedByCode} is already represented for this patient/calendar year. Direct lower-code capture is suppressed; keep the diagnosis visible and use the replacement context if action is needed.`
+          : `Prototype hierarchy maps this lower opportunity to ${condition.trumpedByCode}. Direct capture is suppressed so the higher or more specific code can be reviewed instead.`
+      };
+    }
+
+    const contextualExclusion = evaluateContextualExclusion(condition);
+    if (contextualExclusion.applies) {
+      return {
+        action: contextualExclusion.recommendedAction,
+        confidence: "High",
+        source: "rules",
+        rationale: contextualExclusion.reason
       };
     }
 
@@ -56,13 +245,25 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "prospective") {
-      if (condition.subtype === "recapture" && condition.hadPriorCapture && !condition.hasCurrentYearCapture) {
-        return {
-          action: "Yes",
-          confidence: "High",
-          source: "rules",
-          rationale: "Prior historical capture exists without current-year capture, so this is a recapture opportunity."
-        };
+      const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
+      if (condition.subtype === "recapture") {
+        if (lookback.qualifies) {
+          return {
+            action: "Yes",
+            confidence: "High",
+            source: "rules",
+            rationale: buildLookbackRationale(condition, review, data, lookback)
+          };
+        }
+        if (lookback.hasCurrentYearCapture) {
+          return {
+            action: "No",
+            confidence: "Medium",
+            source: "rules",
+            rationale: `${condition.hcc} already has a current-year capture for this patient and calendar year, so prospective recapture is not recommended.`
+          };
+        }
+        return undefined;
       }
       if (condition.subtype === "suspect" && condition.hasClinicalIndicators && !condition.hadPriorCapture) {
         return {
@@ -83,7 +284,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "The code is on a risk-eligible claim and current documentation supports MEAT."
         };
       }
-      if (currentPrototypeYear && condition.hasOtherSupportingEvidence) {
+      if (currentPrototypeYear && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
         return {
           action: "Send to Prospective",
           confidence: "Medium",
@@ -134,10 +335,225 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
   getDisplayLabel(recommendation: Recommendation, settings: AppSettings) {
     if (settings.recommendationMode === "rules" && recommendation.source === "rules") {
-      return "Rule-based decision support";
+      return "Rule-Based Recommendation - Prototype Only";
     }
-    return "Simulated AI recommendation - prototype only";
+    return recommendation.source === "seeded" ? "Seeded Rule-Based Recommendation - Prototype Only" : "Rule-Based Recommendation - Prototype Only";
   }
 }
 
 export const decisionSupportService = new PrototypeDecisionSupportService();
+
+function clampThreshold(value: number | undefined) {
+  return Math.max(1, Math.min(10, Math.trunc(Number.isFinite(value) ? value! : 3)));
+}
+
+function getSamePatientYearHccConditions(data: SeedData, review: PatientReview, hcc: string) {
+  const patientYearReviewIds = new Set(data.reviews.filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear).map((item) => item.id));
+  return data.conditions.filter((condition) => patientYearReviewIds.has(condition.reviewId) && condition.hcc === hcc);
+}
+
+function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {
+  const acuteOnly = condition.persistence === "acute" || condition.acuteCondition;
+  const applies =
+    acuteOnly &&
+    condition.workflow === "prospective" &&
+    condition.subtype === "recapture" &&
+    !condition.hasCurrentYearCapture &&
+    !condition.hasClinicalIndicators;
+  return {
+    applies,
+    evidenceIds: applies ? [...condition.evidenceIds, ...(condition.lookbackEvidenceIds ?? [])] : []
+  };
+}
+
+function evaluateHierarchySuppression(condition: Condition, review: PatientReview, data: SeedData) {
+  const disabledActions = getDirectCaptureActionsForWorkflow(condition);
+  if (!condition.trumpedByCode || disabledActions.length === 0) {
+    return { applies: false, disabledActions: [] as RecommendationAction[], evidenceIds: [] as string[], reason: "", capturedReplacement: false };
+  }
+  const replacement = getReplacementCondition(condition, review, data);
+  const capturedReplacement = Boolean(
+    replacement &&
+      (replacement.hasCurrentYearCapture ||
+        replacement.disposition?.action === "Validate" ||
+        replacement.disposition?.action === "Add to Claim" ||
+        replacement.disposition?.action === "Yes" ||
+        replacement.ruleOutcome?.source === "rule-resolved")
+  );
+  const replacementText = capturedReplacement ? `${condition.trumpedByCode} is already captured or validated for this patient/calendar year` : `${condition.trumpedByCode} is the prototype replacement code`;
+  return {
+    applies: true,
+    disabledActions,
+    evidenceIds: [...condition.evidenceIds, ...(replacement?.evidenceIds ?? [])],
+    reason: `Direct capture is suppressed because ${replacementText}. This keeps the lower diagnosis visible without double-counting RAF.`,
+    capturedReplacement
+  };
+}
+
+function evaluateContextualExclusion(condition: Condition) {
+  if (!condition.sdohCode && !condition.qualityExclusionCode) {
+    return {
+      applies: false,
+      ruleId: "condition-action-rules",
+      recommendedAction: "Disagree" as RecommendationAction,
+      disabledActions: [] as RecommendationAction[],
+      evidenceIds: [] as string[],
+      reason: ""
+    };
+  }
+  const ruleId = condition.qualityExclusionCode ? "quality-exclusion-suppression" : "sdoh-context-suppression";
+  const label = condition.qualityExclusionCode ? "quality-exclusion" : "SDoH";
+  const recommendedAction: RecommendationAction = condition.workflow === "codesOnClaim" ? "Delete" : condition.workflow === "prospective" ? "No" : "Disagree";
+  return {
+    applies: true,
+    ruleId,
+    recommendedAction,
+    disabledActions: getCaptureActionsForWorkflow(condition),
+    evidenceIds: condition.evidenceIds,
+    reason: `Capture action is suppressed because this opportunity is tagged as ${label} context in the curated prototype scenario. Keep the context visible and route education or review manually if needed.`
+  };
+}
+
+function getCaptureActionsForWorkflow(condition: Condition): RecommendationAction[] {
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Send to Prospective"];
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim"];
+  if (condition.workflow === "prospective") return ["Yes", "Change"];
+  return [];
+}
+
+function getDirectCaptureActionsForWorkflow(condition: Condition): RecommendationAction[] {
+  if (condition.workflow === "codesOnClaim") return ["Validate"];
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim"];
+  if (condition.workflow === "prospective") return ["Yes"];
+  return [];
+}
+
+function getReplacementCondition(condition: Condition, review: PatientReview, data: SeedData) {
+  if (!condition.trumpedByCode) return undefined;
+  const patientYearReviewIds = new Set(data.reviews.filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear).map((item) => item.id));
+  return data.conditions.find((item) => patientYearReviewIds.has(item.reviewId) && item.icd10 === condition.trumpedByCode);
+}
+
+function evaluateThreeYearLookbackRecapture(condition: Condition, review: PatientReview, data: SeedData) {
+  const empty = {
+    qualifies: false,
+    evidenceIds: [] as string[],
+    evidenceLabels: [] as string[],
+    hasCurrentYearCapture: false,
+    currentCaptureEvidenceIds: [] as string[]
+  };
+  if (condition.workflow !== "prospective" || condition.subtype !== "recapture" || !condition.hadPriorCapture) return empty;
+
+  const currentCaptureEvidenceIds = new Set(getCurrentYearCaptureEvidenceIds(condition, review, data));
+  if (condition.hasCurrentYearCapture) {
+    condition.evidenceIds.filter((id) => isCurrentYearEvidence(id, review, data)).forEach((id) => currentCaptureEvidenceIds.add(id));
+  }
+  const hasCurrentYearCapture = condition.hasCurrentYearCapture || currentCaptureEvidenceIds.size > 0;
+  const lookbackEvidence = getLookbackEvidence(condition, review, data);
+  return {
+    qualifies: lookbackEvidence.length > 0 && !hasCurrentYearCapture,
+    evidenceIds: lookbackEvidence.map((item) => item.id),
+    evidenceLabels: lookbackEvidence.map((item) => item.label),
+    hasCurrentYearCapture,
+    currentCaptureEvidenceIds: Array.from(currentCaptureEvidenceIds)
+  };
+}
+
+function getLookbackEvidence(condition: Condition, review: PatientReview, data: SeedData) {
+  const patientReviewIds = new Set(data.reviews.filter((item) => item.patientId === review.patientId).map((item) => item.id));
+  const explicitEvidenceIds = new Set([...(condition.evidenceIds ?? []), ...(condition.lookbackEvidenceIds ?? [])]);
+  return data.evidence
+    .filter((evidence) => patientReviewIds.has(evidence.reviewId))
+    .filter((evidence) => explicitEvidenceIds.has(evidence.id) || evidence.conditionIds.includes(condition.id))
+    .filter((evidence) => {
+      const year = Number(evidence.date.slice(0, 4));
+      return Number.isFinite(year) && year >= review.calendarYear - 3 && year <= review.calendarYear - 1;
+    })
+    .map((evidence) => {
+      const document = data.documents.find((item) => item.id === evidence.documentId);
+      return {
+        id: evidence.id,
+        date: evidence.date,
+        label: `${evidence.date} ${document?.type ?? "Evidence"}`
+      };
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function getCurrentYearCaptureEvidenceIds(condition: Condition, review: PatientReview, data: SeedData) {
+  const captureActions = new Set(["Validate", "Add to Claim", "Yes", "Change"]);
+  const evidenceIds = new Set<string>();
+  getSamePatientYearHccConditions(data, review, condition.hcc)
+    .filter((item) => item.id !== condition.id && item.currentYear)
+    .filter(
+      (item) =>
+        item.hasCurrentYearCapture ||
+        (item.disposition?.action && captureActions.has(item.disposition.action)) ||
+        (item.ruleOutcome?.source === "rule-resolved" && item.ruleOutcome.action && captureActions.has(item.ruleOutcome.action))
+    )
+    .forEach((item) => item.evidenceIds.forEach((id) => evidenceIds.add(id)));
+  return Array.from(evidenceIds).filter((id) => isCurrentYearEvidence(id, review, data));
+}
+
+function buildLookbackRationale(condition: Condition, review: PatientReview, data: SeedData, lookback: ReturnType<typeof evaluateThreeYearLookbackRecapture>) {
+  const appointment = review.appointmentId ? data.appointments.find((item) => item.id === review.appointmentId) : undefined;
+  const evidenceLabel = lookback.evidenceLabels.length ? lookback.evidenceLabels.join(", ") : "curated prior evidence";
+  const appointmentText = appointment ? `${appointment.type} on ${appointment.date}` : "no attached upcoming appointment";
+  return `Three-year lookback found prior ${condition.hcc} evidence in ${evidenceLabel}. No current-year capture is present for this HCC in the same patient/calendar-year group. The attached visit context is ${appointmentText}. This creates a prospective recapture opportunity for provider confirmation, not an automatic claim action.`;
+}
+
+function evaluateDeleteSafety(condition: Condition, review: PatientReview, data: SeedData) {
+  if (condition.workflow !== "codesOnClaim") {
+    return { supportingEvidenceIds: [] as string[], conflictingEvidenceIds: [] as string[] };
+  }
+
+  const sameHccConditions = getSamePatientYearHccConditions(data, review, condition.hcc);
+  const supporting = new Set<string>(condition.supportingEvidenceIds ?? []);
+  const conflicting = new Set<string>(condition.conflictingEvidenceIds ?? []);
+
+  if (condition.currentYear && (condition.hasSufficientMeat || condition.hasOtherSupportingEvidence)) {
+    condition.evidenceIds.forEach((id) => supporting.add(id));
+  }
+
+  sameHccConditions
+    .filter((item) => item.id !== condition.id && item.currentYear)
+    .filter(
+      (item) =>
+        item.hasSufficientMeat ||
+        item.hasOtherSupportingEvidence ||
+        item.disposition?.action === "Validate" ||
+        item.disposition?.action === "Add to Claim" ||
+        item.ruleOutcome?.action === "Validate"
+    )
+    .forEach((item) => item.evidenceIds.forEach((id) => supporting.add(id)));
+
+  if (condition.conflictingEvidence) {
+    condition.evidenceIds.forEach((id) => conflicting.add(id));
+  }
+
+  return {
+    supportingEvidenceIds: Array.from(supporting).filter((id) => isCurrentYearEvidence(id, review, data)),
+    conflictingEvidenceIds: Array.from(conflicting).filter((id) => isCurrentYearEvidence(id, review, data))
+  };
+}
+
+function isCurrentYearEvidence(evidenceId: string, review: PatientReview, data: SeedData) {
+  const evidence = data.evidence.find((item) => item.id === evidenceId);
+  if (!evidence) return false;
+  const evidenceReview = data.reviews.find((item) => item.id === evidence.reviewId);
+  if (!evidenceReview || evidenceReview.patientId !== review.patientId || evidenceReview.calendarYear !== review.calendarYear) return false;
+  const evidenceYear = Number(evidence.date.slice(0, 4));
+  if (evidenceYear === review.calendarYear) return true;
+  const document = data.documents.find((item) => item.id === evidence.documentId);
+  return document?.isCurrentYear === true;
+}
+
+function dedupeDisabledActions(actions: RuleActionSuppression[]) {
+  const seen = new Set<string>();
+  return actions.filter((item) => {
+    const key = `${item.action}:${item.ruleId}:${item.reason}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

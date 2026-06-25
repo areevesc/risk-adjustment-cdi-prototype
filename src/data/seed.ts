@@ -77,7 +77,14 @@ export const patients: Patient[] = [
   { id: "pat-106", name: "Linda Park", dob: "1950-01-15", memberId: "CC-902311", payerId: "payer-civic", demographicRaf: 0.356 },
   { id: "pat-107", name: "George Miller", dob: "1946-07-22", memberId: "NV-600742", payerId: "payer-nova", demographicRaf: 0.601 },
   { id: "pat-108", name: "Angela Rossi", dob: "1953-09-12", memberId: "SM-390114", payerId: "payer-summit", demographicRaf: 0.318 },
-  { id: "pat-109", name: "Victor Coleman", dob: "1941-11-02", memberId: "HB-772140", payerId: "payer-harbor", demographicRaf: 0.557 }
+  { id: "pat-109", name: "Victor Coleman", dob: "1941-11-02", memberId: "HB-772140", payerId: "payer-harbor", demographicRaf: 0.557 },
+  { id: "pat-110", name: "Denise Brooks", dob: "1948-03-18", memberId: "SM-550110", payerId: "payer-summit", demographicRaf: 0.402 },
+  { id: "pat-111", name: "Marlene Cole", dob: "1952-06-09", memberId: "HB-771111", payerId: "payer-harbor", demographicRaf: 0.371 },
+  { id: "pat-112", name: "Arthur Lane", dob: "1945-09-27", memberId: "CC-661112", payerId: "payer-civic", demographicRaf: 0.488 },
+  { id: "pat-113", name: "Helen Carver", dob: "1950-12-02", memberId: "NV-801113", payerId: "payer-nova", demographicRaf: 0.344 },
+  { id: "pat-114", name: "Irene Moss", dob: "1949-01-30", memberId: "SM-661114", payerId: "payer-summit", demographicRaf: 0.376 },
+  { id: "pat-115", name: "Calvin Price", dob: "1954-04-16", memberId: "HB-551115", payerId: "payer-harbor", demographicRaf: 0.329 },
+  { id: "pat-116", name: "Nora Fields", dob: "1946-10-05", memberId: "CC-771116", payerId: "payer-civic", demographicRaf: 0.417 }
 ];
 
 export const appointments: UpcomingAppointment[] = [
@@ -86,7 +93,13 @@ export const appointments: UpcomingAppointment[] = [
   { id: "appt-102", patientId: "pat-102", providerId: "prov-singh", date: "2026-07-02", type: "Chronic care visit" },
   { id: "appt-104", patientId: "pat-104", providerId: "prov-kline", date: "2026-08-01", type: "Cardiology follow-up" },
   { id: "appt-106", patientId: "pat-106", providerId: "prov-singh", date: "2026-06-30", type: "Medication review" },
-  { id: "appt-108", patientId: "pat-108", providerId: "prov-ana", date: "2026-07-18", type: "Diabetes follow-up" }
+  { id: "appt-108", patientId: "pat-108", providerId: "prov-ana", date: "2026-07-18", type: "Diabetes follow-up" },
+  { id: "appt-110", patientId: "pat-110", providerId: "prov-ana", date: "2026-07-22", type: "Threshold validation follow-up" },
+  { id: "appt-111", patientId: "pat-111", providerId: "prov-lane", date: "2026-07-29", type: "Delete safety review" },
+  { id: "appt-113", patientId: "pat-113", providerId: "prov-hill", date: "2026-07-10", type: "COPD follow-up" },
+  { id: "appt-114", patientId: "pat-114", providerId: "prov-ana", date: "2026-07-12", type: "Post-acute follow-up" },
+  { id: "appt-115", patientId: "pat-115", providerId: "prov-lane", date: "2026-07-16", type: "Quality review follow-up" },
+  { id: "appt-116", patientId: "pat-116", providerId: "prov-singh", date: "2026-07-20", type: "Diabetes complication follow-up" }
 ];
 
 export const reviews: PatientReview[] = [
@@ -198,7 +211,7 @@ export const reviews: PatientReview[] = [
     queue: "Prospective Review Queue",
     assignedCoderId: "u-coder-4",
     assignedCdiId: "u-cdi-4",
-    conditionIds: ["cond-107-a", "cond-107-b"]
+    conditionIds: ["cond-107-a", "cond-107-b", "cond-107-c"]
   },
   {
     id: "rev-108",
@@ -227,6 +240,117 @@ export const reviews: PatientReview[] = [
     assignedCdiId: "u-cdi-2",
     assignedAuditorId: "u-auditor-2",
     conditionIds: ["cond-109-a", "cond-109-b"]
+  },
+  {
+    id: "rev-110",
+    patientId: "pat-110",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-river",
+    providerId: "prov-ana",
+    status: "Available",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-1",
+    assignedCdiId: "u-cdi-1",
+    appointmentId: "appt-110",
+    conditionIds: ["cond-110-a", "cond-110-b", "cond-110-c", "cond-110-d"]
+  },
+  {
+    id: "rev-111",
+    patientId: "pat-111",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-oak",
+    providerId: "prov-lane",
+    status: "Available",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-2",
+    assignedCdiId: "u-cdi-2",
+    appointmentId: "appt-111",
+    conditionIds: ["cond-111-a"]
+  },
+  {
+    id: "rev-111-support",
+    patientId: "pat-111",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-oak",
+    providerId: "prov-lane",
+    status: "Completed",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-2",
+    assignedCdiId: "u-cdi-2",
+    appointmentId: "appt-111",
+    conditionIds: ["cond-111-b"]
+  },
+  {
+    id: "rev-112",
+    patientId: "pat-112",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-lake",
+    providerId: "prov-singh",
+    status: "Available",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-3",
+    assignedCdiId: "u-cdi-3",
+    conditionIds: ["cond-112-a"]
+  },
+  {
+    id: "rev-113",
+    patientId: "pat-113",
+    calendarYear: 2026,
+    reviewType: "Prospective",
+    clinicId: "clinic-canyon",
+    providerId: "prov-hill",
+    status: "Available",
+    queue: "Prospective Review Queue",
+    assignedCoderId: "u-coder-4",
+    assignedCdiId: "u-cdi-4",
+    appointmentId: "appt-113",
+    conditionIds: ["cond-113-a"]
+  },
+  {
+    id: "rev-114",
+    patientId: "pat-114",
+    calendarYear: 2026,
+    reviewType: "Prospective",
+    clinicId: "clinic-river",
+    providerId: "prov-ana",
+    status: "Available",
+    queue: "Prospective Review Queue",
+    assignedCoderId: "u-coder-1",
+    assignedCdiId: "u-cdi-1",
+    appointmentId: "appt-114",
+    conditionIds: ["cond-114-a"]
+  },
+  {
+    id: "rev-115",
+    patientId: "pat-115",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-oak",
+    providerId: "prov-lane",
+    status: "Available",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-2",
+    assignedCdiId: "u-cdi-2",
+    appointmentId: "appt-115",
+    conditionIds: ["cond-115-a"]
+  },
+  {
+    id: "rev-116",
+    patientId: "pat-116",
+    calendarYear: 2026,
+    reviewType: "Concurrent",
+    clinicId: "clinic-lake",
+    providerId: "prov-singh",
+    status: "Available",
+    queue: "Assigned Coder",
+    assignedCoderId: "u-coder-3",
+    assignedCdiId: "u-cdi-3",
+    appointmentId: "appt-116",
+    conditionIds: ["cond-116-a", "cond-116-b"]
   }
 ];
 
@@ -348,6 +472,111 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           faceToFace: true,
           providerSignatureValid: true,
           sections: [section(`sec-${review.id}-image-1`, "Imaging shows acute bronchitis only; quality-exclusion logic keeps it out of RAF capture.", [`ev-${review.id}-imaging`])]
+        }
+      ]
+    : []),
+  ...(review.id === "rev-113"
+    ? [
+        {
+          id: `doc-${review.id}-claim-2025`,
+          reviewId: review.id,
+          type: "Claims" as const,
+          title: "2025 claim lookback for COPD",
+          date: "2025-10-20",
+          isCurrentYear: false,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-claim-2025`, "Prior-year claim listed HCC 280 for COPD recapture review.", [`ev-${review.id}-lookback-2025`])]
+        },
+        {
+          id: `doc-${review.id}-specialist-2024`,
+          reviewId: review.id,
+          type: "Specialist Note" as const,
+          title: "2024 pulmonary specialist note",
+          date: "2024-09-12",
+          isCurrentYear: false,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-specialist-2024`, "Pulmonary specialist note carried forward a COPD history for lookback review.", [`ev-${review.id}-lookback-2024`])]
+        },
+        {
+          id: `doc-${review.id}-mor-2023`,
+          reviewId: review.id,
+          type: "MOR" as const,
+          title: "2023 MOR lookback entry",
+          date: "2023-12-01",
+          isCurrentYear: false,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-mor-2023`, "MOR lookback entry includes prior HCC 280 recapture context.", [`ev-${review.id}-lookback-2023`])]
+        }
+      ]
+    : []),
+  ...(review.id === "rev-114"
+    ? [
+        {
+          id: `doc-${review.id}-acute-2025`,
+          reviewId: review.id,
+          type: "Imaging" as const,
+          title: "2025 acute-only imaging lookback",
+          date: "2025-11-03",
+          isCurrentYear: false,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-acute-2025`, "Prior evidence is explicitly marked acute-only and resolved for future recapture review.", [`ev-${review.id}-acute-2025`])]
+        }
+      ]
+    : []),
+  ...(review.id === "rev-115"
+    ? [
+        {
+          id: `doc-${review.id}-quality`,
+          reviewId: review.id,
+          type: "Payer Data" as const,
+          title: "Quality-exclusion payer context",
+          date: "2026-04-18",
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [section(`sec-${review.id}-quality`, "Payer quality file marks this item as quality-exclusion context for prototype RAF safeguards.", [`ev-${review.id}-quality`])]
+        }
+      ]
+    : []),
+  ...(review.id === "rev-116"
+    ? [
+        {
+          id: `doc-${review.id}-hierarchy`,
+          reviewId: review.id,
+          type: "Specialist Note" as const,
+          title: "Hierarchy example specialist note",
+          date: "2026-04-22",
+          isCurrentYear: true,
+          riskEligibleSource: true,
+          cptSourceEligible: true,
+          providerTypeEligible: true,
+          faceToFace: true,
+          providerSignatureValid: true,
+          sections: [
+            section(`sec-${review.id}-hierarchy`, "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.", [
+              `ev-${review.id}-hierarchy-lower`,
+              `ev-${review.id}-hierarchy-higher`
+            ])
+          ]
         }
       ]
     : [])
@@ -519,6 +748,117 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           summary: "Imaging acute-condition and quality-exclusion example."
         }
       ]
+    : []),
+  ...(review.id === "rev-113"
+    ? [
+        {
+          id: `ev-${review.id}-lookback-2025`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-claim-2025`,
+          anchorId: `sec-${review.id}-claim-2025`,
+          sectionId: `sec-${review.id}-claim-2025`,
+          text: "Prior-year claim listed HCC 280 for COPD recapture review.",
+          exactText: "HCC 280 for COPD",
+          date: "2025-10-20",
+          category: "prospective" as const,
+          subtype: "recapture" as const,
+          conditionIds: ["cond-113-a"],
+          summary: "2025 claim lookback evidence for HCC 280."
+        },
+        {
+          id: `ev-${review.id}-lookback-2024`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-specialist-2024`,
+          anchorId: `sec-${review.id}-specialist-2024`,
+          sectionId: `sec-${review.id}-specialist-2024`,
+          text: "Pulmonary specialist note carried forward a COPD history for lookback review.",
+          exactText: "COPD history",
+          date: "2024-09-12",
+          category: "prospective" as const,
+          subtype: "recapture" as const,
+          conditionIds: ["cond-113-a"],
+          summary: "2024 specialist lookback evidence for COPD."
+        },
+        {
+          id: `ev-${review.id}-lookback-2023`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-mor-2023`,
+          anchorId: `sec-${review.id}-mor-2023`,
+          sectionId: `sec-${review.id}-mor-2023`,
+          text: "MOR lookback entry includes prior HCC 280 recapture context.",
+          exactText: "prior HCC 280",
+          date: "2023-12-01",
+          category: "prospective" as const,
+          subtype: "recapture" as const,
+          conditionIds: ["cond-113-a"],
+          summary: "2023 MOR lookback evidence for HCC 280."
+        }
+      ]
+    : []),
+  ...(review.id === "rev-114"
+    ? [
+        {
+          id: `ev-${review.id}-acute-2025`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-acute-2025`,
+          anchorId: `sec-${review.id}-acute-2025`,
+          sectionId: `sec-${review.id}-acute-2025`,
+          text: "Prior evidence is explicitly marked acute-only and resolved for future recapture review.",
+          exactText: "acute-only and resolved",
+          date: "2025-11-03",
+          category: "prospective" as const,
+          subtype: "recapture" as const,
+          conditionIds: ["cond-114-a"],
+          summary: "2025 acute-only lookback evidence excluded from recapture."
+        }
+      ]
+    : []),
+  ...(review.id === "rev-115"
+    ? [
+        {
+          id: `ev-${review.id}-quality`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-quality`,
+          anchorId: `sec-${review.id}-quality`,
+          sectionId: `sec-${review.id}-quality`,
+          text: "Payer quality file marks this item as quality-exclusion context for prototype RAF safeguards.",
+          exactText: "quality-exclusion context",
+          date: "2026-04-18",
+          category: "potentialDelete" as const,
+          conditionIds: ["cond-115-a"],
+          summary: "Current-year payer quality-exclusion context."
+        }
+      ]
+    : []),
+  ...(review.id === "rev-116"
+    ? [
+        {
+          id: `ev-${review.id}-hierarchy-lower`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-hierarchy`,
+          anchorId: `sec-${review.id}-hierarchy`,
+          sectionId: `sec-${review.id}-hierarchy`,
+          text: "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.",
+          exactText: "lower opportunity remains visible",
+          date: "2026-04-22",
+          category: "potentialAddition" as const,
+          conditionIds: ["cond-116-a"],
+          summary: "Lower diabetes eye complication opportunity kept visible."
+        },
+        {
+          id: `ev-${review.id}-hierarchy-higher`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-hierarchy`,
+          anchorId: `sec-${review.id}-hierarchy`,
+          sectionId: `sec-${review.id}-hierarchy`,
+          text: "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.",
+          exactText: "E11.311 as the more specific diabetes eye complication code",
+          date: "2026-04-22",
+          category: "validated" as const,
+          conditionIds: ["cond-116-b"],
+          summary: "Higher-specificity diabetes eye complication evidence."
+        }
+      ]
     : [])
 ]);
 
@@ -538,8 +878,11 @@ const disposed = (action: "Validate" | "Add to Claim" | "Yes" | "Delete", userId
   action,
   userId,
   decidedAt: "2026-06-22T14:15:00.000Z",
-  agreedWithRecommendation: true
+  agreedWithRecommendation: true,
+  source: "user-selected" as const
 });
+
+const explicitConditionReviewIds = new Set(["rev-100", "rev-110", "rev-111", "rev-111-support", "rev-112", "rev-113", "rev-114", "rev-115", "rev-116"]);
 
 export const conditions: Condition[] = [
   {
@@ -692,8 +1035,273 @@ export const conditions: Condition[] = [
     },
     documentationIssues: []
   },
+  {
+    id: "cond-110-a",
+    reviewId: "rev-110",
+    workflow: "codesOnClaim",
+    category: "validated",
+    icd10: "N18.4",
+    description: "Chronic kidney disease, stage 4",
+    hcc: "HCC 328",
+    raf: 0.289,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-110-a"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-110-b",
+    reviewId: "rev-110",
+    workflow: "codesOnClaim",
+    category: "validated",
+    icd10: "E11.22",
+    description: "Type 2 DM with diabetic chronic kidney disease",
+    hcc: "HCC 328",
+    raf: 0.299,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-110-a", "ev-rev-110-d"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-110-c",
+    reviewId: "rev-110",
+    workflow: "codesOnClaim",
+    category: "validated",
+    icd10: "N18.32",
+    description: "Chronic kidney disease, stage 3b",
+    hcc: "HCC 328",
+    raf: 0.244,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-110-b", "ev-rev-110-f"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-110-d",
+    reviewId: "rev-110",
+    workflow: "codesOnClaim",
+    category: "potentialDelete",
+    icd10: "N18.9",
+    description: "Chronic kidney disease, unspecified",
+    hcc: "HCC 328",
+    raf: 0.186,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-110-e"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: false,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-111-a",
+    reviewId: "rev-111",
+    workflow: "codesOnClaim",
+    category: "potentialDelete",
+    icd10: "I50.32",
+    description: "Chronic diastolic heart failure",
+    hcc: "HCC 222",
+    raf: 0.323,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-111-e"],
+    supportingEvidenceIds: ["ev-rev-111-support-a"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: false,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-111-b",
+    reviewId: "rev-111-support",
+    workflow: "codesOnClaim",
+    category: "validated",
+    icd10: "I50.33",
+    description: "Acute-on-chronic diastolic heart failure",
+    hcc: "HCC 222",
+    raf: 0.323,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-111-support-a"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    disposition: disposed("Validate"),
+    documentationIssues: []
+  },
+  {
+    id: "cond-112-a",
+    reviewId: "rev-112",
+    workflow: "codesOnClaim",
+    category: "potentialDelete",
+    icd10: "E66.01",
+    description: "Morbid obesity due to excess calories",
+    hcc: "HCC 48",
+    raf: 0.186,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-12",
+    evidenceIds: ["ev-rev-112-e"],
+    conflictingEvidenceIds: ["ev-rev-112-d"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: false,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    conflictingEvidence: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-113-a",
+    reviewId: "rev-113",
+    workflow: "prospective",
+    category: "prospective",
+    subtype: "recapture",
+    icd10: "J44.9",
+    description: "Chronic obstructive pulmonary disease",
+    hcc: "HCC 280",
+    raf: 0.214,
+    claimStatus: "Historical",
+    sourceDate: "2025-10-20",
+    evidenceIds: ["ev-rev-113-lookback-2025", "ev-rev-113-lookback-2024", "ev-rev-113-lookback-2023"],
+    lookbackEvidenceIds: ["ev-rev-113-lookback-2025", "ev-rev-113-lookback-2024", "ev-rev-113-lookback-2023"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: false,
+    hasClinicalIndicators: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-114-a",
+    reviewId: "rev-114",
+    workflow: "prospective",
+    category: "prospective",
+    subtype: "recapture",
+    icd10: "J20.9",
+    description: "Acute bronchitis, acute-only lookback",
+    hcc: "HCC 280",
+    raf: 0.214,
+    claimStatus: "Historical",
+    sourceDate: "2025-11-03",
+    evidenceIds: ["ev-rev-114-acute-2025"],
+    lookbackEvidenceIds: ["ev-rev-114-acute-2025"],
+    persistence: "acute",
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: false,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: false,
+    hasClinicalIndicators: false,
+    acuteCondition: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-115-a",
+    reviewId: "rev-115",
+    workflow: "codesOnClaim",
+    category: "potentialDelete",
+    icd10: "Z13.89",
+    description: "Quality-exclusion screening context",
+    hcc: "HCC 48",
+    raf: 0.186,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-18",
+    evidenceIds: ["ev-rev-115-quality"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: false,
+    hasOtherSupportingEvidence: false,
+    hadPriorCapture: false,
+    hasCurrentYearCapture: false,
+    hasClinicalIndicators: false,
+    qualityExclusionCode: true,
+    documentationIssues: []
+  },
+  {
+    id: "cond-116-a",
+    reviewId: "rev-116",
+    workflow: "codesNotOnClaim",
+    category: "potentialAddition",
+    icd10: "E11.51",
+    description: "Type 2 DM with diabetic peripheral angiopathy",
+    hcc: "HCC 37",
+    raf: 0.318,
+    claimStatus: "Not on claim",
+    sourceDate: "2026-04-22",
+    evidenceIds: ["ev-rev-116-hierarchy-lower"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: false,
+    hasCurrentYearCapture: false,
+    hasClinicalIndicators: true,
+    trumpedByCode: "E11.311",
+    documentationIssues: []
+  },
+  {
+    id: "cond-116-b",
+    reviewId: "rev-116",
+    workflow: "codesOnClaim",
+    category: "validated",
+    icd10: "E11.311",
+    description: "Type 2 DM with unspecified diabetic retinopathy with macular edema",
+    hcc: "HCC 37",
+    raf: 0.318,
+    claimStatus: "On claim",
+    sourceDate: "2026-04-22",
+    evidenceIds: ["ev-rev-116-hierarchy-higher"],
+    actionable: true,
+    currentYear: true,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
+    hadPriorCapture: true,
+    hasCurrentYearCapture: true,
+    hasClinicalIndicators: true,
+    disposition: disposed("Validate", "u-coder-3"),
+    documentationIssues: []
+  },
   ...reviews
-    .filter((review) => review.id !== "rev-100")
+    .filter((review) => !explicitConditionReviewIds.has(review.id))
     .flatMap((review, index) => {
       const base: Condition[] = [
         {

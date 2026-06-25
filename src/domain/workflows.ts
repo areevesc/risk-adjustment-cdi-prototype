@@ -8,6 +8,7 @@ import type {
   DocumentationIssue,
   DownstreamTask,
   DownstreamTaskQueue,
+  DownstreamTaskStatus,
   DownstreamTaskType,
   PatientReview,
   RecommendationAction,
@@ -28,9 +29,10 @@ import {
   canSetConditionDisposition,
   canStartAudit,
   canTakeCoverage,
+  hasAnyRole,
   isReviewLockOwner
 } from "./auth";
-import { getUnresolvedConditions, reviewConditions } from "./selectors";
+import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions, getUpcomingAppointmentsForReview } from "./selectors";
 
 function stamp() {
   return new Date().toISOString();
@@ -82,6 +84,7 @@ function taskQueue(type: DownstreamTaskType): DownstreamTaskQueue {
   if (type === "Provider Education") return "Provider Education Queue";
   if (type === "Auditor Exception") return "Auditor Queue";
   if (type === "Manager Exception") return "Manager Review Queue";
+  if (type === "Scheduling Outreach") return "Scheduling Outreach Queue";
   return "Export List";
 }
 
@@ -195,9 +198,9 @@ export function completeReview(data: SeedData, reviewId: string, user: User, set
   if (unresolved.length > 0) return { data, unresolved };
 
   let next = updateReview(data, reviewId, (item) => ({ ...item, status: "Completed", lock: undefined, auditReturn: undefined }));
-  next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have dispositions." });
+  next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have a user-selected disposition or rule-generated outcome." });
   if (shouldSampleReviewForAudit(reviewId, settings.auditSampleRate)) {
-    next = startAudit(next, reviewId, user, true);
+    next = startAudit(next, reviewId, user, true, settings.auditSampleRate);
   }
   return { data: next, unresolved: [] };
 }
@@ -256,6 +259,8 @@ export function setDisposition(
   const review = data.reviews.find((item) => item.id === reviewId);
   const conditionBefore = data.conditions.find((item) => item.id === conditionId);
   if (!review || !conditionBefore || !canSetConditionDisposition(review, user)) return data;
+  const ruleResult = getRuleResult(conditionBefore, review, data, settings);
+  if (conditionBefore.ruleOutcome || ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
   const decidedAt = stamp();
   let next = updateCondition(data, conditionId, (condition) => ({
@@ -267,16 +272,17 @@ export function setDisposition(
       replacementCode,
       userId: user.id,
       decidedAt,
-      agreedWithRecommendation
+      agreedWithRecommendation,
+      source: "user-selected"
     }
   }));
 
   const condition = next.conditions.find((item) => item.id === conditionId);
   if (condition && action === "Validate") {
-    next = applyThreeValidationRule(next, reviewId, condition.hcc, user);
+    next = applyThreeValidationRule(next, reviewId, condition.hcc, user, settings.sameHccValidationThreshold);
   }
   if (condition && action === "Add to Claim") {
-    next = disableDuplicateHccAdditions(next, reviewId, condition.hcc, conditionId);
+    next = disableDuplicateHccAdditions(next, reviewId, condition.hcc, conditionId, user);
     next = createDownstreamTask(next, reviewId, conditionId, "Addition to Claim", user, comments);
   }
   if (condition && action === "Delete") {
@@ -288,6 +294,17 @@ export function setDisposition(
     (action === "Send to Prospective" || (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")))
   ) {
     next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, review.assignedCdiId);
+  }
+  if (condition && shouldCreateSchedulingOutreach(next, review, condition, action, reason, settings)) {
+    next = createDownstreamTask(
+      next,
+      reviewId,
+      conditionId,
+      "Scheduling Outreach",
+      user,
+      "No same-patient appointment is available in the prototype schedule for this current-year prospective opportunity.",
+      review.assignedCdiId
+    );
   }
   if (condition && action === "Disagree" && reason === "Other") {
     next = createDownstreamTask(next, reviewId, conditionId, "Manager Exception", user, comments);
@@ -302,44 +319,93 @@ export function setDisposition(
   });
 }
 
-function applyThreeValidationRule(data: SeedData, reviewId: string, hcc: string, user: User): SeedData {
-  const review = data.reviews.find((item) => item.id === reviewId);
-  if (!review) return data;
-  const matching = reviewConditions(data, review).filter((condition) => condition.hcc === hcc && condition.workflow === "codesOnClaim");
-  const validatedCount = matching.filter((condition) => condition.disposition?.action === "Validate").length;
-  if (validatedCount < 3) return data;
-  let next = data;
-  matching.forEach((condition) => {
-    if (!condition.disposition) {
-      next = updateCondition(next, condition.id, (item) => ({
-        ...item,
-        disposition: {
-          action: "Validate",
-          userId: user.id,
-          decidedAt: stamp(),
-          agreedWithRecommendation: true,
-          comments: "Auto-validated by same-HCC three-validation prototype rule."
-        },
-        disabledReason: "Auto-validated after three same-HCC validations."
-      }));
-    } else if (condition.disposition.action === "Delete") {
-      next = updateCondition(next, condition.id, (item) => ({
-        ...item,
-        disabledReason: "Delete option disabled by same-HCC validation rule."
-      }));
-    }
-  });
-  return addHistory(next, { reviewId, userId: user.id, event: "Same-HCC rule applied", detail: `Three validations reached for ${hcc}.` });
+function shouldCreateSchedulingOutreach(
+  data: SeedData,
+  review: PatientReview,
+  condition: Condition,
+  action: RecommendationAction,
+  reason: DisagreeReason | undefined,
+  settings: AppSettings
+) {
+  if (!isPrototypeCurrentYear(review, condition, settings)) return false;
+  if (getUpcomingAppointmentsForReview(data, review).length > 0) return false;
+  if (action === "Send to Prospective" || action === "Yes" || action === "Change") return true;
+  return action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence");
 }
 
-function disableDuplicateHccAdditions(data: SeedData, reviewId: string, hcc: string, selectedConditionId: string): SeedData {
+function applyThreeValidationRule(data: SeedData, reviewId: string, hcc: string, user: User, thresholdSetting: number): SeedData {
   const review = data.reviews.find((item) => item.id === reviewId);
   if (!review) return data;
+  const matching = getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, hcc).filter((condition) => condition.workflow === "codesOnClaim");
+  const threshold = Math.max(1, Math.min(10, Math.trunc(Number.isFinite(thresholdSetting) ? thresholdSetting : 3)));
+  const validatedCount = matching.filter((condition) => condition.disposition?.action === "Validate").length;
+  if (validatedCount < threshold) return data;
   let next = data;
-  reviewConditions(data, review)
-    .filter((condition) => condition.hcc === hcc && condition.workflow === "codesNotOnClaim" && condition.id !== selectedConditionId)
+  matching.forEach((condition) => {
+    if (!condition.disposition && !condition.ruleOutcome && !condition.auditorDisposition) {
+      const explanation = `${hcc} reached ${threshold} user-selected validations for this patient and calendar year. This condition was rule-resolved as validated.`;
+      next = updateCondition(next, condition.id, (item) => ({
+        ...item,
+        ruleOutcome: {
+          source: "rule-resolved",
+          action: "Validate",
+          ruleId: "same-hcc-validation-threshold",
+          explanation,
+          supportingEvidenceIds: item.evidenceIds,
+          createdAt: stamp()
+        },
+        disabledReason: `Rule-resolved after same-HCC validation threshold (${threshold}) was reached.`
+      }));
+      next = addHistory(next, {
+        reviewId: condition.reviewId,
+        conditionId: condition.id,
+        userId: user.id,
+        event: "Rule-resolved condition",
+        detail: explanation
+      });
+    }
+  });
+  return addHistory(next, { reviewId, userId: user.id, event: "Same-HCC rule applied", detail: `${threshold} validations reached for ${hcc}.` });
+}
+
+function disableDuplicateHccAdditions(data: SeedData, reviewId: string, hcc: string, selectedConditionId: string, user: User): SeedData {
+  const review = data.reviews.find((item) => item.id === reviewId);
+  if (!review) return data;
+  const selectedCondition = data.conditions.find((condition) => condition.id === selectedConditionId);
+  if (!selectedCondition) return data;
+  let next = data;
+  getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, hcc)
+    .filter(
+      (condition) =>
+        condition.hcc === hcc &&
+        condition.workflow === "codesNotOnClaim" &&
+        condition.id !== selectedConditionId &&
+        !condition.disposition &&
+        !condition.ruleOutcome &&
+        !condition.auditorDisposition
+    )
     .forEach((condition) => {
-      next = updateCondition(next, condition.id, (item) => ({ ...item, disabledReason: `Duplicate ${hcc} already selected for addition.` }));
+      const explanation = `Add to Claim suppressed because ${selectedCondition.icd10} was selected for the same patient, calendar year, and ${hcc}.`;
+      next = updateCondition(next, condition.id, (item) => ({
+        ...item,
+        ruleOutcome: {
+          source: "rule-suppressed",
+          action: "Add to Claim",
+          ruleId: "same-hcc-duplicate-add",
+          explanation,
+          selectedConditionId,
+          supportingEvidenceIds: selectedCondition.evidenceIds,
+          createdAt: stamp()
+        },
+        disabledReason: explanation
+      }));
+      next = addHistory(next, {
+        reviewId: condition.reviewId,
+        conditionId: condition.id,
+        userId: user.id,
+        event: "Rule-suppressed condition",
+        detail: explanation
+      });
     });
   return next;
 }
@@ -364,11 +430,13 @@ export function flagDocumentationIssue(
   return addHistory(next, { reviewId, conditionId, userId: user.id, event: "Documentation issue flagged", detail: issue });
 }
 
-export function startAudit(data: SeedData, reviewId: string, user: User, sampled = false): SeedData {
+export function startAudit(data: SeedData, reviewId: string, user: User, sampled = false, sampleRate = 0): SeedData {
   const review = data.reviews.find((item) => item.id === reviewId);
   if (!review || (!sampled && !canStartAudit(review, user))) return data;
   const existing = data.audits.find((audit) => audit.reviewId === reviewId);
   if (existing?.status === "Complete") return data;
+  const sampleProfile = getAuditSamplingProfile(data, review, sampleRate);
+  const sampledAt = sampled ? stamp() : undefined;
   let next = updateReview(data, reviewId, (item) => ({
     ...item,
     status: "Under Audit",
@@ -385,6 +453,11 @@ export function startAudit(data: SeedData, reviewId: string, user: User, sampled
               ...audit,
               auditorId: user.roles.includes("Auditor") ? user.id : audit.auditorId,
               status: "In Progress",
+              selectionSource: sampled ? "deterministic-sample" : audit.selectionSource ?? "manual",
+              sampledAt: sampledAt ?? audit.sampledAt,
+              sampleRate: sampled ? sampleProfile.sampleRate : audit.sampleRate,
+              sampleBucket: sampled ? sampleProfile.sampleBucket : audit.sampleBucket,
+              sampleCategories: sampled ? sampleProfile.sampleCategories : audit.sampleCategories,
               outcome: undefined,
               completedAt: undefined
             }
@@ -396,7 +469,12 @@ export function startAudit(data: SeedData, reviewId: string, user: User, sampled
       id: uid("audit"),
       reviewId,
       auditorId: user.roles.includes("Auditor") ? user.id : "u-auditor-1",
-      status: "In Progress"
+      status: "In Progress",
+      selectionSource: sampled ? "deterministic-sample" : "manual",
+      sampledAt,
+      sampleRate: sampled ? sampleProfile.sampleRate : undefined,
+      sampleBucket: sampled ? sampleProfile.sampleBucket : undefined,
+      sampleCategories: sampled ? sampleProfile.sampleCategories : undefined
     };
     next = { ...next, audits: [audit, ...next.audits] };
   }
@@ -404,7 +482,36 @@ export function startAudit(data: SeedData, reviewId: string, user: User, sampled
     reviewId,
     userId: user.id,
     event: sampled ? "Audit sample selected" : "Audit started",
-    detail: sampled ? "Deterministic prototype sample selected from configured audit percentage." : "Review sent to audit."
+    detail: sampled
+      ? `Deterministic prototype sample selected from configured ${sampleProfile.sampleRate}% audit percentage across ${sampleProfile.sampleCategories.join(", ") || "review"} opportunities.`
+      : "Review sent to audit."
+  });
+}
+
+export function updateDownstreamTaskStatus(data: SeedData, taskId: string, user: User, status: DownstreamTaskStatus, comments?: string): SeedData {
+  const task = data.downstreamTasks.find((item) => item.id === taskId);
+  const review = task ? data.reviews.find((item) => item.id === task.reviewId) : undefined;
+  if (!task || !review) return data;
+  const canUpdate = hasAnyRole(user, ["Administrator", "Manager"]) || task.assignedUserId === user.id || isReviewLockOwner(review, user);
+  if (!canUpdate || status === "Cancelled") return data;
+  const next = {
+    ...data,
+    downstreamTasks: data.downstreamTasks.map((item) =>
+      item.id === taskId
+        ? {
+            ...item,
+            status,
+            comments: comments?.trim() || item.comments
+          }
+        : item
+    )
+  };
+  return addHistory(next, {
+    reviewId: task.reviewId,
+    conditionId: task.conditionId,
+    userId: user.id,
+    event: "Downstream task updated",
+    detail: `${task.type} marked ${status}.${comments?.trim() ? ` ${comments.trim()}` : ""}`
   });
 }
 
@@ -439,7 +546,8 @@ export function completeAudit(data: SeedData, reviewId: string, user: User, outc
               comments: comments?.trim() || undefined,
               auditorId: user.id,
               decidedAt: completedAt,
-              agreedWithUser: outcome === "Agree"
+              agreedWithUser: outcome === "Agree",
+              source: "auditor-selected" as const
             },
             agreementWithAuditor: outcome === "Agree"
           }
