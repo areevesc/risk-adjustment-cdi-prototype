@@ -29,6 +29,7 @@ import {
   canSetConditionDisposition,
   canStartAudit,
   canTakeCoverage,
+  getVisibleReviews,
   hasAnyRole,
   isReviewLockOwner
 } from "./auth";
@@ -150,6 +151,27 @@ export function openReview(data: SeedData, reviewId: string, user: User): SeedDa
     lock: { lockedByUserId: user.id, lockedAt: stamp() }
   }));
   return addHistory(next, { reviewId, userId: user.id, event: "Lock acquired", detail: "Patient-level review opened and locked." });
+}
+
+export function findNextEligibleReview(data: SeedData, currentReviewId: string, user: User): PatientReview | undefined {
+  const visibleReviews = getVisibleReviews(data, user);
+  const currentIndex = visibleReviews.findIndex((review) => review.id === currentReviewId);
+  const orderedReviews =
+    currentIndex >= 0
+      ? [...visibleReviews.slice(currentIndex + 1), ...visibleReviews.slice(0, currentIndex)]
+      : visibleReviews;
+  return orderedReviews.find((review) => !review.lock && (review.status === "Available" || review.status === "Pended"));
+}
+
+export function openNextEligibleReview(data: SeedData, currentReviewId: string, user: User): { data: SeedData; nextReviewId?: string } {
+  const nextReview = findNextEligibleReview(data, currentReviewId, user);
+  if (!nextReview) return { data };
+
+  const currentReview = data.reviews.find((review) => review.id === currentReviewId);
+  const releasedData = currentReview && isReviewLockOwner(currentReview, user) ? releaseReview(data, currentReviewId, user) : data;
+  const openedData = openReview(releasedData, nextReview.id, user);
+  const openedReview = openedData.reviews.find((review) => review.id === nextReview.id);
+  return openedReview?.lock?.lockedByUserId === user.id ? { data: openedData, nextReviewId: nextReview.id } : { data };
 }
 
 export function releaseReview(data: SeedData, reviewId: string, user: User): SeedData {

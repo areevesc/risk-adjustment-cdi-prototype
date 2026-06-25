@@ -9,6 +9,8 @@ import {
   completeAudit,
   completeReview,
   flagDocumentationIssue,
+  findNextEligibleReview,
+  openNextEligibleReview,
   openReview,
   overrideLock,
   releaseReview,
@@ -27,6 +29,7 @@ import {
   getOutreachStatusForReview,
   getPatientCalendarYearHccGroup,
   getPersonalStats,
+  getPopulationRafSummary,
   getPresentedOpportunitySummary,
   getRafSummary,
   getReviewScenarioTags,
@@ -130,6 +133,42 @@ describe("prototype workflow rules", () => {
     const review = next.reviews.find((item) => item.id === "rev-100")!;
     expect(review.queue).toBe("Auditor Queue");
     expect(review.status).toBe("Awaiting Review");
+  });
+
+  it("finds the next eligible chart while skipping locked, completed, audit, and unauthorized reviews", () => {
+    const data = cloneSeed();
+    data.reviews = data.reviews.map((review) => {
+      if (review.id === "rev-106") return { ...review, lock: { lockedByUserId: "u-coder-3", lockedAt: "2026-06-24T09:30:00.000Z" } };
+      if (review.id === "rev-110") return { ...review, status: "Completed" as const };
+      if (review.id === "rev-114") return { ...review, status: "Under Audit" as const, queue: "Auditor Queue" as const };
+      return review;
+    });
+
+    expect(findNextEligibleReview(data, "rev-100", user(data, "u-coder-1"))).toBeUndefined();
+  });
+
+  it("releases the current lock before opening the next eligible chart", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const result = openNextEligibleReview(data, "rev-100", user(data, "u-coder-1"));
+
+    expect(result.nextReviewId).toBe("rev-106");
+    expect(result.data.reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
+    expect(result.data.reviews.find((item) => item.id === "rev-106")?.lock?.lockedByUserId).toBe("u-coder-1");
+    expect(result.data.reviews.find((item) => item.id === "rev-106")?.status).toBe("In Progress");
+  });
+
+  it("leaves state unchanged when no next eligible chart exists", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    data.reviews = data.reviews.map((review) => {
+      if (review.id === "rev-106") return { ...review, lock: { lockedByUserId: "u-coder-3", lockedAt: "2026-06-24T09:30:00.000Z" } };
+      if (review.id === "rev-110" || review.id === "rev-114") return { ...review, status: "Completed" as const };
+      return review;
+    });
+
+    const result = openNextEligibleReview(data, "rev-100", user(data, "u-coder-1"));
+    expect(result.nextReviewId).toBeUndefined();
+    expect(result.data).toBe(data);
+    expect(result.data.reviews.find((item) => item.id === "rev-100")?.lock?.lockedByUserId).toBe("u-coder-1");
   });
 
   it("blocks completion while actionable conditions are unresolved", () => {
@@ -408,6 +447,23 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const summary = getRafSummary(data, review);
     expect(summary.validatedCapturedRaf).toBeCloseTo(0.318);
     expect(summary.projectedRaf).toBeCloseTo(0.421 + 0.318);
+  });
+
+  it("calculates population RAF totals and averages for manager reporting", () => {
+    const data = cloneSeed();
+    const summary = getPopulationRafSummary(data);
+    const demographicTotal = data.patients.reduce((sum, patient) => sum + patient.demographicRaf, 0);
+
+    expect(summary.patientCount).toBe(data.patients.length);
+    expect(summary.reviewCount).toBe(data.reviews.length);
+    expect(summary.totals.demographicRaf).toBeCloseTo(demographicTotal);
+    expect(summary.totals.capturedRaf).toBeGreaterThan(0);
+    expect(summary.totals.openRaf).toBeGreaterThan(0);
+    expect(summary.totals.prospectiveRaf).toBeGreaterThan(0);
+    expect(summary.totals.deletionRaf).toBeGreaterThanOrEqual(0);
+    expect(summary.totals.projectedRaf).toBeCloseTo(summary.totals.demographicRaf + summary.totals.capturedRaf - summary.totals.deletionRaf);
+    expect(summary.averages.demographicRaf).toBeCloseTo(summary.totals.demographicRaf / summary.patientCount);
+    expect(summary.averages.projectedRaf).toBeCloseTo(summary.totals.projectedRaf / summary.patientCount);
   });
 
   it("uses deterministic audit sampling setting", () => {

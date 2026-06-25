@@ -227,6 +227,43 @@ export function getRafSummary(data: SeedData, review: PatientReview) {
   };
 }
 
+export function getPopulationRafSummary(data: SeedData, reviews: PatientReview[] = data.reviews) {
+  const patientIds = new Set(reviews.map((review) => review.patientId));
+  const demographicRaf = data.patients.filter((patient) => patientIds.has(patient.id)).reduce((sum, patient) => sum + patient.demographicRaf, 0);
+  const reviewSummaries = reviews.map((review) => getRafSummary(data, review));
+  const capturedRaf = reviewSummaries.reduce((sum, summary) => sum + summary.validatedCapturedRaf, 0);
+  const openRaf = reviewSummaries.reduce((sum, summary) => sum + summary.unresolvedPotentialRaf, 0);
+  const prospectiveRaf = reviewSummaries.reduce((sum, summary) => sum + summary.prospectiveRaf, 0);
+  const deletionRaf = reviewSummaries.reduce((sum, summary) => sum + summary.selectedDeletionRaf, 0);
+  const projectedRaf = demographicRaf + capturedRaf - deletionRaf;
+  const patientCount = patientIds.size;
+
+  function average(value: number) {
+    return patientCount ? value / patientCount : 0;
+  }
+
+  return {
+    patientCount,
+    reviewCount: reviews.length,
+    totals: {
+      demographicRaf,
+      capturedRaf,
+      openRaf,
+      prospectiveRaf,
+      deletionRaf,
+      projectedRaf
+    },
+    averages: {
+      demographicRaf: average(demographicRaf),
+      capturedRaf: average(capturedRaf),
+      openRaf: average(openRaf),
+      prospectiveRaf: average(prospectiveRaf),
+      deletionRaf: average(deletionRaf),
+      projectedRaf: average(projectedRaf)
+    }
+  };
+}
+
 export function getProspectiveCounts(data: SeedData, review: PatientReview) {
   const conditions = reviewConditions(data, review);
   return {

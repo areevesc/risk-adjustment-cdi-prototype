@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { LockKeyhole, UserCheck } from "lucide-react";
 import { useAppState } from "../../state/AppState";
-import { byId, canManageLocks, getActionTotals, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
+import { byId, canManageLocks, getActionTotals, getPopulationRafSummary, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
 import { formatRaf } from "../../domain/format";
 import { Button, CloseDialogButton, Panel, StatusChip } from "../../ui/Primitives";
 import type { AssignmentMode, PatientReview, User } from "../../domain/types";
@@ -17,12 +17,7 @@ export function ManagerPage() {
   const teamStats = getTeamStats(data);
   const statusTotals = getReviewStatusTotals(data);
   const actionTotals = getActionTotals(data);
-  const rafAverage = data.reviews.length
-    ? data.reviews.reduce((sum, review) => {
-        const patient = maps.patients.get(review.patientId);
-        return sum + (patient?.demographicRaf ?? 0);
-      }, 0) / data.reviews.length
-    : 0;
+  const populationRaf = getPopulationRafSummary(data);
 
   return (
     <div className="page-stack">
@@ -68,18 +63,60 @@ export function ManagerPage() {
         <Panel title="RAF Reporting">
           <div className="stat-grid">
             <div className="stat">
-              <span>Average demographic RAF</span>
-              <strong>{formatRaf(rafAverage)}</strong>
+              <span>Patients</span>
+              <strong>{populationRaf.patientCount}</strong>
             </div>
             <div className="stat">
-              <span>Open reviews</span>
-              <strong>{data.reviews.filter((review) => ["Available", "In Progress", "Pended", "Awaiting Review"].includes(review.status)).length}</strong>
+              <span>Reviews</span>
+              <strong>{populationRaf.reviewCount}</strong>
             </div>
             <div className="stat">
-              <span>Audit agreement rate</span>
-              <strong>
-                {Math.round((data.audits.filter((audit) => audit.outcome === "Agree").length / Math.max(1, data.audits.filter((audit) => audit.outcome).length)) * 100)}%
-              </strong>
+              <span>Total demographic RAF</span>
+              <strong>{formatRaf(populationRaf.totals.demographicRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg demographic RAF</span>
+              <strong>{formatRaf(populationRaf.averages.demographicRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Total captured RAF</span>
+              <strong>{formatRaf(populationRaf.totals.capturedRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg captured RAF</span>
+              <strong>{formatRaf(populationRaf.averages.capturedRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Total open RAF</span>
+              <strong>{formatRaf(populationRaf.totals.openRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg open RAF</span>
+              <strong>{formatRaf(populationRaf.averages.openRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Total prospective RAF</span>
+              <strong>{formatRaf(populationRaf.totals.prospectiveRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg prospective RAF</span>
+              <strong>{formatRaf(populationRaf.averages.prospectiveRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Total deletion RAF</span>
+              <strong>{formatRaf(populationRaf.totals.deletionRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg deletion RAF</span>
+              <strong>{formatRaf(populationRaf.averages.deletionRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Total projected RAF</span>
+              <strong>{formatRaf(populationRaf.totals.projectedRaf)}</strong>
+            </div>
+            <div className="stat">
+              <span>Avg projected RAF</span>
+              <strong>{formatRaf(populationRaf.averages.projectedRaf)}</strong>
             </div>
           </div>
           <p className="raf-note">RAF reporting uses predetermined synthetic values and transparent prototype calculations.</p>

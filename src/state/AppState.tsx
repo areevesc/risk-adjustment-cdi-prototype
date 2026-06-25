@@ -6,6 +6,7 @@ import {
   completeAudit,
   completeReview,
   flagDocumentationIssue,
+  openNextEligibleReview,
   openReview,
   overrideLock,
   pendReview,
@@ -38,6 +39,7 @@ interface AppStateValue extends PersistedState {
   resetDemo: () => void;
   actions: {
     openReview: (reviewId: string) => void;
+    openNextEligibleReview: (currentReviewId: string) => string | undefined;
     releaseReview: (reviewId: string) => void;
     overrideLock: (reviewId: string, reason: string) => void;
     pendReview: (reviewId: string) => void;
@@ -128,6 +130,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       resetDemo: () => commit(initialState),
       actions: {
         openReview: (reviewId) => withData((data) => openReview(data, reviewId, currentUser)),
+        openNextEligibleReview: (currentReviewId) => {
+          const result = openNextEligibleReview(state.data, currentReviewId, currentUser);
+          if (result.nextReviewId) commit({ ...state, data: result.data });
+          return result.nextReviewId;
+        },
         releaseReview: (reviewId) => withData((data) => releaseReview(data, reviewId, currentUser)),
         overrideLock: (reviewId, reason) => withData((data) => overrideLock(data, reviewId, currentUser, reason)),
         pendReview: (reviewId) => withData((data) => pendReview(data, reviewId, currentUser)),
