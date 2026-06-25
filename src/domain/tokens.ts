@@ -81,6 +81,12 @@ export const dispositionTokens: Record<DispositionSummaryLabel, { label: string;
     bg: "#eaf4ff",
     border: "#9ccbf3"
   },
+  "Rule Suppressed": {
+    label: "Rule Suppressed",
+    color: "#6d55d8",
+    bg: "#f1efff",
+    border: "#c3bbff"
+  },
   Unresolved: {
     label: "Unresolved",
     color: "#475569",

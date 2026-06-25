@@ -9,15 +9,18 @@ import {
   getClaimForReview,
   getDispositionSummary,
   getDownstreamTaskForCondition,
+  getDownstreamTasksForCondition,
   getEvidenceForCondition,
+  getOutreachStatusForReview,
   getPresentedOpportunitySummary,
   getProspectiveCounts,
   getRafSummary,
   getRecommendation,
+  getRuleResult,
   isPrototypeCurrentYear,
   reviewConditions
 } from "../../domain/selectors";
-import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, SourceDocument } from "../../domain/types";
+import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult, SourceDocument } from "../../domain/types";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
@@ -71,8 +74,16 @@ export function ReviewPage() {
   const clinic = maps.clinics.get(activeReview.clinicId);
   const provider = maps.providers.get(activeReview.providerId);
   const appointment = activeReview.appointmentId ? maps.appointments.get(activeReview.appointmentId) : undefined;
+  const outreachStatus = getOutreachStatusForReview(data, activeReview);
+  const displayAppointment = outreachStatus.appointment ?? appointment;
   const conditions = reviewConditions(data, activeReview);
-  const documents = data.documents.filter((document) => document.reviewId === activeReview.id);
+  const relatedReviewIds = new Set(
+    data.reviews
+      .filter((item) => item.patientId === patient.id && item.calendarYear >= activeReview.calendarYear - 3 && item.calendarYear <= activeReview.calendarYear)
+      .map((item) => item.id)
+  );
+  const documents = data.documents.filter((document) => relatedReviewIds.has(document.reviewId));
+  const relatedEvidence = data.evidence.filter((item) => relatedReviewIds.has(item.reviewId));
   const activeDocument = documents.find((document) => document.id === selectedDocumentId) ?? documents[0];
   const editable = canEditReview(activeReview, currentUser);
   const presentedSummary = getPresentedOpportunitySummary(data, activeReview);
@@ -95,7 +106,7 @@ export function ReviewPage() {
   }
 
   function stepEvidence(direction: "prev" | "next") {
-    const all = data.evidence.filter((item) => item.reviewId === activeReview.id);
+    const all = relatedEvidence;
     if (all.length === 0) return;
     const currentIndex = Math.max(0, all.findIndex((item) => item.id === selectedEvidenceId));
     const nextIndex = direction === "next" ? (currentIndex + 1) % all.length : (currentIndex - 1 + all.length) % all.length;
@@ -232,11 +243,25 @@ export function ReviewPage() {
           </>
         ) : null}
         <div className="raf-note">Synthetic prototype values — not an authoritative CMS RAF calculation.</div>
-        {appointment ? (
-          <StatusChip tone="good">Next visit: {formatDate(appointment.date)} - {appointment.type}</StatusChip>
+        {displayAppointment ? (
+          <StatusChip tone="good">Next visit: {formatDate(displayAppointment.date)} - {displayAppointment.type}</StatusChip>
         ) : (
           <StatusChip tone="warn">No upcoming visit - scheduling outreach may be needed</StatusChip>
         )}
+        <div className="outreach-status-row">
+          <StatusChip tone={outreachStatus.status === "Scheduled" || outreachStatus.status === "Completed" ? "good" : outreachStatus.status === "Not Needed" ? "info" : "warn"}>
+            Outreach: {outreachStatus.label}
+          </StatusChip>
+          <span>{outreachStatus.reason}</span>
+          {outreachStatus.task && editable && outreachStatus.task.status === "Open" ? (
+            <Button variant="secondary" onClick={() => actions.updateDownstreamTaskStatus(outreachStatus.task!.id, "In Progress")}>Start outreach</Button>
+          ) : null}
+          {outreachStatus.task && editable && outreachStatus.task.status === "In Progress" ? (
+            <Button variant="secondary" onClick={() => actions.updateDownstreamTaskStatus(outreachStatus.task!.id, "Completed", "Scheduling outreach completed in the prototype workflow.")}>
+              Mark outreach complete
+            </Button>
+          ) : null}
+        </div>
       </Panel>
 
       {completionWarnings.length > 0 ? (
@@ -265,7 +290,7 @@ export function ReviewPage() {
           <DocumentViewer
             documents={documents}
             activeDocument={activeDocument}
-            evidence={data.evidence}
+            evidence={relatedEvidence}
             selectedEvidenceId={selectedEvidenceId}
             setSelectedDocumentId={setSelectedDocumentId}
           />
@@ -543,14 +568,29 @@ function ConditionCard({
   const { data, settings, actions } = useAppState();
   const evidence = getEvidenceForCondition(data, condition);
   const recommendation = getRecommendation(condition, review, data, settings);
-  const disabled = !editable || !!condition.disabledReason;
+  const ruleResult = getRuleResult(condition, review, data, settings);
+  const disabled = !editable || !!condition.ruleOutcome;
   const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
+  const downstreamTasks = getDownstreamTasksForCondition(data, condition.id);
   const claim = getClaimForReview(data, review.id);
-  const showActionControls = !condition.disposition || review.status === "Rework Required";
+  const showActionControls = !condition.ruleOutcome && (!condition.disposition || review.status === "Rework Required");
 
   function act(action: RecommendationAction) {
     const agreed = recommendation ? recommendation.action === action : undefined;
     actions.setDisposition(review.id, condition.id, action, agreed);
+  }
+
+  function disabledRule(action: RecommendationAction) {
+    return ruleResult.disabledActions.find((item) => item.action === action);
+  }
+
+  function isDisabled(action: RecommendationAction) {
+    return disabled || Boolean(disabledRule(action));
+  }
+
+  function actionTitle(action: RecommendationAction) {
+    if (!editable) return readOnlyTitle;
+    return disabledRule(action)?.reason ?? condition.ruleOutcome?.explanation;
   }
 
   return (
@@ -568,6 +608,7 @@ function ConditionCard({
         <CategoryBadge category={condition.category} subtype={condition.subtype} />
       </div>
       <RecommendationBox recommendation={recommendation} settings={settings} />
+      <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} />
       <div className="source-eligibility-row compact">
         <EligibilityChip label="Risk source" ok={claim?.riskEligible !== false} />
         <EligibilityChip label="CPT" ok={claim?.cptSourceEligible !== false} />
@@ -579,7 +620,8 @@ function ConditionCard({
         <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
         <span>Recommendation: {recommendation?.action ?? condition.originalRecommendation ?? "None"} ({recommendation?.source ?? condition.recommendationSource ?? "rules"})</span>
         <span>User decision: {condition.disposition ? condition.disposition.action : "Unresolved"}</span>
-        <span>Downstream task: {downstreamTask ? `${downstreamTask.type} - ${downstreamTask.status}` : "None"}</span>
+        <span>Rule outcome: {condition.ruleOutcome ? `${condition.ruleOutcome.source} - ${condition.ruleOutcome.action ?? "No action"}` : "None"}</span>
+        <span>Downstream task: {downstreamTasks.length ? downstreamTasks.map((task) => `${task.type} - ${task.status}`).join("; ") : downstreamTask ? `${downstreamTask.type} - ${downstreamTask.status}` : "None"}</span>
         <span>Auditor decision: {condition.auditorDisposition?.outcome ?? "None"}</span>
       </div>
       <div className="evidence-list">
@@ -612,26 +654,37 @@ function ConditionCard({
           <small>{formatDateTime(condition.disposition.decidedAt)}</small>
         </div>
       ) : null}
+      {condition.ruleOutcome ? (
+        <div className="disposition-row">
+          <StatusChip tone={condition.ruleOutcome.source === "rule-resolved" ? "good" : "purple"}>
+            <Check size={14} />
+            {condition.ruleOutcome.source === "rule-resolved" ? "Rule-resolved" : "Rule-suppressed"}
+          </StatusChip>
+          {condition.ruleOutcome.action ? <span>{condition.ruleOutcome.action}</span> : null}
+          <span>{condition.ruleOutcome.explanation}</span>
+          <small>{formatDateTime(condition.ruleOutcome.createdAt)}</small>
+        </div>
+      ) : null}
       {showActionControls ? (
         <div className="action-row">
           {condition.workflow === "codesOnClaim" ? (
             <>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Validate")}>Validate</Button>
-              <Button variant="danger" disabled={disabled || condition.hasOtherSupportingEvidence} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Delete")}>Delete</Button>
-              <Button disabled={disabled || !condition.currentYear || !canUseProspectiveActions} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
+              <Button disabled={isDisabled("Validate")} title={actionTitle("Validate")} onClick={() => act("Validate")}>Validate</Button>
+              <Button variant="danger" disabled={isDisabled("Delete")} title={actionTitle("Delete")} onClick={() => act("Delete")}>Delete</Button>
+              <Button disabled={isDisabled("Send to Prospective")} title={actionTitle("Send to Prospective")} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
             </>
           ) : null}
           {condition.workflow === "codesNotOnClaim" ? (
             <>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Add to Claim")}>Add to Claim</Button>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => onDisagree(condition)}>Disagree</Button>
+              <Button disabled={isDisabled("Add to Claim")} title={actionTitle("Add to Claim")} onClick={() => act("Add to Claim")}>Add to Claim</Button>
+              <Button disabled={isDisabled("Disagree")} title={actionTitle("Disagree")} onClick={() => onDisagree(condition)}>Disagree</Button>
             </>
           ) : null}
           {condition.workflow === "prospective" ? (
             <>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("Yes")}>Yes</Button>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => act("No")}>No</Button>
-              <Button disabled={disabled} title={disabled ? readOnlyTitle ?? condition.disabledReason : undefined} onClick={() => onChange(condition)}>Change</Button>
+              <Button disabled={isDisabled("Yes")} title={actionTitle("Yes")} onClick={() => act("Yes")}>Yes</Button>
+              <Button disabled={isDisabled("No")} title={actionTitle("No")} onClick={() => act("No")}>No</Button>
+              <Button disabled={isDisabled("Change")} title={actionTitle("Change")} onClick={() => onChange(condition)}>Change</Button>
             </>
           ) : null}
           <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>
@@ -641,6 +694,49 @@ function ConditionCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function RuleMessages({ ruleResult, jumpToEvidence }: { ruleResult: RuleResult; jumpToEvidence: (evidence: EvidencePassage) => void }) {
+  const { data } = useAppState();
+  const evidenceMap = byId(data.evidence);
+  const evidenceIds = Array.from(
+    new Set([
+      ...ruleResult.supportingEvidenceIds,
+      ...ruleResult.conflictingEvidenceIds,
+      ...ruleResult.disabledActions.flatMap((item) => [...(item.supportingEvidenceIds ?? []), ...(item.conflictingEvidenceIds ?? [])]),
+      ...ruleResult.warnings.flatMap((item) => item.evidenceIds ?? [])
+    ])
+  );
+  const showLookbackEvidence = ruleResult.ruleId === "three-year-lookback-recapture" && evidenceIds.length > 0;
+  if (!ruleResult.disabledActions.length && !ruleResult.warnings.length && !showLookbackEvidence) return null;
+  return (
+    <div className="rule-message-list">
+      {showLookbackEvidence ? <div className="rule-info">Three-year lookback evidence used for this prototype recommendation.</div> : null}
+      {ruleResult.disabledActions.map((item) => (
+        <div key={`${item.ruleId}-${item.action}`} className="disabled-reason">
+          {item.reason}
+        </div>
+      ))}
+      {ruleResult.warnings.map((item, index) => (
+        <div key={`${item.message}-${index}`} className="warning-banner compact-warning">
+          <AlertTriangle size={16} />
+          {item.message}
+        </div>
+      ))}
+      {evidenceIds.length ? (
+        <div className="rule-evidence-links">
+          {evidenceIds.map((id) => {
+            const evidence = evidenceMap.get(id);
+            return evidence ? (
+              <button key={id} type="button" onClick={() => jumpToEvidence(evidence)}>
+                {evidence.summary}
+              </button>
+            ) : null;
+          })}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

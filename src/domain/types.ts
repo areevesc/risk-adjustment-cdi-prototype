@@ -19,6 +19,7 @@ export type QueueType =
 export type Category = "validated" | "potentialDelete" | "potentialAddition" | "prospective";
 export type ProspectiveSubtype = "recapture" | "suspect";
 export type ConditionWorkflow = "codesOnClaim" | "codesNotOnClaim" | "prospective";
+export type ConditionPersistence = "chronic" | "acute" | "resolved" | "historical" | "unknown";
 export type RecommendationMode = "simulated" | "rules" | "hidden";
 export type RecommendationSource = "rules" | "seeded";
 export type RecommendationAction =
@@ -30,6 +31,9 @@ export type RecommendationAction =
   | "Yes"
   | "No"
   | "Change";
+export type RuleOutcomeSource = "user-selected" | "rule-resolved" | "rule-suppressed" | "auditor-selected";
+export type RuleGeneratedOutcomeSource = Extract<RuleOutcomeSource, "rule-resolved" | "rule-suppressed">;
+export type RuleSeverity = "info" | "warning" | "blocking";
 export type DisagreeReason =
   | "Not Enough MEAT"
   | "Condition Resolved"
@@ -47,15 +51,19 @@ export type DownstreamTaskType =
   | "Deletion"
   | "Auditor Exception"
   | "Manager Exception"
-  | "Provider Education";
+  | "Provider Education"
+  | "Scheduling Outreach";
 export type DownstreamTaskStatus = "Open" | "In Progress" | "Completed" | "Cancelled";
 export type DownstreamTaskQueue =
   | "Prospective Review Queue"
   | "Auditor Queue"
   | "Manager Review Queue"
   | "Provider Education Queue"
+  | "Scheduling Outreach Queue"
   | "Export List";
 export type AssignmentMode = "Coverage" | "Permanent reassignment";
+export type AuditSelectionSource = "manual" | "deterministic-sample";
+export type OutreachStatus = "Scheduled" | "Needed" | "Open" | "In Progress" | "Completed" | "Not Needed";
 
 export interface User {
   id: string;
@@ -188,6 +196,32 @@ export interface Recommendation {
   replacementCode?: string;
 }
 
+export interface RuleActionSuppression {
+  action: RecommendationAction;
+  reason: string;
+  ruleId: string;
+  source: RuleGeneratedOutcomeSource;
+  supportingEvidenceIds?: string[];
+  conflictingEvidenceIds?: string[];
+}
+
+export interface RuleWarning {
+  message: string;
+  severity: RuleSeverity;
+  evidenceIds?: string[];
+}
+
+export interface RuleResult {
+  ruleId: string;
+  recommendedAction?: RecommendationAction;
+  explanation: string;
+  supportingEvidenceIds: string[];
+  conflictingEvidenceIds: string[];
+  disabledActions: RuleActionSuppression[];
+  warnings: RuleWarning[];
+  outcomeSource?: RuleOutcomeSource;
+}
+
 export interface UserDisposition {
   action: RecommendationAction;
   reason?: DisagreeReason;
@@ -196,6 +230,8 @@ export interface UserDisposition {
   userId: string;
   decidedAt: string;
   agreedWithRecommendation?: boolean;
+  source?: Extract<RuleOutcomeSource, "user-selected">;
+  ruleId?: string;
 }
 
 export interface AuditorDisposition {
@@ -204,6 +240,7 @@ export interface AuditorDisposition {
   auditorId: string;
   decidedAt: string;
   agreedWithUser?: boolean;
+  source?: Extract<RuleOutcomeSource, "auditor-selected">;
 }
 
 export interface Condition {
@@ -224,6 +261,10 @@ export interface Condition {
   claimStatus: "On claim" | "Not on claim" | "Historical" | "Registry";
   sourceDate: string;
   evidenceIds: string[];
+  supportingEvidenceIds?: string[];
+  conflictingEvidenceIds?: string[];
+  lookbackEvidenceIds?: string[];
+  persistence?: ConditionPersistence;
   actionable: boolean;
   currentYear: boolean;
   hasSufficientMeat: boolean;
@@ -239,10 +280,22 @@ export interface Condition {
   qualityExclusionCode?: boolean;
   seededRecommendation?: Recommendation;
   disposition?: UserDisposition;
+  ruleOutcome?: RuleGeneratedOutcome;
   auditorDisposition?: AuditorDisposition;
   agreementWithAuditor?: boolean;
   documentationIssues: DocumentationFlag[];
   disabledReason?: string;
+}
+
+export interface RuleGeneratedOutcome {
+  source: RuleGeneratedOutcomeSource;
+  action?: RecommendationAction;
+  ruleId: string;
+  explanation: string;
+  selectedConditionId?: string;
+  supportingEvidenceIds?: string[];
+  conflictingEvidenceIds?: string[];
+  createdAt: string;
 }
 
 export interface DocumentationFlag {
@@ -265,6 +318,11 @@ export interface Audit {
   reviewId: string;
   auditorId: string;
   status: "Not Started" | "In Progress" | "Returned" | "Complete";
+  selectionSource?: AuditSelectionSource;
+  sampledAt?: string;
+  sampleRate?: number;
+  sampleBucket?: number;
+  sampleCategories?: Category[];
   outcome?: "Agree" | "Disagree" | "Return for Correction";
   comments?: string;
   completedAt?: string;
@@ -293,6 +351,7 @@ export interface AppSettings {
   recommendationMode: RecommendationMode;
   auditSampleRate: number;
   prototypeCurrentYear: number;
+  sameHccValidationThreshold: number;
 }
 
 export interface DownstreamTask {

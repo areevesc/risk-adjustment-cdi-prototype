@@ -9,8 +9,10 @@ import type {
   ExportRecord,
   PatientReview,
   Recommendation,
+  RuleResult,
   SeedData,
   SourceDocument,
+  UpcomingAppointment,
   User
 } from "./types";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
@@ -50,12 +52,37 @@ export function reviewEvidence(data: SeedData, review: PatientReview) {
   return data.evidence.filter((item) => item.reviewId === review.id);
 }
 
+export function getPatientReviews(data: SeedData, patientId: string) {
+  return data.reviews.filter((review) => review.patientId === patientId);
+}
+
+export function getPatientCalendarYearReviews(data: SeedData, patientId: string, calendarYear: number) {
+  return getPatientReviews(data, patientId).filter((review) => review.calendarYear === calendarYear);
+}
+
+export function getPatientCalendarYearConditions(data: SeedData, patientId: string, calendarYear: number) {
+  const reviewIds = new Set(getPatientCalendarYearReviews(data, patientId, calendarYear).map((review) => review.id));
+  return data.conditions.filter((condition) => reviewIds.has(condition.reviewId));
+}
+
+export function getPatientCalendarYearHccGroup(data: SeedData, patientId: string, calendarYear: number, hcc: string) {
+  return getPatientCalendarYearConditions(data, patientId, calendarYear).filter((condition) => condition.hcc === hcc);
+}
+
+export function getSameHccCandidates(data: SeedData, review: PatientReview, condition: Condition) {
+  return getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, condition.hcc);
+}
+
 export function getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
   return decisionSupportService.getRecommendation(condition, review, data, settings);
 }
 
+export function getRuleResult(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): RuleResult {
+  return decisionSupportService.evaluateRules(condition, review, data, settings);
+}
+
 export function getUnresolvedConditions(data: SeedData, review: PatientReview) {
-  return reviewConditions(data, review).filter((condition) => condition.actionable && !condition.disposition);
+  return reviewConditions(data, review).filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome);
 }
 
 export function getPresentedOpportunitySummary(data: SeedData, review: PatientReview) {
@@ -82,6 +109,7 @@ export const dispositionLabels = [
   "Prospective Yes",
   "Prospective No",
   "Changed",
+  "Rule Suppressed",
   "Unresolved"
 ] as const;
 
@@ -101,6 +129,11 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
 }
 
 export function getDispositionSummaryLabel(condition: Condition): DispositionSummaryLabel {
+  if (!condition.disposition && condition.ruleOutcome) {
+    if (condition.ruleOutcome.source === "rule-suppressed") return "Rule Suppressed";
+    if (condition.ruleOutcome.action === "Validate") return "Validated";
+    if (condition.ruleOutcome.action === "Add to Claim") return "Added to Claim";
+  }
   switch (condition.disposition?.action) {
     case "Validate":
       return "Validated";
@@ -127,33 +160,49 @@ export function getDownstreamTaskForCondition(data: SeedData, conditionId: strin
   return data.downstreamTasks.find((task) => task.conditionId === conditionId && task.status !== "Cancelled");
 }
 
+export function getDownstreamTasksForCondition(data: SeedData, conditionId: string): DownstreamTask[] {
+  return data.downstreamTasks.filter((task) => task.conditionId === conditionId && task.status !== "Cancelled");
+}
+
 export function getRafSummary(data: SeedData, review: PatientReview) {
   const patient = data.patients.find((item) => item.id === review.patientId);
   const conditions = reviewConditions(data, review);
+  const patientYearConditions = patient ? getPatientCalendarYearConditions(data, patient.id, review.calendarYear) : conditions;
   const selectedCapturedActions = new Set(["Validate", "Add to Claim", "Yes", "Change"]);
   const demographicRaf = patient?.demographicRaf ?? 0;
   // Synthetic only: completed capture actions are counted once as current captured RAF.
-  const validatedCapturedRaf = conditions
-    .filter((condition) => condition.disposition && selectedCapturedActions.has(condition.disposition.action))
-    .reduce((sum, condition) => sum + condition.raf, 0);
+  const capturedByHcc = new Map<string, number>();
+  patientYearConditions
+    .filter(
+      (condition) =>
+        (condition.disposition && selectedCapturedActions.has(condition.disposition.action)) ||
+        (condition.ruleOutcome?.source === "rule-resolved" && condition.ruleOutcome.action && selectedCapturedActions.has(condition.ruleOutcome.action))
+    )
+    .forEach((condition) => {
+      capturedByHcc.set(condition.hcc, Math.max(capturedByHcc.get(condition.hcc) ?? 0, condition.raf));
+    });
+  const validatedCapturedRaf = Array.from(capturedByHcc.values()).reduce((sum, raf) => sum + raf, 0);
   // Synthetic only: unresolved potential excludes prospective recapture/suspect so open RAF and prospective RAF do not overlap.
   const unresolvedPotentialRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category))
+    .filter(
+      (condition) =>
+        condition.actionable && !condition.disposition && !condition.ruleOutcome && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category)
+    )
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: potential additions are open, uncaptured opportunities and are not counted in current captured RAF.
   const potentialAdditionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && (condition.originalCategory ?? condition.category) === "potentialAddition")
+    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && (condition.originalCategory ?? condition.category) === "potentialAddition")
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: potential deletions are displayed separately as possible negative adjustment, not double-subtracted from projection.
   const potentialDeletionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && (condition.originalCategory ?? condition.category) === "potentialDelete")
+    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && (condition.originalCategory ?? condition.category) === "potentialDelete")
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: recapture and suspect are separate prospective buckets and are excluded from unresolved potential RAF.
   const prospectiveRecaptureRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && condition.subtype === "recapture")
+    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && condition.subtype === "recapture")
     .reduce((sum, condition) => sum + condition.raf, 0);
   const prospectiveSuspectRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && condition.subtype === "suspect")
+    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && condition.subtype === "suspect")
     .reduce((sum, condition) => sum + condition.raf, 0);
   const selectedDeletionRaf = conditions.filter((condition) => condition.disposition?.action === "Delete").reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: projected RAF after selected dispositions includes demographic RAF plus selected captures and subtracts selected deletions.
@@ -195,12 +244,88 @@ export function getAuditForReview(data: SeedData, reviewId: string): Audit | und
   return data.audits.find((audit) => audit.reviewId === reviewId);
 }
 
+export function getAuditSamplingProfile(data: SeedData, review: PatientReview, auditSampleRate: number) {
+  const rate = Math.max(0, Math.min(100, Number.isFinite(auditSampleRate) ? auditSampleRate : 0));
+  const bucket = deterministicAuditBucket(review.id);
+  const categories = Array.from(new Set(reviewConditions(data, review).map((condition) => condition.originalCategory ?? condition.category))).sort((a, b) => a.localeCompare(b));
+  return {
+    eligible: review.status === "Completed" || review.status === "Audit Complete",
+    sampled: rate >= 100 || (rate > 0 && bucket < rate),
+    sampleRate: rate,
+    sampleBucket: bucket,
+    sampleCategories: categories
+  };
+}
+
+function deterministicAuditBucket(reviewId: string) {
+  let hash = 0;
+  for (const char of reviewId) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 10000;
+  }
+  return hash % 100;
+}
+
 export function getClaimForReview(data: SeedData, reviewId: string) {
   return data.claims.find((claim) => claim.reviewId === reviewId);
 }
 
 export function isPrototypeCurrentYear(review: PatientReview, settings: AppSettings) {
   return review.calendarYear === settings.prototypeCurrentYear;
+}
+
+export function getUpcomingAppointmentsForReview(data: SeedData, review: PatientReview): UpcomingAppointment[] {
+  const yearStart = `${review.calendarYear}-01-01`;
+  const yearEnd = `${review.calendarYear}-12-31`;
+  return data.appointments
+    .filter((appointment) => appointment.patientId === review.patientId && appointment.date >= yearStart && appointment.date <= yearEnd)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function getSchedulingOutreachTaskForReview(data: SeedData, review: PatientReview): DownstreamTask | undefined {
+  return data.downstreamTasks.find((task) => task.reviewId === review.id && task.type === "Scheduling Outreach" && task.status !== "Cancelled");
+}
+
+export function getOutreachStatusForReview(data: SeedData, review: PatientReview) {
+  const appointment = getUpcomingAppointmentsForReview(data, review)[0];
+  const task = getSchedulingOutreachTaskForReview(data, review);
+  const hasProspectiveNeed =
+    review.reviewType === "Prospective" ||
+    data.downstreamTasks.some((item) => item.reviewId === review.id && item.type === "Prospective CDI Review" && item.status !== "Cancelled") ||
+    reviewConditions(data, review).some((condition) => {
+      if (!condition.actionable || condition.ruleOutcome?.source === "rule-suppressed") return false;
+      if (condition.workflow === "prospective" && !condition.disposition) return true;
+      return ["Send to Prospective", "Yes", "Change"].includes(condition.disposition?.action ?? "");
+    });
+
+  if (appointment) {
+    return {
+      status: "Scheduled" as const,
+      label: "Scheduled",
+      reason: "Same-patient appointment exists in the prototype schedule for this calendar year.",
+      appointment,
+      task
+    };
+  }
+  if (task) {
+    return {
+      status: task.status as "Open" | "In Progress" | "Completed",
+      label: task.status === "Completed" ? "Outreach completed" : `Outreach ${task.status.toLowerCase()}`,
+      reason: task.comments ?? "Scheduling outreach task exists because no same-patient appointment was found.",
+      task
+    };
+  }
+  if (hasProspectiveNeed) {
+    return {
+      status: "Needed" as const,
+      label: "Outreach needed",
+      reason: "No same-patient appointment exists in the prototype schedule for an open or selected prospective opportunity."
+    };
+  }
+  return {
+    status: "Not Needed" as const,
+    label: "No outreach need",
+    reason: "No open prospective scheduling need is visible in this review."
+  };
 }
 
 export function getReviewScenarioTags(data: SeedData, review: PatientReview) {
@@ -225,15 +350,37 @@ export function getReviewScenarioTags(data: SeedData, review: PatientReview) {
   if (claim?.faceToFace === false) tags.add("Non-face-to-face");
   if (claim?.providerSignatureValid === false) tags.add("Invalid signature");
 
-  reviewConditions(data, review).forEach((condition) => {
+  const conditions = reviewConditions(data, review);
+  const outreachStatus = getOutreachStatusForReview(data, review);
+  if (outreachStatus.status !== "Scheduled" && outreachStatus.status !== "Not Needed") tags.add("Scheduling outreach");
+  const hccGroups = new Map<string, Condition[]>();
+  conditions.forEach((condition) => hccGroups.set(condition.hcc, [...(hccGroups.get(condition.hcc) ?? []), condition]));
+  if (Array.from(hccGroups.values()).some((group) => group.filter((condition) => condition.workflow === "codesOnClaim").length >= 3)) tags.add("Same-HCC threshold");
+  if (Array.from(hccGroups.values()).some((group) => group.filter((condition) => condition.workflow === "codesNotOnClaim").length >= 2)) tags.add("Duplicate HCC addition");
+
+  conditions.forEach((condition) => {
     if (condition.claimStatus === "Registry") tags.add("Registry");
     if (condition.acuteCondition) tags.add("Acute condition");
+    if (condition.persistence === "acute" && condition.subtype === "recapture") tags.add("Acute-only recapture");
     if (condition.trumpedByCode) tags.add("Trumping");
     if (condition.sdohCode) tags.add("SDoH");
     if (condition.qualityExclusionCode) tags.add("Quality exclusion");
+    if (condition.supportingEvidenceIds?.length || condition.conflictingEvidenceIds?.length) tags.add("Delete safety");
+    if (condition.subtype === "recapture" && hasThreeYearLookbackEvidence(data, review, condition)) tags.add("Three-year lookback");
   });
 
   return Array.from(tags).sort((a, b) => a.localeCompare(b));
+}
+
+function hasThreeYearLookbackEvidence(data: SeedData, review: PatientReview, condition: Condition) {
+  const evidenceIds = new Set([...(condition.evidenceIds ?? []), ...(condition.lookbackEvidenceIds ?? [])]);
+  return data.evidence
+    .filter((evidence) => evidenceIds.has(evidence.id) || evidence.conditionIds.includes(condition.id))
+    .some((evidence) => {
+      const evidenceReview = data.reviews.find((item) => item.id === evidence.reviewId);
+      const year = Number(evidence.date.slice(0, 4));
+      return evidenceReview?.patientId === review.patientId && Number.isFinite(year) && year >= review.calendarYear - 3 && year <= review.calendarYear - 1;
+    });
 }
 
 export function getTeamStats(data: SeedData) {
@@ -255,7 +402,7 @@ export function getTeamStats(data: SeedData) {
 export function getActionTotals(data: SeedData) {
   const totals = new Map<string, number>();
   data.conditions.forEach((condition) => {
-    const action = condition.disposition?.action ?? "Unresolved";
+    const action = getDispositionSummaryLabel(condition);
     totals.set(action, (totals.get(action) ?? 0) + 1);
   });
   return Array.from(totals, ([name, value]) => ({ name, value }));
@@ -329,6 +476,10 @@ export function getGeneratedExports(data: SeedData): ExportRecord[] {
   const auditRows = data.audits.map((audit) => ({
     reviewId: audit.reviewId,
     auditorId: audit.auditorId,
+    selectionSource: audit.selectionSource ?? "manual",
+    sampleRate: audit.sampleRate ?? "",
+    sampleBucket: audit.sampleBucket ?? "",
+    sampleCategories: audit.sampleCategories?.join("|") ?? "",
     outcome: audit.outcome ?? "Open",
     note: audit.comments ?? "Simulated audit result row"
   }));

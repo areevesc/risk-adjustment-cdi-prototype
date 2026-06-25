@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { seedData } from "../data/seed";
-import type { AppSettings, AssignmentMode, DocumentationIssue, PatientReview, RecommendationAction, SeedData, User } from "../domain/types";
+import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, RecommendationAction, SeedData, User } from "../domain/types";
 import {
   assignReview,
   completeAudit,
@@ -14,7 +14,8 @@ import {
   routeReview,
   setDisposition,
   startAudit,
-  takeCoverage
+  takeCoverage,
+  updateDownstreamTaskStatus
 } from "../domain/workflows";
 import { getCurrentUser } from "../domain/selectors";
 import type { DisagreeReason, RecommendationMode } from "../domain/types";
@@ -33,6 +34,7 @@ interface AppStateValue extends PersistedState {
   setRecommendationMode: (mode: RecommendationMode) => void;
   setAuditSampleRate: (rate: number) => void;
   setPrototypeCurrentYear: (year: number) => void;
+  setSameHccValidationThreshold: (threshold: number) => void;
   resetDemo: () => void;
   actions: {
     openReview: (reviewId: string) => void;
@@ -56,13 +58,15 @@ interface AppStateValue extends PersistedState {
     startAudit: (reviewId: string) => void;
     completeAudit: (reviewId: string, outcome: "Agree" | "Disagree" | "Return for Correction", comments?: string) => void;
     reopenAudit: (reviewId: string) => void;
+    updateDownstreamTaskStatus: (taskId: string, status: DownstreamTaskStatus, comments?: string) => void;
   };
 }
 
 const defaultSettings: AppSettings = {
   recommendationMode: "simulated",
   auditSampleRate: 25,
-  prototypeCurrentYear: 2026
+  prototypeCurrentYear: 2026,
+  sameHccValidationThreshold: 3
 };
 
 const initialState: PersistedState = {
@@ -116,6 +120,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           ...state,
           settings: { ...state.settings, prototypeCurrentYear: Math.max(2020, Math.min(2035, Math.trunc(Number.isFinite(year) ? year : 2026))) }
         }),
+      setSameHccValidationThreshold: (threshold) =>
+        commit({
+          ...state,
+          settings: { ...state.settings, sameHccValidationThreshold: Math.max(1, Math.min(10, Math.trunc(Number.isFinite(threshold) ? threshold : 3))) }
+        }),
       resetDemo: () => commit(initialState),
       actions: {
         openReview: (reviewId) => withData((data) => openReview(data, reviewId, currentUser)),
@@ -135,7 +144,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         flagDocumentationIssue: (reviewId, conditionId, issue, comments) => withData((data) => flagDocumentationIssue(data, reviewId, conditionId, currentUser, issue, comments)),
         startAudit: (reviewId) => withData((data) => startAudit(data, reviewId, currentUser)),
         completeAudit: (reviewId, outcome, comments) => withData((data) => completeAudit(data, reviewId, currentUser, outcome, comments)),
-        reopenAudit: (reviewId) => withData((data) => reopenAudit(data, reviewId, currentUser))
+        reopenAudit: (reviewId) => withData((data) => reopenAudit(data, reviewId, currentUser)),
+        updateDownstreamTaskStatus: (taskId, status, comments) => withData((data) => updateDownstreamTaskStatus(data, taskId, currentUser, status, comments))
       }
     };
   }, [currentUser, state]);

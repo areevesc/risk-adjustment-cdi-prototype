@@ -15,15 +15,31 @@ import {
   routeReview,
   setDisposition,
   shouldSampleReviewForAudit,
-  takeCoverage
+  startAudit,
+  takeCoverage,
+  updateDownstreamTaskStatus
 } from "./workflows";
-import { getDispositionSummary, getGeneratedExports, getPersonalStats, getPresentedOpportunitySummary, getRafSummary, getReviewScenarioTags } from "./selectors";
+import {
+  getActionTotals,
+  getAuditSamplingProfile,
+  getDispositionSummary,
+  getGeneratedExports,
+  getOutreachStatusForReview,
+  getPatientCalendarYearHccGroup,
+  getPersonalStats,
+  getPresentedOpportunitySummary,
+  getRafSummary,
+  getReviewScenarioTags,
+  getRuleResult,
+  getUnresolvedConditions
+} from "./selectors";
 import type { AppSettings, SeedData } from "./types";
 
 const settings: AppSettings = {
   recommendationMode: "rules",
   auditSampleRate: 25,
-  prototypeCurrentYear: 2026
+  prototypeCurrentYear: 2026,
+  sameHccValidationThreshold: 3
 };
 
 function cloneSeed(): SeedData {
@@ -41,7 +57,7 @@ function disposeRev100(data: SeedData, auditSampleRate: number) {
   next = setDisposition(next, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Disagree", true, settings, "Condition Resolved");
-  next = setDisposition(next, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Yes", true, settings);
+  next = setDisposition(next, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
   return completeReview(next, "rev-100", user(data, "u-coder-1"), { ...settings, auditSampleRate });
 }
 
@@ -123,11 +139,92 @@ describe("prototype workflow rules", () => {
     expect(result.data.reviews.find((item) => item.id === "rev-100")?.status).toBe("In Progress");
   });
 
+  it("records completion history that distinguishes dispositions from rule outcomes", () => {
+    let data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    data = setDisposition(data, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
+    data = setDisposition(data, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Delete", true, settings);
+    data = setDisposition(data, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
+    data = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
+    data = setDisposition(data, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
+    const result = completeReview(data, "rev-100", user(data, "u-coder-1"), { ...settings, auditSampleRate: 0 });
+    expect(result.unresolved).toHaveLength(0);
+    expect(result.data.history[0]).toMatchObject({
+      event: "Review completed",
+      detail: "All actionable conditions have a user-selected disposition or rule-generated outcome."
+    });
+  });
+
   it("disables duplicate same-HCC additions after one add-to-claim selection", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
     const duplicate = next.conditions.find((item) => item.id === "cond-100-e")!;
     expect(duplicate.disabledReason).toContain("HCC 37");
+    expect(duplicate.ruleOutcome).toMatchObject({ source: "rule-suppressed", action: "Add to Claim", ruleId: "same-hcc-duplicate-add" });
+    expect(next.history).toEqual(expect.arrayContaining([expect.objectContaining({ event: "Rule-suppressed condition", conditionId: "cond-100-e" })]));
+  });
+
+  it("groups same-HCC candidates by patient and calendar year across reviews", () => {
+    const data = cloneSeed();
+    const group = getPatientCalendarYearHccGroup(data, "pat-111", 2026, "HCC 222");
+    expect(group.map((condition) => condition.id).sort()).toEqual(["cond-111-a", "cond-111-b"]);
+  });
+
+  it("rule-resolves unresolved same-HCC conditions after the validation threshold", () => {
+    let data = openReview(cloneSeed(), "rev-110", user(seedData, "u-coder-1"));
+    data = setDisposition(data, "rev-110", "cond-110-a", user(data, "u-coder-1"), "Validate", true, settings);
+    data = setDisposition(data, "rev-110", "cond-110-b", user(data, "u-coder-1"), "Validate", true, settings);
+    expect(data.conditions.find((item) => item.id === "cond-110-d")?.ruleOutcome).toBeUndefined();
+    data = setDisposition(data, "rev-110", "cond-110-c", user(data, "u-coder-1"), "Validate", true, settings);
+    const resolved = data.conditions.find((item) => item.id === "cond-110-d")!;
+    const review = data.reviews.find((item) => item.id === "rev-110")!;
+    expect(resolved.ruleOutcome).toMatchObject({ source: "rule-resolved", action: "Validate", ruleId: "same-hcc-validation-threshold" });
+    expect(getUnresolvedConditions(data, review).map((condition) => condition.id)).not.toContain("cond-110-d");
+    expect(data.history.some((entry) => entry.event === "Rule-resolved condition" && entry.conditionId === "cond-110-d")).toBe(true);
+  });
+
+  it("uses rule outcomes in action totals instead of counting them as unresolved", () => {
+    let data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    data = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
+    const totals = getActionTotals(data);
+    expect(totals).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Rule Suppressed", value: expect.any(Number) })]));
+  });
+
+  it("returns structured rule results for delete safety support across same-patient records", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-111")!;
+    const condition = data.conditions.find((item) => item.id === "cond-111-a")!;
+    const result = getRuleResult(condition, review, data, settings);
+    expect(result.disabledActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "Delete", ruleId: "delete-safety-current-year-support", supportingEvidenceIds: expect.arrayContaining(["ev-rev-111-support-a"]) })
+      ])
+    );
+  });
+
+  it("allows delete when no current-year same-patient support exists", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = data.conditions.find((item) => item.id === "cond-100-b")!;
+    expect(getRuleResult(condition, review, data, settings).disabledActions.some((item) => item.action === "Delete")).toBe(false);
+    const next = setDisposition(data, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Delete", true, settings);
+    expect(next.conditions.find((item) => item.id === "cond-100-b")?.disposition?.action).toBe("Delete");
+  });
+
+  it("blocks direct delete action when current-year same-patient support exists", () => {
+    const data = openReview(cloneSeed(), "rev-111", user(seedData, "u-coder-2"));
+    const next = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-coder-2"), "Delete", true, settings);
+    expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition).toBeUndefined();
+  });
+
+  it("warns but does not block delete when curated conflicting evidence exists", () => {
+    const data = openReview(cloneSeed(), "rev-112", user(seedData, "u-coder-3"));
+    const review = data.reviews.find((item) => item.id === "rev-112")!;
+    const condition = data.conditions.find((item) => item.id === "cond-112-a")!;
+    const result = getRuleResult(condition, review, data, settings);
+    expect(result.warnings[0]?.message).toContain("Conflicting or ambiguous");
+    expect(result.disabledActions.some((item) => item.action === "Delete")).toBe(false);
+    const next = setDisposition(data, "rev-112", "cond-112-a", user(data, "u-coder-3"), "Delete", true, settings);
+    expect(next.conditions.find((item) => item.id === "cond-112-a")?.disposition?.action).toBe("Delete");
   });
 
   it("preserves presented category while current disposition summary changes", () => {
@@ -148,6 +245,145 @@ describe("prototype workflow rules", () => {
     expect(wrongYear.downstreamTasks).toHaveLength(0);
     expect(currentYear.downstreamTasks).toHaveLength(1);
   });
+
+  it("returns structured three-year lookback recapture results from curated evidence", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-113")!;
+    const condition = data.conditions.find((item) => item.id === "cond-113-a")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+
+    expect(recommendation?.action).toBe("Yes");
+    expect(recommendation?.rationale).toContain("2025-10-20 Claims");
+    expect(recommendation?.rationale).toContain("2024-09-12 Specialist Note");
+    expect(recommendation?.rationale).toContain("2023-12-01 MOR");
+    expect(recommendation?.rationale).toContain("No current-year capture");
+    expect(recommendation?.rationale).toContain("COPD follow-up on 2026-07-10");
+    expect(result).toMatchObject({
+      ruleId: "three-year-lookback-recapture",
+      recommendedAction: "Yes",
+      supportingEvidenceIds: expect.arrayContaining(["ev-rev-113-lookback-2025", "ev-rev-113-lookback-2024", "ev-rev-113-lookback-2023"])
+    });
+  });
+
+  it("suppresses prospective recapture when the same patient-year HCC is already captured", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-113")!;
+    const currentCapture = structuredClone(data.conditions.find((item) => item.id === "cond-113-a")!);
+    data.conditions.push({
+      ...currentCapture,
+      id: "cond-113-current-capture",
+      workflow: "codesOnClaim",
+      category: "validated",
+      subtype: undefined,
+      claimStatus: "On claim",
+      sourceDate: "2026-04-12",
+      evidenceIds: ["ev-rev-113-a"],
+      lookbackEvidenceIds: undefined,
+      hasSufficientMeat: true,
+      hasOtherSupportingEvidence: true,
+      hasCurrentYearCapture: true,
+      disposition: {
+        action: "Validate",
+        userId: "u-coder-4",
+        decidedAt: "2026-06-24T10:00:00.000Z",
+        agreedWithRecommendation: true,
+        source: "user-selected"
+      }
+    });
+    const condition = data.conditions.find((item) => item.id === "cond-113-a")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+
+    expect(recommendation?.action).toBe("No");
+    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Yes", ruleId: "current-year-hcc-captured" })]));
+  });
+
+  it("excludes explicitly acute-only conditions from prospective recapture", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-114")!;
+    const condition = data.conditions.find((item) => item.id === "cond-114-a")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+
+    expect(recommendation?.action).toBe("No");
+    expect(recommendation?.rationale).toContain("acute-only");
+    expect(result).toMatchObject({
+      ruleId: "acute-only-recapture-exclusion",
+      recommendedAction: "No",
+      supportingEvidenceIds: expect.arrayContaining(["ev-rev-114-acute-2025"])
+    });
+    expect(result.disabledActions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action: "Yes", ruleId: "acute-only-recapture-exclusion", supportingEvidenceIds: expect.arrayContaining(["ev-rev-114-acute-2025"]) })])
+    );
+  });
+
+  it("blocks direct Yes selection for acute-only recapture but allows No", () => {
+    const data = openReview(cloneSeed(), "rev-114", user(seedData, "u-coder-1"));
+    const blocked = setDisposition(data, "rev-114", "cond-114-a", user(data, "u-coder-1"), "Yes", false, settings);
+    const allowed = setDisposition(data, "rev-114", "cond-114-a", user(data, "u-coder-1"), "No", true, settings);
+
+    expect(blocked.conditions.find((item) => item.id === "cond-114-a")?.disposition).toBeUndefined();
+    expect(allowed.conditions.find((item) => item.id === "cond-114-a")?.disposition?.action).toBe("No");
+  });
+
+  it("allows acute recapture review only when synthetic later indicators are explicit", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-114")!;
+    const condition = data.conditions.find((item) => item.id === "cond-114-a")!;
+    condition.hasClinicalIndicators = true;
+    condition.evidenceIds = [...condition.evidenceIds, "ev-rev-114-a"];
+    condition.supportingEvidenceIds = ["ev-rev-114-a"];
+
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+
+    expect(recommendation?.action).toBe("Yes");
+    expect(result.disabledActions.some((item) => item.ruleId === "acute-only-recapture-exclusion")).toBe(false);
+  });
+
+  it("suppresses lower-code direct capture when hierarchy replacement is present", () => {
+    const data = openReview(cloneSeed(), "rev-116", user(seedData, "u-coder-3"));
+    const review = data.reviews.find((item) => item.id === "rev-116")!;
+    const condition = data.conditions.find((item) => item.id === "cond-116-a")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+    const blocked = setDisposition(data, "rev-116", "cond-116-a", user(data, "u-coder-3"), "Add to Claim", false, settings);
+    const changed = setDisposition(data, "rev-116", "cond-116-a", user(data, "u-coder-3"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
+
+    expect(recommendation).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Add to Claim", ruleId: "hierarchy-trumping-suppression" })]));
+    expect(blocked.conditions.find((item) => item.id === "cond-116-a")?.disposition).toBeUndefined();
+    expect(changed.conditions.find((item) => item.id === "cond-116-a")?.disposition).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+  });
+
+  it("suppresses SDoH capture while preserving contextual review", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = data.conditions.find((item) => item.id === "cond-100-e")!;
+    const result = getRuleResult(condition, review, data, settings);
+    const blocked = setDisposition(data, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Add to Claim", false, settings);
+
+    expect(result.ruleId).toBe("sdoh-context-suppression");
+    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Add to Claim", ruleId: "sdoh-context-suppression" })]));
+    expect(blocked.conditions.find((item) => item.id === "cond-100-e")?.disposition).toBeUndefined();
+  });
+
+  it("recommends deletion rather than capture for quality-exclusion context", () => {
+    const data = openReview(cloneSeed(), "rev-115", user(seedData, "u-coder-2"));
+    const review = data.reviews.find((item) => item.id === "rev-115")!;
+    const condition = data.conditions.find((item) => item.id === "cond-115-a")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+    const blocked = setDisposition(data, "rev-115", "cond-115-a", user(data, "u-coder-2"), "Validate", false, settings);
+    const deleted = setDisposition(data, "rev-115", "cond-115-a", user(data, "u-coder-2"), "Delete", true, settings);
+
+    expect(recommendation?.action).toBe("Delete");
+    expect(result.ruleId).toBe("quality-exclusion-suppression");
+    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Validate", ruleId: "quality-exclusion-suppression" })]));
+    expect(blocked.conditions.find((item) => item.id === "cond-115-a")?.disposition).toBeUndefined();
+    expect(deleted.conditions.find((item) => item.id === "cond-115-a")?.disposition?.action).toBe("Delete");
+  });
 });
 
 describe("RAF, audit, assignment, stats, and exports", () => {
@@ -164,10 +400,29 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(summary.projectedRaf).toBeCloseTo(0.421);
   });
 
+  it("deduplicates captured RAF by patient, calendar year, and HCC", () => {
+    let data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    data = setDisposition(data, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
+    data = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const summary = getRafSummary(data, review);
+    expect(summary.validatedCapturedRaf).toBeCloseTo(0.318);
+    expect(summary.projectedRaf).toBeCloseTo(0.421 + 0.318);
+  });
+
   it("uses deterministic audit sampling setting", () => {
     expect(shouldSampleReviewForAudit("rev-100", 0)).toBe(false);
     expect(shouldSampleReviewForAudit("rev-100", 100)).toBe(true);
     expect(shouldSampleReviewForAudit("rev-100", 25)).toBe(shouldSampleReviewForAudit("rev-100", 25));
+  });
+
+  it("builds an audit sampling profile across presented opportunity categories", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const profile = getAuditSamplingProfile(data, review, 25);
+    expect(profile.sampleBucket).toBeGreaterThanOrEqual(0);
+    expect(profile.sampleBucket).toBeLessThan(100);
+    expect(profile.sampleCategories).toEqual(expect.arrayContaining(["validated", "potentialDelete", "potentialAddition", "prospective"]));
   });
 
   it("uses audit sample setting when completing a review", () => {
@@ -175,6 +430,20 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const withAudit = disposeRev100(cloneSeed(), 100);
     expect(noAudit.data.reviews.find((item) => item.id === "rev-100")?.status).toBe("Completed");
     expect(withAudit.data.reviews.find((item) => item.id === "rev-100")?.status).toBe("Under Audit");
+    expect(withAudit.data.audits.find((item) => item.reviewId === "rev-100")).toMatchObject({
+      selectionSource: "deterministic-sample",
+      sampleRate: 100,
+      sampleCategories: expect.arrayContaining(["potentialAddition", "potentialDelete", "prospective", "validated"])
+    });
+    expect(withAudit.data.history[0].detail).toContain("configured 100% audit percentage");
+  });
+
+  it("distinguishes manually started audit work from sampled audits", () => {
+    const data = cloneSeed();
+    const next = startAudit(data, "rev-108", user(data, "u-auditor-1"));
+    const audit = next.audits.find((item) => item.reviewId === "rev-108")!;
+    expect(audit.selectionSource).toBe("manual");
+    expect(audit.sampleRate).toBeUndefined();
   });
 
   it("returns audit work to original reviewer as Rework Required", () => {
@@ -223,12 +492,56 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(exports.find((record) => record.id === "generated-addition")?.rows[0]).toMatchObject({ reviewId: "rev-100", icd10: "E11.40" });
   });
 
+  it("creates and advances scheduling outreach when a prospective action has no same-year appointment", () => {
+    let data = cloneSeed();
+    data.appointments = data.appointments.filter((appointment) => appointment.patientId !== "pat-113");
+    data = openReview(data, "rev-113", user(data, "u-coder-4"));
+    data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
+    const outreach = data.downstreamTasks.find((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")!;
+    expect(outreach).toMatchObject({ status: "Open", queue: "Scheduling Outreach Queue", assignedUserId: "u-cdi-4" });
+    expect(getOutreachStatusForReview(data, data.reviews.find((item) => item.id === "rev-113")!)).toMatchObject({ status: "Open" });
+
+    data = updateDownstreamTaskStatus(data, outreach.id, user(data, "u-cdi-4"), "In Progress");
+    expect(data.downstreamTasks.find((task) => task.id === outreach.id)?.status).toBe("In Progress");
+    expect(data.history[0]).toMatchObject({ event: "Downstream task updated", conditionId: "cond-113-a" });
+  });
+
+  it("does not create scheduling outreach when a same-patient appointment exists", () => {
+    let data = openReview(cloneSeed(), "rev-113", user(seedData, "u-coder-4"));
+    data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
+    expect(data.downstreamTasks.some((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")).toBe(false);
+    expect(getOutreachStatusForReview(data, data.reviews.find((item) => item.id === "rev-113")!)).toMatchObject({ status: "Scheduled" });
+  });
+
   it("derives source and scenario discovery tags from seeded review data", () => {
     const data = cloneSeed();
     const rev100 = data.reviews.find((item) => item.id === "rev-100")!;
     const rev103 = data.reviews.find((item) => item.id === "rev-103")!;
+    const rev110 = data.reviews.find((item) => item.id === "rev-110")!;
+    const rev111 = data.reviews.find((item) => item.id === "rev-111")!;
+    const rev113 = data.reviews.find((item) => item.id === "rev-113")!;
+    const rev114 = data.reviews.find((item) => item.id === "rev-114")!;
+    const rev115 = data.reviews.find((item) => item.id === "rev-115")!;
+    const rev116 = data.reviews.find((item) => item.id === "rev-116")!;
+    const rev107 = data.reviews.find((item) => item.id === "rev-107")!;
     expect(getReviewScenarioTags(data, rev100)).toEqual(expect.arrayContaining(["HIE", "MOR", "Payer Data", "Registry", "Specialist Note"]));
+    expect(getReviewScenarioTags(data, rev100)).toContain("Duplicate HCC addition");
     expect(getReviewScenarioTags(data, rev103)).toContain("Ineligible CPT");
+    expect(getReviewScenarioTags(data, rev110)).toContain("Same-HCC threshold");
+    expect(getReviewScenarioTags(data, rev111)).toContain("Delete safety");
+    expect(getReviewScenarioTags(data, rev113)).toContain("Three-year lookback");
+    expect(getReviewScenarioTags(data, rev114)).toEqual(expect.arrayContaining(["Acute condition", "Acute-only recapture"]));
+    expect(getReviewScenarioTags(data, rev115)).toContain("Quality exclusion");
+    expect(getReviewScenarioTags(data, rev116)).toContain("Trumping");
+    expect(getReviewScenarioTags(data, rev107)).toContain("Scheduling outreach");
+  });
+
+  it("does not count prospective recapture RAF until selected by a user", () => {
+    let data = openReview(cloneSeed(), "rev-113", user(seedData, "u-coder-4"));
+    const review = data.reviews.find((item) => item.id === "rev-113")!;
+    expect(getRafSummary(data, review).validatedCapturedRaf).toBeCloseTo(0);
+    data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
+    expect(getRafSummary(data, review).validatedCapturedRaf).toBeCloseTo(0.214);
   });
 });
 

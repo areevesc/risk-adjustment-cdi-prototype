@@ -6,7 +6,7 @@ import { Button, Panel, StatusChip } from "../../ui/Primitives";
 import type { ExportRecord, RecommendationMode } from "../../domain/types";
 
 export function AdminPage() {
-  const { data, settings, setRecommendationMode, setAuditSampleRate, setPrototypeCurrentYear } = useAppState();
+  const { data, settings, setRecommendationMode, setAuditSampleRate, setPrototypeCurrentYear, setSameHccValidationThreshold } = useAppState();
   const generatedExports = useMemo<ExportRecord[]>(() => getGeneratedExports(data), [data]);
   const seededExamples = data.exports.filter((record) => record.seededExample);
 
@@ -17,11 +17,11 @@ export function AdminPage() {
           <label>
             Recommendation assistance display
             <select value={settings.recommendationMode} onChange={(event) => setRecommendationMode(event.target.value as RecommendationMode)}>
-              <option value="simulated">Simulated AI recommendations</option>
+              <option value="simulated">Rule-based recommendations - prototype only</option>
               <option value="rules">Rule-based decision support</option>
               <option value="hidden">Hidden/disabled</option>
             </select>
-            <small className="setting-help">Changes whether condition cards show simulated AI labels, rule-based decision support, or no recommendation assistance.</small>
+            <small className="setting-help">Changes whether condition cards show rule-based prototype recommendations or no recommendation assistance.</small>
           </label>
           <label>
             Audit sampling percentage
@@ -32,6 +32,17 @@ export function AdminPage() {
             Prototype current year
             <input type="number" min={2020} max={2035} value={settings.prototypeCurrentYear} onChange={(event) => setPrototypeCurrentYear(Number(event.target.value))} />
             <small className="setting-help">Controls current-year eligibility for prospective routing and calendar-year logic.</small>
+          </label>
+          <label>
+            Same-HCC validation threshold
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={settings.sameHccValidationThreshold}
+              onChange={(event) => setSameHccValidationThreshold(Number(event.target.value))}
+            />
+            <small className="setting-help">Defaults to three user-selected validations before unresolved same-HCC items are rule-resolved.</small>
           </label>
         </div>
         <p className="raf-note">No AI APIs, API keys, cloud model services, required local language models, EHR, payer, CMS, or scheduling integrations are used.</p>

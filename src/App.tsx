@@ -71,7 +71,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>Risk Adjustment Coding/CDI Platform</h1>
-            <p>Functional prototype using deterministic rules, seeded evidence, and simulated recommendations.</p>
+            <p>Functional prototype using deterministic rules, seeded evidence, and rule-based recommendations.</p>
           </div>
           <div className="topbar-meta">
             <Users size={18} />
