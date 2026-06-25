@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole, Play } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
@@ -48,6 +48,7 @@ export function ReviewPage() {
   const [overrideRequested, setOverrideRequested] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [completionWarnings, setCompletionWarnings] = useState<string[]>([]);
+  const [nextPatientMessage, setNextPatientMessage] = useState("");
 
   const maps = useMemo(
     () => ({
@@ -118,6 +119,19 @@ export function ReviewPage() {
     navigate("/queue");
   }
 
+  function openNextPatientChart() {
+    const nextReviewId = actions.openNextEligibleReview(activeReview.id);
+    if (!nextReviewId) {
+      setNextPatientMessage("No available or pended next patient chart is currently eligible for your role.");
+      return;
+    }
+    setSelectedDocumentId(undefined);
+    setSelectedEvidenceId(undefined);
+    setCompletionWarnings([]);
+    setNextPatientMessage("");
+    navigate(`/review/${nextReviewId}`);
+  }
+
   function complete() {
     const unresolved = actions.completeReview(activeReview.id);
     setCompletionWarnings(unresolved);
@@ -149,6 +163,10 @@ export function ReviewPage() {
             <Button onClick={() => setSummaryExpanded((value) => !value)} variant="ghost">
               {summaryExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               Summary
+            </Button>
+            <Button variant="secondary" onClick={openNextPatientChart}>
+              <Play size={15} />
+              Next Patient Chart
             </Button>
             <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.pendReview(review.id)}>Pend</Button>
             <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
@@ -183,6 +201,12 @@ export function ReviewPage() {
           <div className="warning-banner rework-banner">
             <AlertTriangle size={18} />
             Correction requested by {maps.users.get(activeReview.auditReturn.returnedByUserId)?.name}: {activeReview.auditReturn.comments}
+          </div>
+        ) : null}
+        {nextPatientMessage ? (
+          <div className="warning-banner rework-banner">
+            <AlertTriangle size={18} />
+            {nextPatientMessage}
           </div>
         ) : null}
         {!editable ? (
