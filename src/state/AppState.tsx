@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { seedData } from "../data/seed";
-import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, RecommendationAction, SeedData, User } from "../domain/types";
+import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, QueueType, RecommendationAction, Role, SeedData, User } from "../domain/types";
 import {
   assignReview,
   completeAudit,
@@ -9,6 +9,7 @@ import {
   openNextEligibleReview,
   openReview,
   overrideLock,
+  pendAndOpenNextEligibleReview,
   pendReview,
   releaseReview,
   reopenAudit,
@@ -43,6 +44,7 @@ interface AppStateValue extends PersistedState {
     releaseReview: (reviewId: string) => void;
     overrideLock: (reviewId: string, reason: string) => void;
     pendReview: (reviewId: string) => void;
+    pendAndOpenNextEligibleReview: (currentReviewId: string) => string | undefined;
     routeReview: (reviewId: string, queue: PatientReview["queue"]) => void;
     completeReview: (reviewId: string) => string[];
     assignReview: (reviewId: string, assignedUserId: string, mode?: AssignmentMode, reason?: string) => void;
@@ -77,17 +79,79 @@ const initialState: PersistedState = {
   data: seedData
 };
 
+const legacyRoleMap: Record<string, Role> = {
+  Administrator: "Administrator",
+  Manager: "Manager",
+  Auditor: "Auditor",
+  Coder: "CDI/Coder",
+  "CDI Specialist": "CDI/Coder",
+  "CDI/Coder": "CDI/Coder"
+};
+
+function normalizeRole(role: unknown): Role {
+  return legacyRoleMap[String(role)] ?? "CDI/Coder";
+}
+
+function normalizeQueue(queue: unknown): QueueType {
+  if (queue === "Assigned Coder" || queue === "Assigned CDI Specialist" || queue === "Unassigned Team Queue") return "CDI/Coder Queue";
+  if (queue === "Auditor Queue" || queue === "Manager Review Queue" || queue === "Prospective Review Queue" || queue === "CDI/Coder Queue") return queue;
+  return "CDI/Coder Queue";
+}
+
+export function normalizeSeedData(rawData: SeedData): SeedData {
+  const raw = rawData as SeedData & {
+    clinics: Array<SeedData["clinics"][number] & { defaultCoderId?: string; defaultCdiId?: string }>;
+    reviews: Array<PatientReview & { assignedCoderId?: string; assignedCdiId?: string; assignedUserId?: string }>;
+  };
+  const clinics = raw.clinics.map((clinic) => {
+    const legacyClinic = clinic as typeof clinic & { defaultCoderId?: string; defaultCdiId?: string };
+    const { defaultCoderId: _defaultCoderId, defaultCdiId: _defaultCdiId, ...currentClinic } = legacyClinic;
+    return {
+      ...currentClinic,
+      defaultAssigneeId: clinic.defaultAssigneeId ?? legacyClinic.defaultCoderId ?? legacyClinic.defaultCdiId ?? "u-coder-1"
+    };
+  });
+  const clinicById = new Map(clinics.map((clinic) => [clinic.id, clinic]));
+  const users = raw.users.map((user) => {
+    const roles = Array.from(new Set(user.roles.map(normalizeRole)));
+    return {
+      ...user,
+      roles,
+      primaryRole: normalizeRole(user.primaryRole)
+    };
+  });
+  return {
+    ...raw,
+    users,
+    clinics,
+    reviews: raw.reviews.map((review) => {
+      const legacyReview = review as typeof review & { assignedCoderId?: string; assignedCdiId?: string };
+      const { assignedCoderId: _assignedCoderId, assignedCdiId: _assignedCdiId, ...currentReview } = legacyReview;
+      return {
+        ...currentReview,
+        queue: normalizeQueue(review.queue),
+        assignedUserId: review.assignedUserId ?? legacyReview.assignedCoderId ?? legacyReview.assignedCdiId ?? clinicById.get(review.clinicId)?.defaultAssigneeId ?? "u-coder-1",
+        assignedAuditorId: review.assignedAuditorId
+      };
+    })
+  };
+}
+
 function loadInitialState(): PersistedState {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return initialState;
     const parsed = JSON.parse(raw) as PersistedState;
     if (!parsed.data?.reviews?.length) return initialState;
-    return {
-      currentUserId: parsed.currentUserId ?? initialState.currentUserId,
+    const data = normalizeSeedData({ ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] });
+    const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
+    const next = {
+      currentUserId: currentUser.id,
       settings: { ...defaultSettings, ...parsed.settings },
-      data: { ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] }
+      data
     };
+    localStorage.setItem(storageKey, JSON.stringify(next));
+    return next;
   } catch {
     return initialState;
   }
@@ -138,6 +202,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         releaseReview: (reviewId) => withData((data) => releaseReview(data, reviewId, currentUser)),
         overrideLock: (reviewId, reason) => withData((data) => overrideLock(data, reviewId, currentUser, reason)),
         pendReview: (reviewId) => withData((data) => pendReview(data, reviewId, currentUser)),
+        pendAndOpenNextEligibleReview: (currentReviewId) => {
+          const result = pendAndOpenNextEligibleReview(state.data, currentReviewId, currentUser);
+          commit({ ...state, data: result.data });
+          return result.nextReviewId;
+        },
         routeReview: (reviewId, queue) => withData((data) => routeReview(data, reviewId, currentUser, queue)),
         completeReview: (reviewId) => {
           const result = completeReview(state.data, reviewId, currentUser, state.settings);

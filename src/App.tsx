@@ -1,10 +1,11 @@
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import type { ElementType, ReactNode } from "react";
-import { BarChart3, ClipboardList, Database, FileCheck2, Settings, ShieldCheck, Users } from "lucide-react";
+import { BarChart3, ClipboardList, Database, FileCheck2, LineChart, Settings, ShieldCheck, Users } from "lucide-react";
 import { useAppState } from "./state/AppState";
 import { LoginPage } from "./features/login/LoginPage";
 import { QueuePage } from "./features/queue/QueuePage";
+import { MyStatsPage } from "./features/stats/MyStatsPage";
 import { ReviewPage } from "./features/review/ReviewPage";
 import { AuditPage } from "./features/audit/AuditPage";
 import { ManagerPage } from "./features/dashboard/ManagerPage";
@@ -15,6 +16,7 @@ import { canAccessRoute, getFirstPermittedRoute, getRouteDenialMessage, routePat
 const navItems: { route: AppRouteKey; label: string; icon: ElementType }[] = [
   { route: "login", label: "Login", icon: ShieldCheck },
   { route: "queue", label: "Work Queue", icon: ClipboardList },
+  { route: "stats", label: "My Stats", icon: LineChart },
   { route: "audit", label: "Audit", icon: FileCheck2 },
   { route: "manager", label: "Manager", icon: BarChart3 },
   { route: "admin", label: "Admin", icon: Settings }
@@ -94,6 +96,14 @@ export function App() {
             element={
               <ProtectedRoute route="review">
                 <ReviewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/stats"
+            element={
+              <ProtectedRoute route="stats">
+                <MyStatsPage />
               </ProtectedRoute>
             }
           />

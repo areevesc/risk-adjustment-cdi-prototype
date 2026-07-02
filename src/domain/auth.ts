@@ -1,10 +1,11 @@
 import type { PatientReview, Role, SeedData, User } from "./types";
 
-export type AppRouteKey = "login" | "queue" | "review" | "audit" | "manager" | "admin";
+export type AppRouteKey = "login" | "queue" | "stats" | "review" | "audit" | "manager" | "admin";
 
 export const routePathByKey: Record<AppRouteKey, string> = {
   login: "/login",
   queue: "/queue",
+  stats: "/stats",
   review: "/queue",
   audit: "/audit",
   manager: "/manager",
@@ -12,9 +13,10 @@ export const routePathByKey: Record<AppRouteKey, string> = {
 };
 
 const routeRoles: Record<AppRouteKey, Role[]> = {
-  login: ["Administrator", "Manager", "Auditor", "Coder", "CDI Specialist"],
-  queue: ["Administrator", "Manager", "Auditor", "Coder", "CDI Specialist"],
-  review: ["Administrator", "Manager", "Auditor", "Coder", "CDI Specialist"],
+  login: ["Administrator", "Manager", "Auditor", "CDI/Coder"],
+  queue: ["Administrator", "Manager", "Auditor", "CDI/Coder"],
+  stats: ["CDI/Coder"],
+  review: ["Administrator", "Manager", "Auditor", "CDI/Coder"],
   audit: ["Administrator", "Manager", "Auditor"],
   manager: ["Administrator", "Manager"],
   admin: ["Administrator"]
@@ -29,7 +31,7 @@ export function canAccessRoute(user: User, route: AppRouteKey) {
 }
 
 export function getFirstPermittedRoute(user: User) {
-  const ordered: AppRouteKey[] = ["queue", "audit", "manager", "admin", "login"];
+  const ordered: AppRouteKey[] = ["queue", "stats", "audit", "manager", "admin", "login"];
   return routePathByKey[ordered.find((route) => canAccessRoute(user, route)) ?? "login"];
 }
 
@@ -53,7 +55,7 @@ export function canConfigurePrototype(user: User) {
 }
 
 export function isAssignedToReview(review: PatientReview, user: User) {
-  return review.assignedCoderId === user.id || review.assignedCdiId === user.id || review.assignedAuditorId === user.id;
+  return review.assignedUserId === user.id || review.assignedAuditorId === user.id;
 }
 
 export function isReviewLockOwner(review: PatientReview, user: User) {
@@ -69,11 +71,9 @@ export function canViewReview(data: SeedData, review: PatientReview, user: User)
   if (user.roles.includes("Auditor")) {
     return review.queue === "Auditor Queue" || review.status === "Under Audit" || review.status === "Audit Complete";
   }
-  if (hasAnyRole(user, ["Coder", "CDI Specialist"])) {
+  if (hasAnyRole(user, ["CDI/Coder"])) {
     return (
-      isAssignedToReview(review, user) ||
-      review.queue === "Unassigned Team Queue" ||
-      (user.roles.includes("CDI Specialist") && review.queue === "Prospective Review Queue") ||
+      review.assignedUserId === user.id ||
       data.downstreamTasks.some((task) => task.reviewId === review.id && task.assignedUserId === user.id && task.status !== "Completed")
     );
   }
@@ -114,9 +114,7 @@ export function canFlagDocumentationIssue(review: PatientReview, user: User) {
 }
 
 export function canTakeCoverage(data: SeedData, review: PatientReview, user: User) {
-  if (!hasAnyRole(user, ["Coder", "CDI Specialist"])) return false;
-  if (!canViewReview(data, review, user)) return false;
-  return !review.lock || isReviewLockOwner(review, user);
+  return false;
 }
 
 export function canStartAudit(review: PatientReview, user: User) {

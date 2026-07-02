@@ -143,7 +143,7 @@ export function ManagerPage() {
                   <td>
                     <StatusChip>{review.status}</StatusChip>
                   </td>
-                  <td>{review.lock ? `Locked by ${maps.users.get(review.lock.lockedByUserId)?.name}` : "Unlocked"}</td>
+                  <td>{review.lock ? `Being edited by ${maps.users.get(review.lock.lockedByUserId)?.name}` : "No active editor"}</td>
                   <td>
                     <div className="row-actions">
                       <Button disabled={!canManageLocks(currentUser)} onClick={() => setAssignmentReviewId(review.id)}>
@@ -200,13 +200,13 @@ function AssignmentDialog({
   users: User[];
   maps: {
     users: Map<string, User>;
-    clinics: Map<string, { id: string; name: string; defaultCoderId: string; defaultCdiId: string }>;
+    clinics: Map<string, { id: string; name: string; defaultAssigneeId: string }>;
   };
   onAssign: (assignedUserId: string, mode: AssignmentMode, reason?: string) => void;
   onClose: () => void;
 }) {
   const clinic = maps.clinics.get(review.clinicId);
-  const [assignedUserId, setAssignedUserId] = useState(review.assignedCoderId ?? review.assignedCdiId ?? users[0]?.id ?? "");
+  const [assignedUserId, setAssignedUserId] = useState(review.assignedUserId ?? users[0]?.id ?? "");
   const [mode, setMode] = useState<AssignmentMode>("Coverage");
   const [reason, setReason] = useState("");
   return (
@@ -218,15 +218,14 @@ function AssignmentDialog({
         </header>
         <div className="modal-body">
           <div className="assignment-context">
-            <span>Current coder: {review.assignedCoderId ? maps.users.get(review.assignedCoderId)?.name : "Unassigned"}</span>
-            <span>Current CDI specialist: {review.assignedCdiId ? maps.users.get(review.assignedCdiId)?.name : "Unassigned"}</span>
-            <span>Clinic defaults: {clinic ? `${maps.users.get(clinic.defaultCoderId)?.name} / ${maps.users.get(clinic.defaultCdiId)?.name}` : "None"}</span>
+            <span>Current assignee: {maps.users.get(review.assignedUserId)?.name ?? "Unassigned"}</span>
+            <span>Clinic default: {clinic ? maps.users.get(clinic.defaultAssigneeId)?.name : "None"}</span>
           </div>
           <label>
             Proposed assignee
             <select value={assignedUserId} onChange={(event) => setAssignedUserId(event.target.value)}>
               {users
-                .filter((user) => user.roles.includes("Coder") || user.roles.includes("CDI Specialist"))
+                .filter((user) => user.roles.includes("CDI/Coder"))
                 .map((user) => (
                   <option key={user.id} value={user.id}>
                     {user.name}

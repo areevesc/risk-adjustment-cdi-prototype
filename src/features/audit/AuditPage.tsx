@@ -37,7 +37,7 @@ export function AuditPage() {
 
   function returnForCorrection() {
     if (!comments.trim()) return;
-    const recipientId = selected.assignedCoderId ?? selected.assignedCdiId;
+    const recipientId = selected.assignedUserId;
     const recipientName = recipientId ? maps.users.get(recipientId)?.name : undefined;
     const message = `Review ${selected.id} was returned to ${recipientName ?? "the assigned reviewer"} for correction and is now Rework Required.`;
     const nextReview = auditReviews.find((review) => review.id !== selected.id);

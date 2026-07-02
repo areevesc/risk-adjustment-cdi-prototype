@@ -422,7 +422,7 @@ function hasThreeYearLookbackEvidence(data: SeedData, review: PatientReview, con
 
 export function getTeamStats(data: SeedData) {
   return data.users
-    .filter((user) => user.roles.includes("Coder") || user.roles.includes("CDI Specialist"))
+    .filter((user) => user.roles.includes("CDI/Coder"))
     .map((user) => {
       const assigned = data.reviews.filter((review) => isAssignedToUser(review, user));
       const completed = assigned.filter((review) => review.status === "Completed" || review.status === "Audit Complete").length;
