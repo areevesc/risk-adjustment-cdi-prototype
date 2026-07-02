@@ -63,12 +63,10 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "codesOnClaim" && deleteSafety.supportingEvidenceIds.length > 0) {
-      disabledActions.push({
-        action: "Delete",
-        reason: "Delete unavailable because current-year supporting evidence exists for this condition or same HCC.",
-        ruleId: "delete-safety-current-year-support",
-        source: "rule-suppressed",
-        supportingEvidenceIds: deleteSafety.supportingEvidenceIds
+      warnings.push({
+        message: `Current-year supporting evidence exists for ${condition.hcc}. Delete remains a user decision, but the prototype requires deletion-safety review before accepting a patient-year HCC deletion.`,
+        severity: "blocking",
+        evidenceIds: deleteSafety.supportingEvidenceIds
       });
     }
 
@@ -120,6 +118,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           supportingEvidenceIds: hierarchy.evidenceIds
         })
       );
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && hierarchy.warning) {
+      warnings.push({
+        message: hierarchy.warning,
+        severity: "warning",
+        evidenceIds: hierarchy.evidenceIds
+      });
     }
 
     if (!condition.disposition && !condition.ruleOutcome && contextualExclusion.applies) {
@@ -369,7 +375,7 @@ function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {
 function evaluateHierarchySuppression(condition: Condition, review: PatientReview, data: SeedData) {
   const disabledActions = getDirectCaptureActionsForWorkflow(condition);
   if (!condition.trumpedByCode || disabledActions.length === 0) {
-    return { applies: false, disabledActions: [] as RecommendationAction[], evidenceIds: [] as string[], reason: "", capturedReplacement: false };
+    return { applies: false, disabledActions: [] as RecommendationAction[], evidenceIds: [] as string[], reason: "", warning: "", capturedReplacement: false };
   }
   const replacement = getReplacementCondition(condition, review, data);
   const capturedReplacement = Boolean(
@@ -380,12 +386,22 @@ function evaluateHierarchySuppression(condition: Condition, review: PatientRevie
         replacement.disposition?.action === "Yes" ||
         replacement.ruleOutcome?.source === "rule-resolved")
   );
-  const replacementText = capturedReplacement ? `${condition.trumpedByCode} is already captured or validated for this patient/calendar year` : `${condition.trumpedByCode} is the prototype replacement code`;
+  if (!capturedReplacement) {
+    return {
+      applies: false,
+      disabledActions: [] as RecommendationAction[],
+      evidenceIds: [...condition.evidenceIds, ...(replacement?.evidenceIds ?? [])],
+      reason: "",
+      warning: `Change is recommended because prototype specificity logic suggests ${condition.trumpedByCode}, but direct capture is not hard-disabled unless that code is already captured or the displayed ICD-10 is definitively invalid.`,
+      capturedReplacement
+    };
+  }
   return {
     applies: true,
     disabledActions,
     evidenceIds: [...condition.evidenceIds, ...(replacement?.evidenceIds ?? [])],
-    reason: `Direct capture is suppressed because ${replacementText}. This keeps the lower diagnosis visible without double-counting RAF.`,
+    reason: `Direct capture is unavailable because ${condition.trumpedByCode} is already captured or validated for this patient/calendar year.`,
+    warning: "",
     capturedReplacement
   };
 }
@@ -410,7 +426,7 @@ function evaluateContextualExclusion(condition: Condition) {
     recommendedAction,
     disabledActions: getCaptureActionsForWorkflow(condition),
     evidenceIds: condition.evidenceIds,
-    reason: `Capture action is suppressed because this opportunity is tagged as ${label} context in the curated prototype scenario. Keep the context visible and route education or review manually if needed.`
+    reason: `Capture action is unavailable because the displayed diagnosis itself is marked as a prototype ${label} code. This curated classification is not an authoritative live code-set determination.`
   };
 }
 

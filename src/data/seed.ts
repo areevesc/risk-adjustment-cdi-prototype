@@ -979,7 +979,6 @@ export const conditions: Condition[] = [
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
     conflictingEvidence: true,
-    sdohCode: true,
     seededRecommendation: {
       action: "Disagree",
       confidence: "Low",
@@ -1306,7 +1305,6 @@ export const conditions: Condition[] = [
           hadPriorCapture: true,
           hasCurrentYearCapture: true,
           hasClinicalIndicators: true,
-          sdohCode: review.id === "rev-103",
           disposition: review.status === "Completed" || review.status === "Under Audit" || review.status === "Audit Complete" ? disposed(index % 3 === 0 ? "Delete" : "Validate") : undefined,
           documentationIssues: []
         },

@@ -728,6 +728,15 @@ label {
   gap: 7px;
 }
 
+.review-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
 .patient-header-actions .button {
   min-height: 34px;
   padding: 7px 11px;
@@ -1142,6 +1151,18 @@ label {
   font-weight: 800;
 }
 
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  color: #14532d;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
 .rework-banner {
   margin-bottom: 10px;
 }
@@ -1224,6 +1245,27 @@ label {
 .modal-copy {
   margin: 0;
   color: var(--text-muted);
+}
+
+.safety-evidence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.safety-evidence-list button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.safety-evidence-list button:hover {
+  border-color: var(--primary);
 }
 
 .modal-actions {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table";
 import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
@@ -14,7 +14,7 @@ import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
 import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens } from "../../domain/tokens";
-import { canAssignReviews, canTakeCoverage, getVisibleReviews } from "../../domain/auth";
+import { canAssignReviews, canOpenReview, canTakeCoverage, getVisibleReviews, hasAnyRole } from "../../domain/auth";
 
 interface QueueRow {
   review: PatientReview;
@@ -27,6 +27,8 @@ interface QueueRow {
   year: number;
   type: string;
   assigned: string;
+  originalAssignee: string;
+  coverageBy: string;
   status: WorkflowStatus;
   queue: string;
   lockedBy: string;
@@ -46,11 +48,16 @@ export function QueuePage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [reviewTypeFilter, setReviewTypeFilter] = useState("All");
-  const [teamMemberFilter, setTeamMemberFilter] = useState("All");
+  const canUseCdiCoverageFilter = currentUser.roles.includes("CDI/Coder") && !hasAnyRole(currentUser, ["Administrator", "Manager", "Auditor"]);
+  const [teamMemberFilter, setTeamMemberFilter] = useState(canUseCdiCoverageFilter ? "Mine" : "All");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [sourceExampleFilter, setSourceExampleFilter] = useState("All");
   const [noVisitOnly, setNoVisitOnly] = useState(false);
-  const canFilterByTeamMember = canAssignReviews(currentUser);
+  const canFilterByTeamMember = canAssignReviews(currentUser) || canUseCdiCoverageFilter;
+
+  useEffect(() => {
+    setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
+  }, [canUseCdiCoverageFilter, currentUser.id]);
 
   const maps = useMemo(
     () => ({
@@ -71,6 +78,7 @@ export function QueuePage() {
         .map((id) => (id ? maps.users.get(id)?.name : undefined))
         .filter(Boolean)
         .join(" / ");
+      const coverageBy = review.coverage ? maps.users.get(review.coverage.coveringUserId)?.name ?? "Unknown CDI/Coder" : "";
       const categories = getPresentedOpportunitySummary(data, review);
       const counts = getProspectiveCounts(data, review);
       return {
@@ -83,7 +91,9 @@ export function QueuePage() {
         provider: maps.providers.get(review.providerId)?.name ?? "-",
         year: review.calendarYear,
         type: review.reviewType,
-        assigned: assignedUsers || "Unassigned",
+        assigned: coverageBy ? `${assignedUsers || "Unassigned"} / Coverage: ${coverageBy}` : assignedUsers || "Unassigned",
+        originalAssignee: maps.users.get(review.assignedUserId)?.name ?? "Unassigned",
+        coverageBy,
         status: review.status,
         queue: review.queue,
         lockedBy: review.lock ? maps.users.get(review.lock.lockedByUserId)?.name ?? "Unknown user" : "",
@@ -97,7 +107,18 @@ export function QueuePage() {
   }, [currentUser, data, maps]);
 
   const sourceExampleOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.sourceExamples))).sort((a, b) => a.localeCompare(b)), [rows]);
-  const teamMemberOptions = useMemo(() => data.users.filter((user) => user.roles.includes("CDI/Coder")), [data.users]);
+  const teamMemberOptions = useMemo(
+    () =>
+      data.users
+        .filter((user) => user.roles.includes("CDI/Coder"))
+        .filter((user) => !canUseCdiCoverageFilter || user.teamId === currentUser.teamId)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [canUseCdiCoverageFilter, currentUser.teamId, data.users]
+  );
+  const selectableTeamMemberOptions = useMemo(
+    () => teamMemberOptions.filter((user) => !(canUseCdiCoverageFilter && user.id === currentUser.id)),
+    [canUseCdiCoverageFilter, currentUser.id, teamMemberOptions]
+  );
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status))), [rows]);
 
   const filteredRows = useMemo(() => rows.filter((row) => {
@@ -110,18 +131,18 @@ export function QueuePage() {
     const matchesMember =
       !canFilterByTeamMember ||
       teamMemberFilter === "All" ||
-      row.review.assignedUserId === teamMemberFilter;
+      (teamMemberFilter === "Mine" ? isAssignedToUser(row.review, currentUser) : row.review.assignedUserId === teamMemberFilter);
     const matchesCategory = categoryFilter === "All" || row.categories[categoryFilter as keyof typeof row.categories]?.count > 0;
     const matchesSourceExample = sourceExampleFilter === "All" || row.sourceExamples.includes(sourceExampleFilter);
     const matchesVisit = !noVisitOnly || row.noVisit;
     return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesSourceExample && matchesVisit;
-  }), [canFilterByTeamMember, categoryFilter, noVisitOnly, query, reviewTypeFilter, rows, sourceExampleFilter, statusFilter, teamMemberFilter]);
+  }), [canFilterByTeamMember, categoryFilter, currentUser, noVisitOnly, query, reviewTypeFilter, rows, sourceExampleFilter, statusFilter, teamMemberFilter]);
 
   function clearFilters() {
     setQuery("");
     setStatusFilter("All");
     setReviewTypeFilter("All");
-    if (canFilterByTeamMember) setTeamMemberFilter("All");
+    if (canFilterByTeamMember) setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
     setCategoryFilter("All");
     setSourceExampleFilter("All");
     setNoVisitOnly(false);
@@ -133,7 +154,7 @@ export function QueuePage() {
   }
 
   function nextPatient() {
-    const next = filteredRows.find((row) => !row.review.lock && ["Available", "Pended"].includes(row.review.status));
+    const next = filteredRows.find((row) => canOpenReview(data, row.review, currentUser) && !row.review.lock && ["Available", "Pended"].includes(row.review.status));
     if (next) open(next.review.id);
   }
 
@@ -156,6 +177,7 @@ export function QueuePage() {
     columnHelper.accessor("year", { header: "CY" }),
     columnHelper.accessor("type", { header: "Type" }),
     columnHelper.accessor("assigned", { header: "Assigned" }),
+    columnHelper.accessor("originalAssignee", { header: "Original CDI/Coder" }),
     columnHelper.accessor("status", {
       header: "Status",
       cell: (info) => (
@@ -197,12 +219,12 @@ export function QueuePage() {
       cell: (info) => (
         <div className="row-actions">
           <Button variant="primary" onClick={() => open(info.row.original.review.id)}>
-            Open
+            {canOpenReview(data, info.row.original.review, currentUser) ? "Open" : "View"}
           </Button>
           {canTakeCoverage(data, info.row.original.review, currentUser) && !isAssignedToUser(info.row.original.review, currentUser) ? (
             <Button variant="secondary" onClick={() => actions.takeCoverage(info.row.original.review.id)}>
               <UserPlus size={14} />
-              Cover
+              Take Coverage
             </Button>
           ) : null}
         </div>
@@ -251,8 +273,9 @@ export function QueuePage() {
           </select>
           {canFilterByTeamMember ? (
             <select value={teamMemberFilter} onChange={(event) => setTeamMemberFilter(event.target.value)} aria-label="Team member">
-              <option value="All">All team members</option>
-              {teamMemberOptions.map((user) => (
+              {canUseCdiCoverageFilter ? <option value="Mine">My Queue</option> : null}
+              <option value="All">{canUseCdiCoverageFilter ? "All CDI/Coder Queues" : "All team members"}</option>
+              {selectableTeamMemberOptions.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.name}
                 </option>
@@ -292,6 +315,7 @@ export function QueuePage() {
               <col className="queue-col-provider" />
               <col className="queue-col-year" />
               <col className="queue-col-type" />
+              <col className="queue-col-assigned" />
               <col className="queue-col-assigned" />
               <col className="queue-col-status" />
               <col className="queue-col-queue" />
@@ -386,6 +410,14 @@ function MobileQueueCard({
           <dd>{row.assigned}</dd>
         </div>
         <div>
+          <dt>Original CDI/Coder</dt>
+          <dd>{row.originalAssignee}</dd>
+        </div>
+        <div>
+          <dt>Coverage</dt>
+          <dd>{row.coverageBy || "None"}</dd>
+        </div>
+        <div>
           <dt>Queue</dt>
           <dd>{row.queue}</dd>
         </div>
@@ -404,12 +436,12 @@ function MobileQueueCard({
       {row.sourceExamples.length ? <ScenarioTagList tags={row.sourceExamples} limit={6} /> : null}
       <div className="row-actions queue-card-actions">
         <Button variant="primary" onClick={() => onOpen(row.review.id)}>
-          Open
+          {canOpenReview(data, row.review, currentUser) ? "Open" : "View"}
         </Button>
         {canCover ? (
           <Button variant="secondary" onClick={() => onCover(row.review.id)}>
             <UserPlus size={14} />
-            Cover
+            Take Coverage
           </Button>
         ) : null}
       </div>

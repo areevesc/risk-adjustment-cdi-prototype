@@ -55,7 +55,11 @@ export function canConfigurePrototype(user: User) {
 }
 
 export function isAssignedToReview(review: PatientReview, user: User) {
-  return review.assignedUserId === user.id || review.assignedAuditorId === user.id;
+  return review.assignedUserId === user.id || review.coverage?.coveringUserId === user.id || review.assignedAuditorId === user.id;
+}
+
+export function isOriginalAssignee(review: PatientReview, user: User) {
+  return review.assignedUserId === user.id;
 }
 
 export function isReviewLockOwner(review: PatientReview, user: User) {
@@ -72,8 +76,11 @@ export function canViewReview(data: SeedData, review: PatientReview, user: User)
     return review.queue === "Auditor Queue" || review.status === "Under Audit" || review.status === "Audit Complete";
   }
   if (hasAnyRole(user, ["CDI/Coder"])) {
+    const assigned = data.users.find((item) => item.id === review.assignedUserId);
     return (
       review.assignedUserId === user.id ||
+      review.coverage?.coveringUserId === user.id ||
+      (review.queue === "CDI/Coder Queue" && assigned?.roles.includes("CDI/Coder") && assigned.teamId === user.teamId) ||
       data.downstreamTasks.some((task) => task.reviewId === review.id && task.assignedUserId === user.id && task.status !== "Completed")
     );
   }
@@ -81,7 +88,17 @@ export function canViewReview(data: SeedData, review: PatientReview, user: User)
 }
 
 export function canOpenReview(data: SeedData, review: PatientReview, user: User) {
-  return canViewReview(data, review, user);
+  if (!canViewReview(data, review, user)) return false;
+  if (hasAnyRole(user, ["Administrator", "Manager"])) return true;
+  if (user.roles.includes("Auditor")) return review.assignedAuditorId === user.id || review.queue === "Auditor Queue";
+  if (user.roles.includes("CDI/Coder")) {
+    return (
+      review.assignedUserId === user.id ||
+      review.coverage?.coveringUserId === user.id ||
+      data.downstreamTasks.some((task) => task.reviewId === review.id && task.assignedUserId === user.id && task.status !== "Completed")
+    );
+  }
+  return false;
 }
 
 export function canMutateReview(review: PatientReview, user: User) {
@@ -114,7 +131,13 @@ export function canFlagDocumentationIssue(review: PatientReview, user: User) {
 }
 
 export function canTakeCoverage(data: SeedData, review: PatientReview, user: User) {
-  return false;
+  if (!user.roles.includes("CDI/Coder") || hasAnyRole(user, ["Administrator", "Manager", "Auditor"])) return false;
+  if (review.queue !== "CDI/Coder Queue") return false;
+  if (!["Available", "Pended", "Rework Required"].includes(review.status)) return false;
+  if (review.assignedUserId === user.id || review.coverage?.coveringUserId === user.id) return false;
+  if (review.lock || review.coverage) return false;
+  const originalAssignee = data.users.find((item) => item.id === review.assignedUserId);
+  return Boolean(originalAssignee?.roles.includes("CDI/Coder") && originalAssignee.teamId === user.teamId);
 }
 
 export function canStartAudit(review: PatientReview, user: User) {
@@ -129,6 +152,13 @@ export function canReopenAudit(user: User) {
   return hasAnyRole(user, ["Administrator", "Manager", "Auditor"]);
 }
 
+export function canViewCoverageQueue(data: SeedData, review: PatientReview, user: User) {
+  if (!user.roles.includes("CDI/Coder") || hasAnyRole(user, ["Administrator", "Manager", "Auditor"])) return false;
+  if (review.queue !== "CDI/Coder Queue") return false;
+  const assigned = data.users.find((item) => item.id === review.assignedUserId);
+  return Boolean(assigned?.roles.includes("CDI/Coder") && assigned.teamId === user.teamId);
+}
+
 export function getVisibleReviews(data: SeedData, user: User) {
-  return data.reviews.filter((review) => canViewReview(data, review, user));
+  return data.reviews.filter((review) => canViewReview(data, review, user) || canViewCoverageQueue(data, review, user));
 }
