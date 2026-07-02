@@ -72,8 +72,7 @@ function updateClinicAssignment(data: SeedData, clinicId: string, assignedUser: 
       clinic.id === clinicId
         ? {
             ...clinic,
-            defaultCoderId: assignedUser.roles.includes("Coder") ? assignedUser.id : clinic.defaultCoderId,
-            defaultCdiId: assignedUser.roles.includes("CDI Specialist") ? assignedUser.id : clinic.defaultCdiId
+            defaultAssigneeId: assignedUser.id
           }
         : clinic
     )
@@ -153,14 +152,14 @@ export function openReview(data: SeedData, reviewId: string, user: User): SeedDa
   return addHistory(next, { reviewId, userId: user.id, event: "Lock acquired", detail: "Patient-level review opened and locked." });
 }
 
-export function findNextEligibleReview(data: SeedData, currentReviewId: string, user: User): PatientReview | undefined {
+export function findNextEligibleReview(data: SeedData, currentReviewId: string, user: User, excludeCurrent = false): PatientReview | undefined {
   const visibleReviews = getVisibleReviews(data, user);
   const currentIndex = visibleReviews.findIndex((review) => review.id === currentReviewId);
   const orderedReviews =
     currentIndex >= 0
       ? [...visibleReviews.slice(currentIndex + 1), ...visibleReviews.slice(0, currentIndex)]
       : visibleReviews;
-  return orderedReviews.find((review) => !review.lock && (review.status === "Available" || review.status === "Pended"));
+  return orderedReviews.find((review) => (!excludeCurrent || review.id !== currentReviewId) && !review.lock && (review.status === "Available" || review.status === "Pended"));
 }
 
 export function openNextEligibleReview(data: SeedData, currentReviewId: string, user: User): { data: SeedData; nextReviewId?: string } {
@@ -205,6 +204,17 @@ export function pendReview(data: SeedData, reviewId: string, user: User): SeedDa
   return addHistory(next, { reviewId, userId: user.id, event: "Review pended", detail: "Unfinished patient review was pended." });
 }
 
+export function pendAndOpenNextEligibleReview(data: SeedData, currentReviewId: string, user: User): { data: SeedData; nextReviewId?: string } {
+  const pendedData = pendReview(data, currentReviewId, user);
+  const currentReview = pendedData.reviews.find((review) => review.id === currentReviewId);
+  if (!currentReview || currentReview.lock) return { data };
+  const nextReview = findNextEligibleReview(pendedData, currentReviewId, user, true);
+  if (!nextReview) return { data: pendedData };
+  const openedData = openReview(pendedData, nextReview.id, user);
+  const openedReview = openedData.reviews.find((review) => review.id === nextReview.id);
+  return openedReview?.lock?.lockedByUserId === user.id ? { data: openedData, nextReviewId: nextReview.id } : { data: pendedData };
+}
+
 export function routeReview(data: SeedData, reviewId: string, user: User, queue: PatientReview["queue"]): SeedData {
   const review = data.reviews.find((item) => item.id === reviewId);
   if (!review || !canRouteWholeReview(review, user)) return data;
@@ -241,8 +251,7 @@ export function assignReview(
   if (!review || !assigned) return data;
   let next = updateReview(data, reviewId, (item) => ({
     ...item,
-    assignedCoderId: assigned.roles.includes("Coder") ? assigned.id : item.assignedCoderId,
-    assignedCdiId: assigned.roles.includes("CDI Specialist") ? assigned.id : item.assignedCdiId
+    assignedUserId: assigned.id
   }));
   if (mode === "Permanent reassignment") {
     next = updateClinicAssignment(next, review.clinicId, assigned);
@@ -260,8 +269,7 @@ export function takeCoverage(data: SeedData, reviewId: string, user: User): Seed
   if (!review || !canTakeCoverage(data, review, user)) return data;
   const next = updateReview(data, reviewId, (item) => ({
     ...item,
-    assignedCoderId: user.roles.includes("Coder") ? user.id : item.assignedCoderId,
-    assignedCdiId: user.roles.includes("CDI Specialist") ? user.id : item.assignedCdiId
+    assignedUserId: user.id
   }));
   return addHistory(next, { reviewId, userId: user.id, event: "Coverage assignment taken", detail: `${user.name} took temporary coverage.` });
 }
@@ -315,7 +323,7 @@ export function setDisposition(
     isPrototypeCurrentYear(review, condition, settings) &&
     (action === "Send to Prospective" || (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")))
   ) {
-    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, review.assignedCdiId);
+    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, review.assignedUserId);
   }
   if (condition && shouldCreateSchedulingOutreach(next, review, condition, action, reason, settings)) {
     next = createDownstreamTask(
@@ -325,7 +333,7 @@ export function setDisposition(
       "Scheduling Outreach",
       user,
       "No same-patient appointment is available in the prototype schedule for this current-year prospective opportunity.",
-      review.assignedCdiId
+      review.assignedUserId
     );
   }
   if (condition && action === "Disagree" && reason === "Other") {
@@ -581,7 +589,7 @@ export function completeAudit(data: SeedData, reviewId: string, user: User, outc
       ? {
           ...item,
           status: "Rework Required",
-          queue: item.assignedCoderId ? "Assigned Coder" : "Assigned CDI Specialist",
+          queue: "CDI/Coder Queue",
           assignedAuditorId: undefined,
           lock: undefined,
           auditReturn: {

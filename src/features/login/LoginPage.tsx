@@ -8,8 +8,7 @@ const roleTone: Record<Role, "neutral" | "good" | "warn" | "bad" | "info" | "pur
   Administrator: "purple",
   Manager: "info",
   Auditor: "warn",
-  Coder: "good",
-  "CDI Specialist": "neutral"
+  "CDI/Coder": "good"
 };
 
 export function LoginPage() {

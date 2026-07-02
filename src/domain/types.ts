@@ -1,4 +1,4 @@
-export type Role = "Administrator" | "Manager" | "Auditor" | "Coder" | "CDI Specialist";
+export type Role = "Administrator" | "Manager" | "Auditor" | "CDI/Coder";
 export type ReviewType = "Retrospective" | "Concurrent" | "Prospective";
 export type WorkflowStatus =
   | "Available"
@@ -10,12 +10,10 @@ export type WorkflowStatus =
   | "Under Audit"
   | "Audit Complete";
 export type QueueType =
-  | "Assigned Coder"
-  | "Assigned CDI Specialist"
+  | "CDI/Coder Queue"
   | "Auditor Queue"
   | "Manager Review Queue"
-  | "Prospective Review Queue"
-  | "Unassigned Team Queue";
+  | "Prospective Review Queue";
 export type Category = "validated" | "potentialDelete" | "potentialAddition" | "prospective";
 export type ProspectiveSubtype = "recapture" | "suspect";
 export type ConditionWorkflow = "codesOnClaim" | "codesNotOnClaim" | "prospective";
@@ -83,8 +81,7 @@ export interface Team {
 export interface Clinic {
   id: string;
   name: string;
-  defaultCoderId: string;
-  defaultCdiId: string;
+  defaultAssigneeId: string;
 }
 
 export interface Provider {
@@ -123,8 +120,7 @@ export interface PatientReview {
   providerId: string;
   status: WorkflowStatus;
   queue: QueueType;
-  assignedCoderId?: string;
-  assignedCdiId?: string;
+  assignedUserId: string;
   assignedAuditorId?: string;
   lock?: Lock;
   appointmentId?: string;

@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { seedData } from "../data/seed";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
-import { canAccessRoute } from "./auth";
+import { canAccessRoute, getVisibleReviews } from "./auth";
+import { normalizeSeedData } from "../state/AppState";
 import {
   assignReview,
   completeAudit,
@@ -13,12 +14,13 @@ import {
   openNextEligibleReview,
   openReview,
   overrideLock,
+  pendAndOpenNextEligibleReview,
+  pendReview,
   releaseReview,
   routeReview,
   setDisposition,
   shouldSampleReviewForAudit,
   startAudit,
-  takeCoverage,
   updateDownstreamTaskStatus
 } from "./workflows";
 import {
@@ -76,7 +78,24 @@ describe("routing and prototype authorization", () => {
     expect(canAccessRoute(user(data, "u-admin"), "admin")).toBe(true);
     expect(canAccessRoute(user(data, "u-manager-1"), "admin")).toBe(false);
     expect(canAccessRoute(user(data, "u-coder-1"), "manager")).toBe(false);
+    expect(canAccessRoute(user(data, "u-coder-1"), "stats")).toBe(true);
+    expect(canAccessRoute(user(data, "u-manager-1"), "stats")).toBe(false);
     expect(canAccessRoute(user(data, "u-auditor-1"), "audit")).toBe(true);
+  });
+
+  it("normalizes legacy persisted CDI and Coder role state", () => {
+    const legacy = cloneSeed() as SeedData & {
+      users: Array<SeedData["users"][number] & { primaryRole: string; roles: string[] }>;
+      reviews: Array<SeedData["reviews"][number] & { assignedCoderId?: string; assignedCdiId?: string; assignedUserId?: string }>;
+    };
+    legacy.users[5] = { ...legacy.users[5], primaryRole: "Coder", roles: ["Coder"] } as never;
+    legacy.users[10] = { ...legacy.users[10], primaryRole: "CDI Specialist", roles: ["CDI Specialist"] } as never;
+    legacy.reviews[0] = { ...legacy.reviews[0], assignedUserId: undefined as unknown as string, assignedCoderId: "u-coder-1", assignedCdiId: "u-cdi-1", queue: "Assigned Coder" as never } as never;
+
+    const normalized = normalizeSeedData(legacy);
+    expect(normalized.users[5]).toMatchObject({ primaryRole: "CDI/Coder", roles: ["CDI/Coder"] });
+    expect(normalized.users[10]).toMatchObject({ primaryRole: "CDI/Coder", roles: ["CDI/Coder"] });
+    expect(normalized.reviews[0]).toMatchObject({ assignedUserId: "u-coder-1", queue: "CDI/Coder Queue" });
   });
 });
 
@@ -121,7 +140,7 @@ describe("prototype workflow rules", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
     const review = next.reviews.find((item) => item.id === "rev-100")!;
-    expect(review.queue).toBe("Assigned Coder");
+    expect(review.queue).toBe("CDI/Coder Queue");
     expect(next.downstreamTasks).toEqual(
       expect.arrayContaining([expect.objectContaining({ conditionId: "cond-100-c", type: "Prospective CDI Review", queue: "Prospective Review Queue" })])
     );
@@ -151,10 +170,29 @@ describe("prototype workflow rules", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const result = openNextEligibleReview(data, "rev-100", user(data, "u-coder-1"));
 
-    expect(result.nextReviewId).toBe("rev-106");
+    expect(result.nextReviewId).toBe("rev-110");
     expect(result.data.reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
-    expect(result.data.reviews.find((item) => item.id === "rev-106")?.lock?.lockedByUserId).toBe("u-coder-1");
-    expect(result.data.reviews.find((item) => item.id === "rev-106")?.status).toBe("In Progress");
+    expect(result.data.reviews.find((item) => item.id === "rev-110")?.lock?.lockedByUserId).toBe("u-coder-1");
+    expect(result.data.reviews.find((item) => item.id === "rev-110")?.status).toBe("In Progress");
+  });
+
+  it("pends a chart while preserving assignment and releasing only the active edit lock", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const next = pendReview(data, "rev-100", user(data, "u-coder-1"));
+    const review = next.reviews.find((item) => item.id === "rev-100")!;
+    expect(review.status).toBe("Pended");
+    expect(review.assignedUserId).toBe("u-coder-1");
+    expect(review.lock).toBeUndefined();
+    expect(getVisibleReviews(next, user(next, "u-coder-2")).map((item) => item.id)).not.toContain("rev-100");
+  });
+
+  it("pends and opens the next assigned patient without reselecting the pended chart", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const result = pendAndOpenNextEligibleReview(data, "rev-100", user(data, "u-coder-1"));
+    expect(result.nextReviewId).toBe("rev-110");
+    expect(result.data.reviews.find((item) => item.id === "rev-100")).toMatchObject({ status: "Pended", assignedUserId: "u-coder-1" });
+    expect(result.data.reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
+    expect(result.data.reviews.find((item) => item.id === "rev-110")?.lock?.lockedByUserId).toBe("u-coder-1");
   });
 
   it("leaves state unchanged when no next eligible chart exists", () => {
@@ -508,8 +546,8 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const review = next.reviews.find((item) => item.id === "rev-105")!;
     const audit = next.audits.find((item) => item.reviewId === "rev-105")!;
     expect(review.status).toBe("Rework Required");
-    expect(review.queue).toBe("Assigned Coder");
-    expect(review.assignedCoderId).toBe("u-coder-2");
+    expect(review.queue).toBe("CDI/Coder Queue");
+    expect(review.assignedUserId).toBe("u-coder-2");
     expect(review.assignedAuditorId).toBeUndefined();
     expect(review.auditReturn?.comments).toBe("Fix MEAT support");
     expect(audit.status).toBe("Returned");
@@ -523,11 +561,11 @@ describe("RAF, audit, assignment, stats, and exports", () => {
 
   it("keeps coverage assignment separate from clinic defaults and records permanent reassignment", () => {
     const data = cloneSeed();
-    const coverage = takeCoverage(data, "rev-106", user(data, "u-coder-4"));
-    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedCoderId).toBe("u-coder-4");
-    expect(coverage.clinics.find((item) => item.id === "clinic-lake")?.defaultCoderId).toBe("u-coder-3");
+    const coverage = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Coverage", "Coverage day");
+    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-coder-4");
+    expect(coverage.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-3");
     const permanent = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Permanent reassignment", "Panel move");
-    expect(permanent.clinics.find((item) => item.id === "clinic-lake")?.defaultCoderId).toBe("u-coder-4");
+    expect(permanent.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-4");
     expect(permanent.history[0].detail).toContain("Panel move");
   });
 
@@ -554,10 +592,10 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     data = openReview(data, "rev-113", user(data, "u-coder-4"));
     data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
     const outreach = data.downstreamTasks.find((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")!;
-    expect(outreach).toMatchObject({ status: "Open", queue: "Scheduling Outreach Queue", assignedUserId: "u-cdi-4" });
+    expect(outreach).toMatchObject({ status: "Open", queue: "Scheduling Outreach Queue", assignedUserId: "u-coder-4" });
     expect(getOutreachStatusForReview(data, data.reviews.find((item) => item.id === "rev-113")!)).toMatchObject({ status: "Open" });
 
-    data = updateDownstreamTaskStatus(data, outreach.id, user(data, "u-cdi-4"), "In Progress");
+    data = updateDownstreamTaskStatus(data, outreach.id, user(data, "u-coder-4"), "In Progress");
     expect(data.downstreamTasks.find((task) => task.id === outreach.id)?.status).toBe("In Progress");
     expect(data.history[0]).toMatchObject({ event: "Downstream task updated", conditionId: "cond-113-a" });
   });
@@ -622,3 +660,4 @@ describe("prototype decision support", () => {
     expect(recommendation).toBeUndefined();
   });
 });
+

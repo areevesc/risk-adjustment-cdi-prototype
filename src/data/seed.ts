@@ -25,17 +25,17 @@ export const users: User[] = [
   { id: "u-manager-2", name: "Samir Patel", primaryRole: "Manager", roles: ["Manager"], teamId: "t-south", defaultClinicIds: ["clinic-lake", "clinic-canyon"] },
   { id: "u-auditor-1", name: "Tessa Morgan", primaryRole: "Auditor", roles: ["Auditor"], teamId: "t-audit", defaultClinicIds: [] },
   { id: "u-auditor-2", name: "Leo Vargas", primaryRole: "Auditor", roles: ["Auditor"], teamId: "t-audit", defaultClinicIds: [] },
-  { id: "u-coder-1", name: "Nina Brooks", primaryRole: "Coder", roles: ["Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
-  { id: "u-coder-2", name: "Evan Hale", primaryRole: "Coder", roles: ["Coder"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
-  { id: "u-coder-3", name: "Grace Imani", primaryRole: "Coder", roles: ["Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
-  { id: "u-coder-4", name: "Owen Reed", primaryRole: "Coder", roles: ["Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
-  { id: "u-coder-5", name: "Priya Shah", primaryRole: "Coder", roles: ["Coder", "CDI Specialist"], teamId: "t-north", defaultClinicIds: ["clinic-river", "clinic-oak"] },
-  { id: "u-cdi-1", name: "Clara Wood", primaryRole: "CDI Specialist", roles: ["CDI Specialist"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
-  { id: "u-cdi-2", name: "Hector Ruiz", primaryRole: "CDI Specialist", roles: ["CDI Specialist"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
-  { id: "u-cdi-3", name: "Amina Diallo", primaryRole: "CDI Specialist", roles: ["CDI Specialist"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
-  { id: "u-cdi-4", name: "Noah Kim", primaryRole: "CDI Specialist", roles: ["CDI Specialist"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
-  { id: "u-cdi-5", name: "Iris Stone", primaryRole: "CDI Specialist", roles: ["CDI Specialist", "Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake", "clinic-canyon"] },
-  { id: "u-coder-6", name: "Marcus Bell", primaryRole: "Coder", roles: ["Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] }
+  { id: "u-coder-1", name: "Nina Brooks", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
+  { id: "u-coder-2", name: "Evan Hale", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
+  { id: "u-coder-3", name: "Grace Imani", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
+  { id: "u-coder-4", name: "Owen Reed", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
+  { id: "u-coder-5", name: "Priya Shah", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river", "clinic-oak"] },
+  { id: "u-cdi-1", name: "Clara Wood", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
+  { id: "u-cdi-2", name: "Hector Ruiz", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
+  { id: "u-cdi-3", name: "Amina Diallo", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
+  { id: "u-cdi-4", name: "Noah Kim", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
+  { id: "u-cdi-5", name: "Iris Stone", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake", "clinic-canyon"] },
+  { id: "u-coder-6", name: "Marcus Bell", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] }
 ];
 
 export const teams: Team[] = [
@@ -46,10 +46,10 @@ export const teams: Team[] = [
 ];
 
 export const clinics: Clinic[] = [
-  { id: "clinic-river", name: "Riverbend Primary Care", defaultCoderId: "u-coder-1", defaultCdiId: "u-cdi-1" },
-  { id: "clinic-oak", name: "Oak Valley Internal Medicine", defaultCoderId: "u-coder-2", defaultCdiId: "u-cdi-2" },
-  { id: "clinic-lake", name: "Lakeview Senior Health", defaultCoderId: "u-coder-3", defaultCdiId: "u-cdi-3" },
-  { id: "clinic-canyon", name: "Canyon Family Clinic", defaultCoderId: "u-coder-4", defaultCdiId: "u-cdi-4" }
+  { id: "clinic-river", name: "Riverbend Primary Care", defaultAssigneeId: "u-coder-1" },
+  { id: "clinic-oak", name: "Oak Valley Internal Medicine", defaultAssigneeId: "u-coder-2" },
+  { id: "clinic-lake", name: "Lakeview Senior Health", defaultAssigneeId: "u-coder-3" },
+  { id: "clinic-canyon", name: "Canyon Family Clinic", defaultAssigneeId: "u-coder-4" }
 ];
 
 export const providers: Provider[] = [
@@ -111,9 +111,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-river",
     providerId: "prov-ana",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-1",
-    assignedCdiId: "u-cdi-1",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-1",
     appointmentId: "appt-100",
     conditionIds: ["cond-100-a", "cond-100-b", "cond-100-c", "cond-100-d", "cond-100-e", "cond-100-f"]
   },
@@ -126,8 +125,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-lane",
     status: "In Progress",
     queue: "Prospective Review Queue",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    assignedUserId: "u-coder-2",
     lock: { lockedByUserId: "u-cdi-2", lockedAt: "2026-06-24T08:20:00.000Z" },
     appointmentId: "appt-101",
     conditionIds: ["cond-101-a", "cond-101-b", "cond-101-c"]
@@ -140,9 +138,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-lake",
     providerId: "prov-singh",
     status: "Pended",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-3",
-    assignedCdiId: "u-cdi-3",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-3",
     appointmentId: "appt-102",
     conditionIds: ["cond-102-a", "cond-102-b"]
   },
@@ -155,8 +152,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-hill",
     status: "Awaiting Review",
     queue: "Manager Review Queue",
-    assignedCoderId: "u-coder-4",
-    assignedCdiId: "u-cdi-4",
+    assignedUserId: "u-coder-4",
     conditionIds: ["cond-103-a", "cond-103-b"]
   },
   {
@@ -167,9 +163,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-river",
     providerId: "prov-kline",
     status: "Completed",
-    queue: "Assigned CDI Specialist",
-    assignedCoderId: "u-coder-5",
-    assignedCdiId: "u-cdi-1",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-5",
     appointmentId: "appt-104",
     conditionIds: ["cond-104-a", "cond-104-b"]
   },
@@ -182,8 +177,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-lane",
     status: "Under Audit",
     queue: "Auditor Queue",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    assignedUserId: "u-coder-2",
     assignedAuditorId: "u-auditor-1",
     conditionIds: ["cond-105-a", "cond-105-b"]
   },
@@ -195,8 +189,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-lake",
     providerId: "prov-singh",
     status: "Available",
-    queue: "Unassigned Team Queue",
-    assignedCdiId: "u-cdi-3",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-cdi-3",
     appointmentId: "appt-106",
     conditionIds: ["cond-106-a", "cond-106-b"]
   },
@@ -209,8 +203,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-hill",
     status: "Available",
     queue: "Prospective Review Queue",
-    assignedCoderId: "u-coder-4",
-    assignedCdiId: "u-cdi-4",
+    assignedUserId: "u-coder-4",
     conditionIds: ["cond-107-a", "cond-107-b", "cond-107-c"]
   },
   {
@@ -221,9 +214,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-river",
     providerId: "prov-ana",
     status: "Completed",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-6",
-    assignedCdiId: "u-cdi-1",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-6",
     appointmentId: "appt-108",
     conditionIds: ["cond-108-a", "cond-108-b", "cond-108-c"]
   },
@@ -236,8 +228,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-lane",
     status: "Audit Complete",
     queue: "Auditor Queue",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    assignedUserId: "u-coder-2",
     assignedAuditorId: "u-auditor-2",
     conditionIds: ["cond-109-a", "cond-109-b"]
   },
@@ -249,9 +240,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-river",
     providerId: "prov-ana",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-1",
-    assignedCdiId: "u-cdi-1",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-1",
     appointmentId: "appt-110",
     conditionIds: ["cond-110-a", "cond-110-b", "cond-110-c", "cond-110-d"]
   },
@@ -263,9 +253,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-oak",
     providerId: "prov-lane",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-2",
     appointmentId: "appt-111",
     conditionIds: ["cond-111-a"]
   },
@@ -277,9 +266,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-oak",
     providerId: "prov-lane",
     status: "Completed",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-2",
     appointmentId: "appt-111",
     conditionIds: ["cond-111-b"]
   },
@@ -291,9 +279,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-lake",
     providerId: "prov-singh",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-3",
-    assignedCdiId: "u-cdi-3",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-3",
     conditionIds: ["cond-112-a"]
   },
   {
@@ -305,8 +292,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-hill",
     status: "Available",
     queue: "Prospective Review Queue",
-    assignedCoderId: "u-coder-4",
-    assignedCdiId: "u-cdi-4",
+    assignedUserId: "u-coder-4",
     appointmentId: "appt-113",
     conditionIds: ["cond-113-a"]
   },
@@ -319,8 +305,7 @@ export const reviews: PatientReview[] = [
     providerId: "prov-ana",
     status: "Available",
     queue: "Prospective Review Queue",
-    assignedCoderId: "u-coder-1",
-    assignedCdiId: "u-cdi-1",
+    assignedUserId: "u-coder-1",
     appointmentId: "appt-114",
     conditionIds: ["cond-114-a"]
   },
@@ -332,9 +317,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-oak",
     providerId: "prov-lane",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-2",
-    assignedCdiId: "u-cdi-2",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-2",
     appointmentId: "appt-115",
     conditionIds: ["cond-115-a"]
   },
@@ -346,9 +330,8 @@ export const reviews: PatientReview[] = [
     clinicId: "clinic-lake",
     providerId: "prov-singh",
     status: "Available",
-    queue: "Assigned Coder",
-    assignedCoderId: "u-coder-3",
-    assignedCdiId: "u-cdi-3",
+    queue: "CDI/Coder Queue",
+    assignedUserId: "u-coder-3",
     appointmentId: "appt-116",
     conditionIds: ["cond-116-a", "cond-116-b"]
   }
@@ -1433,3 +1416,4 @@ export const seedData: SeedData = {
   history,
   exports: exportsSeed
 };
+

@@ -95,7 +95,7 @@ export function ReviewPage() {
   const lockOwner = activeReview.lock ? maps.users.get(activeReview.lock.lockedByUserId)?.name : undefined;
   const canRelease = canReleaseReviewLock(activeReview, currentUser);
   const canUseProspectiveActions = isPrototypeCurrentYear(activeReview, settings);
-  const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while locked by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
+  const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while being edited by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
 
   function jumpToEvidence(evidence: EvidencePassage) {
     setSelectedEvidenceId(evidence.id);
@@ -117,6 +117,20 @@ export function ReviewPage() {
   function exitAndRelease() {
     actions.releaseReview(activeReview.id);
     navigate("/queue");
+  }
+
+  function pendAndReturnToQueue() {
+    actions.pendReview(activeReview.id);
+    navigate("/queue");
+  }
+
+  function pendAndOpenNextPatient() {
+    const nextReviewId = actions.pendAndOpenNextEligibleReview(activeReview.id);
+    setSelectedDocumentId(undefined);
+    setSelectedEvidenceId(undefined);
+    setCompletionWarnings([]);
+    setNextPatientMessage("");
+    navigate(nextReviewId ? `/review/${nextReviewId}` : "/queue");
   }
 
   function openNextPatientChart() {
@@ -144,9 +158,9 @@ export function ReviewPage() {
         actions={
           <div className="header-actions patient-header-actions">
             {review.lock ? (
-              <StatusChip tone={editable ? "info" : "warn"}>Locked by {lockOwner}</StatusChip>
+              <StatusChip tone={editable ? "info" : "warn"}>Being edited by {lockOwner}</StatusChip>
             ) : (
-              <StatusChip>Unlocked</StatusChip>
+              <StatusChip>No active editor</StatusChip>
             )}
             {!review.lock ? (
               <Button variant="secondary" onClick={() => actions.openReview(review.id)}>
@@ -168,13 +182,14 @@ export function ReviewPage() {
               <Play size={15} />
               Next Patient Chart
             </Button>
-            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.pendReview(review.id)}>Pend</Button>
+            <Button disabled={!editable} title={readOnlyTitle} onClick={pendAndReturnToQueue}>Pend & Return to Queue</Button>
+            <Button disabled={!editable} title={readOnlyTitle} onClick={pendAndOpenNextPatient}>Pend & Next Patient</Button>
             <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
             <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
             <Button disabled={!editable} title={readOnlyTitle} variant="primary" onClick={complete}>
               Complete review
             </Button>
-            <Button disabled={!canRelease} title={!canRelease ? readOnlyTitle : undefined} variant="ghost" onClick={exitAndRelease}>Exit/release</Button>
+            <Button disabled={!canRelease} title={!canRelease ? readOnlyTitle : undefined} variant="ghost" onClick={exitAndRelease}>Exit & Release</Button>
           </div>
         }
       >
@@ -192,7 +207,9 @@ export function ReviewPage() {
               <>
                 <span>{clinic?.name}</span>
                 <span>{provider?.name}</span>
-                <span>Assigned: {[review.assignedCoderId, review.assignedCdiId].map((id) => (id ? maps.users.get(id)?.name : undefined)).filter(Boolean).join(" / ")}</span>
+                <span>Assigned to: {maps.users.get(review.assignedUserId)?.name ?? "Unassigned"}</span>
+                <span>Workflow status: {review.status}</span>
+                <span>Editing status: {review.lock ? `Being edited by ${lockOwner}` : "No active editor"}</span>
               </>
             ) : null}
           </div>
@@ -212,7 +229,7 @@ export function ReviewPage() {
         {!editable ? (
           <div className="read-only-banner">
             <AlertTriangle size={16} />
-            Read-only view. {review.lock ? `Current lock owner: ${lockOwner}.` : "Open the chart to acquire an edit lock."}
+            Read-only view. {review.lock ? `Current editor: ${lockOwner}.` : "Open the chart to acquire an edit lock."}
           </div>
         ) : null}
         <CompactReviewSummary

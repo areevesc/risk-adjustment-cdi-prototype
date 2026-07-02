@@ -5,7 +5,6 @@ import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
-  getPersonalStats,
   getPresentedOpportunitySummary,
   getProspectiveCounts,
   getReviewScenarioTags,
@@ -15,7 +14,7 @@ import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
 import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens } from "../../domain/tokens";
-import { canTakeCoverage, getVisibleReviews } from "../../domain/auth";
+import { canAssignReviews, canTakeCoverage, getVisibleReviews } from "../../domain/auth";
 
 interface QueueRow {
   review: PatientReview;
@@ -51,6 +50,7 @@ export function QueuePage() {
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [sourceExampleFilter, setSourceExampleFilter] = useState("All");
   const [noVisitOnly, setNoVisitOnly] = useState(false);
+  const canFilterByTeamMember = canAssignReviews(currentUser);
 
   const maps = useMemo(
     () => ({
@@ -67,7 +67,7 @@ export function QueuePage() {
   const rows = useMemo<QueueRow[]>(() => {
     return getVisibleReviews(data, currentUser).map((review) => {
       const patient = maps.patients.get(review.patientId)!;
-      const assignedUsers = [review.assignedCoderId, review.assignedCdiId, review.assignedAuditorId]
+      const assignedUsers = [review.assignedUserId, review.assignedAuditorId]
         .map((id) => (id ? maps.users.get(id)?.name : undefined))
         .filter(Boolean)
         .join(" / ");
@@ -97,8 +97,10 @@ export function QueuePage() {
   }, [currentUser, data, maps]);
 
   const sourceExampleOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.sourceExamples))).sort((a, b) => a.localeCompare(b)), [rows]);
+  const teamMemberOptions = useMemo(() => data.users.filter((user) => user.roles.includes("CDI/Coder")), [data.users]);
+  const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status))), [rows]);
 
-  const filteredRows = rows.filter((row) => {
+  const filteredRows = useMemo(() => rows.filter((row) => {
     const search = query.trim().toLowerCase();
     const matchesSearch =
       !search ||
@@ -106,23 +108,20 @@ export function QueuePage() {
     const matchesStatus = statusFilter === "All" || row.status === statusFilter;
     const matchesType = reviewTypeFilter === "All" || row.type === reviewTypeFilter;
     const matchesMember =
+      !canFilterByTeamMember ||
       teamMemberFilter === "All" ||
-      row.review.assignedCoderId === teamMemberFilter ||
-      row.review.assignedCdiId === teamMemberFilter ||
-      row.review.assignedAuditorId === teamMemberFilter;
+      row.review.assignedUserId === teamMemberFilter;
     const matchesCategory = categoryFilter === "All" || row.categories[categoryFilter as keyof typeof row.categories]?.count > 0;
     const matchesSourceExample = sourceExampleFilter === "All" || row.sourceExamples.includes(sourceExampleFilter);
     const matchesVisit = !noVisitOnly || row.noVisit;
     return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesSourceExample && matchesVisit;
-  });
-
-  const personalStats = getPersonalStats(data, currentUser);
+  }), [canFilterByTeamMember, categoryFilter, noVisitOnly, query, reviewTypeFilter, rows, sourceExampleFilter, statusFilter, teamMemberFilter]);
 
   function clearFilters() {
     setQuery("");
     setStatusFilter("All");
     setReviewTypeFilter("All");
-    setTeamMemberFilter("All");
+    if (canFilterByTeamMember) setTeamMemberFilter("All");
     setCategoryFilter("All");
     setSourceExampleFilter("All");
     setNoVisitOnly(false);
@@ -168,7 +167,7 @@ export function QueuePage() {
     }),
     columnHelper.accessor("queue", { header: "Queue" }),
     columnHelper.accessor("lockedBy", {
-      header: "Lock",
+      header: "Editing",
       cell: (info) =>
         info.getValue() ? (
           <StatusChip tone="warn">
@@ -176,7 +175,7 @@ export function QueuePage() {
             {info.getValue()}
           </StatusChip>
         ) : (
-          <StatusChip>Unlocked</StatusChip>
+          <StatusChip>No active editor</StatusChip>
         )
     }),
     columnHelper.display({
@@ -240,7 +239,7 @@ export function QueuePage() {
           </label>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Workflow status">
             <option>All</option>
-            {Array.from(new Set(data.reviews.map((review) => review.status))).map((status) => (
+            {statusOptions.map((status) => (
               <option key={status}>{status}</option>
             ))}
           </select>
@@ -250,14 +249,16 @@ export function QueuePage() {
             <option>Concurrent</option>
             <option>Prospective</option>
           </select>
-          <select value={teamMemberFilter} onChange={(event) => setTeamMemberFilter(event.target.value)} aria-label="Team member">
-            <option value="All">All team members</option>
-            {data.users.map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.name}
-              </option>
-            ))}
-          </select>
+          {canFilterByTeamMember ? (
+            <select value={teamMemberFilter} onChange={(event) => setTeamMemberFilter(event.target.value)} aria-label="Team member">
+              <option value="All">All team members</option>
+              {teamMemberOptions.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Category">
             <option value="All">All categories</option>
             <option value="validated">Validated</option>
@@ -329,21 +330,6 @@ export function QueuePage() {
           ))}
         </div>
       </Panel>
-      <Panel title="Personal Statistics">
-        <div className="stat-grid">
-          <Stat label="Assigned Reviews" value={personalStats.assignedReviews} />
-          <Stat label="Completed" value={personalStats.completedReviews} />
-          <Stat label="Pended" value={personalStats.pendedReviews} />
-          <Stat label="Validations" value={personalStats.validations} />
-          <Stat label="Deletions" value={personalStats.deletions} />
-          <Stat label="Additions" value={personalStats.additions} />
-          <Stat label="Prospective Decisions" value={personalStats.prospectiveDecisions} />
-          <Stat label="Recapture Decisions" value={personalStats.recaptureDecisions} />
-          <Stat label="Suspect Decisions" value={personalStats.suspectDecisions} />
-          <Stat label="Recommendation Agreement" value={personalStats.recommendationAgreement} suffix="%" />
-          <Stat label="Audit Agreement" value={personalStats.auditAgreement} suffix="%" />
-        </div>
-      </Panel>
     </div>
   );
 }
@@ -404,8 +390,8 @@ function MobileQueueCard({
           <dd>{row.queue}</dd>
         </div>
         <div>
-          <dt>Lock</dt>
-          <dd>{row.lockedBy ? `Locked by ${row.lockedBy}` : "Unlocked"}</dd>
+          <dt>Editing</dt>
+          <dd>{row.lockedBy ? `Being edited by ${row.lockedBy}` : "No active editor"}</dd>
         </div>
       </dl>
       <div className="category-strip queue-card-indicators" aria-label="Category indicators">
@@ -440,18 +426,6 @@ function ScenarioTagList({ tags, limit }: { tags: string[]; limit?: number }) {
         <span key={tag}>{tag}</span>
       ))}
       {remaining > 0 ? <span>+{remaining}</span> : null}
-    </div>
-  );
-}
-
-function Stat({ label, value, suffix = "" }: { label: string; value: number; suffix?: string }) {
-  return (
-    <div className="stat">
-      <span>{label}</span>
-      <strong>
-        {value}
-        {suffix}
-      </strong>
     </div>
   );
 }
