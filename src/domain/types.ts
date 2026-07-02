@@ -122,6 +122,12 @@ export interface PatientReview {
   queue: QueueType;
   assignedUserId: string;
   assignedAuditorId?: string;
+  coverage?: {
+    originalAssignedUserId: string;
+    coveringUserId: string;
+    startedAt: string;
+    initiatedByUserId: string;
+  };
   lock?: Lock;
   appointmentId?: string;
   conditionIds: string[];

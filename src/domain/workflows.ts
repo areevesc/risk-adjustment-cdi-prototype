@@ -153,7 +153,7 @@ export function openReview(data: SeedData, reviewId: string, user: User): SeedDa
 }
 
 export function findNextEligibleReview(data: SeedData, currentReviewId: string, user: User, excludeCurrent = false): PatientReview | undefined {
-  const visibleReviews = getVisibleReviews(data, user);
+  const visibleReviews = getVisibleReviews(data, user).filter((review) => canOpenReview(data, review, user));
   const currentIndex = visibleReviews.findIndex((review) => review.id === currentReviewId);
   const orderedReviews =
     currentIndex >= 0
@@ -249,10 +249,22 @@ export function assignReview(
   const review = data.reviews.find((item) => item.id === reviewId);
   const assigned = data.users.find((item) => item.id === assignedUserId);
   if (!review || !assigned) return data;
-  let next = updateReview(data, reviewId, (item) => ({
-    ...item,
-    assignedUserId: assigned.id
-  }));
+  let next =
+    mode === "Coverage"
+      ? updateReview(data, reviewId, (item) => ({
+          ...item,
+          coverage: {
+            originalAssignedUserId: item.coverage?.originalAssignedUserId ?? item.assignedUserId,
+            coveringUserId: assigned.id,
+            startedAt: stamp(),
+            initiatedByUserId: user.id
+          }
+        }))
+      : updateReview(data, reviewId, (item) => ({
+          ...item,
+          assignedUserId: assigned.id,
+          coverage: undefined
+        }));
   if (mode === "Permanent reassignment") {
     next = updateClinicAssignment(next, review.clinicId, assigned);
   }
@@ -269,9 +281,17 @@ export function takeCoverage(data: SeedData, reviewId: string, user: User): Seed
   if (!review || !canTakeCoverage(data, review, user)) return data;
   const next = updateReview(data, reviewId, (item) => ({
     ...item,
-    assignedUserId: user.id
+    status: item.status === "Available" || item.status === "Pended" || item.status === "Rework Required" ? "In Progress" : item.status,
+    coverage: {
+      originalAssignedUserId: item.coverage?.originalAssignedUserId ?? item.assignedUserId,
+      coveringUserId: user.id,
+      startedAt: stamp(),
+      initiatedByUserId: user.id
+    },
+    lock: { lockedByUserId: user.id, lockedAt: stamp() }
   }));
-  return addHistory(next, { reviewId, userId: user.id, event: "Coverage assignment taken", detail: `${user.name} took temporary coverage.` });
+  const originalAssignee = data.users.find((item) => item.id === review.assignedUserId)?.name ?? "original CDI/Coder";
+  return addHistory(next, { reviewId, userId: user.id, event: "Coverage assignment taken", detail: `${user.name} took temporary coverage from ${originalAssignee}.` });
 }
 
 export function setDisposition(
@@ -292,6 +312,11 @@ export function setDisposition(
   const ruleResult = getRuleResult(conditionBefore, review, data, settings);
   if (conditionBefore.ruleOutcome || ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
+  const hasDeleteSafetySupport =
+    action === "Delete" &&
+    conditionBefore.workflow === "codesOnClaim" &&
+    ruleResult.warnings.some((warning) => warning.severity === "blocking" && warning.evidenceIds?.length);
+  if (hasDeleteSafetySupport && (!hasAnyRole(user, ["Administrator", "Manager"]) || !comments?.trim())) return data;
   const decidedAt = stamp();
   let next = updateCondition(data, conditionId, (condition) => ({
     ...condition,

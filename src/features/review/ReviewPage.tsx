@@ -24,7 +24,7 @@ import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, Re
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
-import { canOverrideLock, canReleaseReviewLock, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
+import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute, hasAnyRole } from "../../domain/auth";
 
 const disagreeReasons: DisagreeReason[] = ["Not Enough MEAT", "Condition Resolved", "Conflicting Evidence", "Other"];
 const documentationIssues: DocumentationIssue[] = [
@@ -49,6 +49,8 @@ export function ReviewPage() {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [completionWarnings, setCompletionWarnings] = useState<string[]>([]);
   const [nextPatientMessage, setNextPatientMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [deleteSafetyCondition, setDeleteSafetyCondition] = useState<Condition | null>(null);
 
   const maps = useMemo(
     () => ({
@@ -114,41 +116,47 @@ export function ReviewPage() {
     jumpToEvidence(all[nextIndex]);
   }
 
-  function exitAndRelease() {
-    actions.releaseReview(activeReview.id);
-    navigate("/queue");
-  }
-
-  function pendAndReturnToQueue() {
-    actions.pendReview(activeReview.id);
-    navigate("/queue");
-  }
-
-  function pendAndOpenNextPatient() {
-    const nextReviewId = actions.pendAndOpenNextEligibleReview(activeReview.id);
+  function clearReviewLocalState() {
     setSelectedDocumentId(undefined);
     setSelectedEvidenceId(undefined);
     setCompletionWarnings([]);
     setNextPatientMessage("");
-    navigate(nextReviewId ? `/review/${nextReviewId}` : "/queue");
+  }
+
+  function returnToQueue() {
+    if (canRelease) actions.releaseReview(activeReview.id);
+    navigate("/queue");
+  }
+
+  function pend() {
+    actions.pendReview(activeReview.id);
+    setActionMessage("Chart pended. The edit lock was released; Return to Queue and Next Patient remain available.");
+  }
+
+  function route(queue: "Auditor Queue" | "Manager Review Queue") {
+    actions.routeReview(activeReview.id, queue);
+    setActionMessage(queue === "Auditor Queue" ? "Chart sent to the auditor queue. The CDI/Coder edit lock was released." : "Chart sent for manager review. The edit lock was released.");
   }
 
   function openNextPatientChart() {
+    if (editable && activeReview.lock) {
+      const confirmed = window.confirm("This chart is still actively being edited. Moving to the next patient will release your current edit lock. Continue?");
+      if (!confirmed) return;
+    }
     const nextReviewId = actions.openNextEligibleReview(activeReview.id);
     if (!nextReviewId) {
-      setNextPatientMessage("No available or pended next patient chart is currently eligible for your role.");
+      window.alert("No available or pended next patient chart is currently eligible for your role. Returning to the queue.");
+      navigate("/queue");
       return;
     }
-    setSelectedDocumentId(undefined);
-    setSelectedEvidenceId(undefined);
-    setCompletionWarnings([]);
-    setNextPatientMessage("");
+    clearReviewLocalState();
     navigate(`/review/${nextReviewId}`);
   }
 
   function complete() {
     const unresolved = actions.completeReview(activeReview.id);
     setCompletionWarnings(unresolved);
+    if (!unresolved.length) setActionMessage("Review completed. The edit lock was released; Return to Queue and Next Patient remain available.");
   }
 
   return (
@@ -162,10 +170,16 @@ export function ReviewPage() {
             ) : (
               <StatusChip>No active editor</StatusChip>
             )}
-            {!review.lock ? (
+            {!review.lock && canOpenReview(data, review, currentUser) ? (
               <Button variant="secondary" onClick={() => actions.openReview(review.id)}>
                 <LockKeyhole size={15} />
                 Open chart
+              </Button>
+            ) : null}
+            {!review.lock && canTakeCoverage(data, review, currentUser) ? (
+              <Button variant="secondary" onClick={() => actions.takeCoverage(review.id)}>
+                <LockKeyhole size={15} />
+                Take Coverage
               </Button>
             ) : null}
             {review.lock && !editable && canOverrideLock(review, currentUser, "override") ? (
@@ -178,18 +192,19 @@ export function ReviewPage() {
               {summaryExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
               Summary
             </Button>
-            <Button variant="secondary" onClick={openNextPatientChart}>
-              <Play size={15} />
-              Next Patient Chart
-            </Button>
-            <Button disabled={!editable} title={readOnlyTitle} onClick={pendAndReturnToQueue}>Pend & Return to Queue</Button>
-            <Button disabled={!editable} title={readOnlyTitle} onClick={pendAndOpenNextPatient}>Pend & Next Patient</Button>
-            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Auditor Queue")}>Send to auditor</Button>
-            <Button disabled={!editable} title={readOnlyTitle} onClick={() => actions.routeReview(review.id, "Manager Review Queue")}>Manager review</Button>
-            <Button disabled={!editable} title={readOnlyTitle} variant="primary" onClick={complete}>
-              Complete review
-            </Button>
-            <Button disabled={!canRelease} title={!canRelease ? readOnlyTitle : undefined} variant="ghost" onClick={exitAndRelease}>Exit & Release</Button>
+            <div className="review-action-group" aria-label="Workflow actions">
+              <Button disabled={!editable} title={readOnlyTitle} onClick={pend}>Pend</Button>
+              <Button disabled={!editable} title={readOnlyTitle} onClick={() => route("Auditor Queue")}>Send to Auditor</Button>
+              <Button disabled={!editable} title={readOnlyTitle} onClick={() => route("Manager Review Queue")}>Manager Review</Button>
+              <Button disabled={!editable} title={readOnlyTitle} variant="primary" onClick={complete}>Complete Review</Button>
+            </div>
+            <div className="review-action-group" aria-label="Navigation actions">
+              <Button variant="ghost" onClick={returnToQueue}>Return to Queue</Button>
+              <Button variant="secondary" onClick={openNextPatientChart}>
+                <Play size={15} />
+                Next Patient
+              </Button>
+            </div>
           </div>
         }
       >
@@ -224,6 +239,12 @@ export function ReviewPage() {
           <div className="warning-banner rework-banner">
             <AlertTriangle size={18} />
             {nextPatientMessage}
+          </div>
+        ) : null}
+        {actionMessage ? (
+          <div className="success-banner">
+            <Check size={16} />
+            {actionMessage}
           </div>
         ) : null}
         {!editable ? (
@@ -351,6 +372,7 @@ export function ReviewPage() {
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
+              onDeleteSafety={setDeleteSafetyCondition}
             />
             <ConditionGroup
               title="Codes Not On Claim - Potential Additions"
@@ -364,6 +386,7 @@ export function ReviewPage() {
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
+              onDeleteSafety={setDeleteSafetyCondition}
             />
             <ConditionGroup
               title="CDI Prospective Review"
@@ -377,6 +400,7 @@ export function ReviewPage() {
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
+              onDeleteSafety={setDeleteSafetyCondition}
             />
           </div>
         </Panel>
@@ -401,6 +425,7 @@ export function ReviewPage() {
       {disagreeCondition ? <DisagreeModal condition={disagreeCondition} reviewId={review.id} onClose={() => setDisagreeCondition(null)} /> : null}
       {changeCondition ? <ChangeModal condition={changeCondition} reviewId={review.id} onClose={() => setChangeCondition(null)} /> : null}
       {flagCondition ? <FlagModal condition={flagCondition} reviewId={review.id} onClose={() => setFlagCondition(null)} /> : null}
+      {deleteSafetyCondition ? <DeleteSafetyModal condition={deleteSafetyCondition} reviewId={review.id} onClose={() => setDeleteSafetyCondition(null)} jumpToEvidence={jumpToEvidence} /> : null}
       {overrideRequested ? <OverrideLockModal reviewId={review.id} onClose={() => setOverrideRequested(false)} /> : null}
     </div>
   );
@@ -546,7 +571,8 @@ function ConditionGroup({
   jumpToEvidence,
   onDisagree,
   onChange,
-  onFlag
+  onFlag,
+  onDeleteSafety
 }: {
   title: string;
   conditions: Condition[];
@@ -559,6 +585,7 @@ function ConditionGroup({
   onDisagree: (condition: Condition) => void;
   onChange: (condition: Condition) => void;
   onFlag: (condition: Condition) => void;
+  onDeleteSafety: (condition: Condition) => void;
 }) {
   if (!conditions.length) return null;
   return (
@@ -577,6 +604,7 @@ function ConditionGroup({
           onDisagree={onDisagree}
           onChange={onChange}
           onFlag={onFlag}
+          onDeleteSafety={onDeleteSafety}
         />
       ))}
     </section>
@@ -593,7 +621,8 @@ function ConditionCard({
   jumpToEvidence,
   onDisagree,
   onChange,
-  onFlag
+  onFlag,
+  onDeleteSafety
 }: {
   condition: Condition;
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
@@ -605,6 +634,7 @@ function ConditionCard({
   onDisagree: (condition: Condition) => void;
   onChange: (condition: Condition) => void;
   onFlag: (condition: Condition) => void;
+  onDeleteSafety: (condition: Condition) => void;
 }) {
   const { data, settings, actions } = useAppState();
   const evidence = getEvidenceForCondition(data, condition);
@@ -617,6 +647,10 @@ function ConditionCard({
   const showActionControls = !condition.ruleOutcome && (!condition.disposition || review.status === "Rework Required");
 
   function act(action: RecommendationAction) {
+    if (action === "Delete" && hasDeleteSafetyWarning(ruleResult)) {
+      onDeleteSafety(condition);
+      return;
+    }
     const agreed = recommendation ? recommendation.action === action : undefined;
     actions.setDisposition(review.id, condition.id, action, agreed);
   }
@@ -736,6 +770,10 @@ function ConditionCard({
       ) : null}
     </article>
   );
+}
+
+function hasDeleteSafetyWarning(ruleResult: RuleResult) {
+  return ruleResult.warnings.some((warning) => warning.severity === "blocking" && warning.evidenceIds?.length);
 }
 
 function RuleMessages({ ruleResult, jumpToEvidence }: { ruleResult: RuleResult; jumpToEvidence: (evidence: EvidencePassage) => void }) {
@@ -884,6 +922,90 @@ function FlagModal({ condition, reviewId, onClose }: { condition: Condition; rev
         >
           Route issue
         </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteSafetyModal({
+  condition,
+  reviewId,
+  onClose,
+  jumpToEvidence
+}: {
+  condition: Condition;
+  reviewId: string;
+  onClose: () => void;
+  jumpToEvidence: (evidence: EvidencePassage) => void;
+}) {
+  const { data, currentUser, settings, actions } = useAppState();
+  const review = data.reviews.find((item) => item.id === reviewId)!;
+  const ruleResult = getRuleResult(condition, review, data, settings);
+  const evidenceMap = byId(data.evidence);
+  const documentMap = byId(data.documents);
+  const conditionMap = byId(data.conditions);
+  const supportIds = Array.from(new Set(ruleResult.warnings.filter((warning) => warning.severity === "blocking").flatMap((warning) => warning.evidenceIds ?? [])));
+  const supportEvidence = supportIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
+  const canOverrideDelete = hasAnyRole(currentUser, ["Administrator", "Manager"]);
+  const recommendation = getRecommendation(condition, review, data, settings);
+  const [explanation, setExplanation] = useState("");
+
+  function routeForSafety(queue: "Auditor Queue" | "Manager Review Queue") {
+    actions.routeReview(reviewId, queue);
+    onClose();
+  }
+
+  return (
+    <Modal title="Deletion Safety Review" onClose={onClose}>
+      <p className="modal-copy">
+        This prototype treats Delete as patient-year HCC deletion, not claim-line-only deletion. Verified current-year support must be cancelled, routed, or overridden with a manager/admin explanation.
+      </p>
+      <div className="safety-evidence-list">
+        {supportEvidence.map((evidence) => {
+          const document = documentMap.get(evidence.documentId);
+          const linkedConditions = evidence.conditionIds.map((id) => conditionMap.get(id)).filter(Boolean) as Condition[];
+          return (
+            <button
+              key={evidence.id}
+              type="button"
+              onClick={() => {
+                jumpToEvidence(evidence);
+                onClose();
+              }}
+            >
+              <strong>{evidence.summary}</strong>
+              <span>{document?.title ?? "Source document"} - {formatDate(evidence.date)}</span>
+              <span>{evidence.exactText ?? evidence.text}</span>
+              <small>
+                Supports {linkedConditions.map((item) => `${item.icd10} / ${item.hcc}`).join(", ") || `${condition.icd10} / ${condition.hcc}`} - MEAT support:{" "}
+                {linkedConditions.some((item) => item.hasSufficientMeat || item.hasOtherSupportingEvidence) || condition.hasSufficientMeat || condition.hasOtherSupportingEvidence ? "met in prototype data" : "not met"}
+              </small>
+            </button>
+          );
+        })}
+      </div>
+      {canOverrideDelete ? (
+        <label>
+          Override explanation
+          <textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder="Required manager/admin rationale for deleting despite verified support" />
+        </label>
+      ) : null}
+      <div className="modal-actions">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="secondary" onClick={() => routeForSafety("Auditor Queue")}>Route to Auditor Review</Button>
+        <Button variant="secondary" onClick={() => routeForSafety("Manager Review Queue")}>Route to Manager Review</Button>
+        {canOverrideDelete ? (
+          <Button
+            variant="danger"
+            disabled={!explanation.trim()}
+            onClick={() => {
+              actions.setDisposition(reviewId, condition.id, "Delete", recommendation ? recommendation.action === "Delete" : undefined, undefined, explanation);
+              onClose();
+            }}
+          >
+            Override Delete
+          </Button>
+        ) : null}
       </div>
     </Modal>
   );

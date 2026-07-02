@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { seedData } from "../data/seed";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
-import { canAccessRoute, getVisibleReviews } from "./auth";
+import { canAccessRoute, canOpenReview, canTakeCoverage, getVisibleReviews } from "./auth";
 import { normalizeSeedData } from "../state/AppState";
 import {
   assignReview,
@@ -21,6 +21,7 @@ import {
   setDisposition,
   shouldSampleReviewForAudit,
   startAudit,
+  takeCoverage,
   updateDownstreamTaskStatus
 } from "./workflows";
 import {
@@ -183,7 +184,9 @@ describe("prototype workflow rules", () => {
     expect(review.status).toBe("Pended");
     expect(review.assignedUserId).toBe("u-coder-1");
     expect(review.lock).toBeUndefined();
-    expect(getVisibleReviews(next, user(next, "u-coder-2")).map((item) => item.id)).not.toContain("rev-100");
+    expect(getVisibleReviews(next, user(next, "u-coder-2")).map((item) => item.id)).toContain("rev-100");
+    expect(canOpenReview(next, review, user(next, "u-coder-2"))).toBe(false);
+    expect(canTakeCoverage(next, review, user(next, "u-coder-2"))).toBe(true);
   });
 
   it("pends and opens the next assigned patient without reselecting the pended chart", () => {
@@ -193,6 +196,33 @@ describe("prototype workflow rules", () => {
     expect(result.data.reviews.find((item) => item.id === "rev-100")).toMatchObject({ status: "Pended", assignedUserId: "u-coder-1" });
     expect(result.data.reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
     expect(result.data.reviews.find((item) => item.id === "rev-110")?.lock?.lockedByUserId).toBe("u-coder-1");
+  });
+
+  it("supports return to queue after a pended chart has already released its lock", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const pended = pendReview(data, "rev-100", user(data, "u-coder-1"));
+    const returned = releaseReview(pended, "rev-100", user(pended, "u-coder-1"));
+    expect(returned.reviews.find((item) => item.id === "rev-100")).toMatchObject({ status: "Pended", assignedUserId: "u-coder-1" });
+    expect(returned.reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
+  });
+
+  it("supports next patient after a chart is pended", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const pended = pendReview(data, "rev-100", user(data, "u-coder-1"));
+    const result = openNextEligibleReview(pended, "rev-100", user(pended, "u-coder-1"));
+    expect(result.nextReviewId).toBe("rev-110");
+    expect(result.data.reviews.find((item) => item.id === "rev-110")?.lock?.lockedByUserId).toBe("u-coder-1");
+  });
+
+  it("supports return to queue and next patient after sending to auditor", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const routed = routeReview(data, "rev-100", user(data, "u-coder-1"), "Auditor Queue");
+    const routedReview = routed.reviews.find((item) => item.id === "rev-100")!;
+    expect(routedReview).toMatchObject({ queue: "Auditor Queue", status: "Awaiting Review", assignedUserId: "u-coder-1" });
+    expect(routedReview.lock).toBeUndefined();
+    expect(releaseReview(routed, "rev-100", user(routed, "u-coder-1")).reviews.find((item) => item.id === "rev-100")?.lock).toBeUndefined();
+    const result = openNextEligibleReview(routed, "rev-100", user(routed, "u-coder-1"));
+    expect(result.nextReviewId).toBe("rev-110");
   });
 
   it("leaves state unchanged when no next eligible chart exists", () => {
@@ -266,14 +296,15 @@ describe("prototype workflow rules", () => {
     expect(totals).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Rule Suppressed", value: expect.any(Number) })]));
   });
 
-  it("returns structured rule results for delete safety support across same-patient records", () => {
+  it("returns structured warning results for delete safety support across same-patient records", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-111")!;
     const condition = data.conditions.find((item) => item.id === "cond-111-a")!;
     const result = getRuleResult(condition, review, data, settings);
-    expect(result.disabledActions).toEqual(
+    expect(result.disabledActions.some((item) => item.action === "Delete")).toBe(false);
+    expect(result.warnings).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ action: "Delete", ruleId: "delete-safety-current-year-support", supportingEvidenceIds: expect.arrayContaining(["ev-rev-111-support-a"]) })
+        expect.objectContaining({ severity: "blocking", evidenceIds: expect.arrayContaining(["ev-rev-111-support-a"]) })
       ])
     );
   });
@@ -291,6 +322,18 @@ describe("prototype workflow rules", () => {
     const data = openReview(cloneSeed(), "rev-111", user(seedData, "u-coder-2"));
     const next = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-coder-2"), "Delete", true, settings);
     expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition).toBeUndefined();
+  });
+
+  it("allows documented manager override when delete safety support exists", () => {
+    const data = openReview(cloneSeed(), "rev-111", user(seedData, "u-manager-1"));
+    const blocked = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-manager-1"), "Delete", true, settings);
+    const overridden = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-manager-1"), "Delete", true, settings, undefined, "Manager reviewed conflicting patient-year support.");
+
+    expect(blocked.conditions.find((item) => item.id === "cond-111-a")?.disposition).toBeUndefined();
+    expect(overridden.conditions.find((item) => item.id === "cond-111-a")?.disposition).toMatchObject({
+      action: "Delete",
+      comments: "Manager reviewed conflicting patient-year support."
+    });
   });
 
   it("warns but does not block delete when curated conflicting evidence exists", () => {
@@ -434,16 +477,30 @@ describe("prototype workflow rules", () => {
     expect(changed.conditions.find((item) => item.id === "cond-116-a")?.disposition).toMatchObject({ action: "Change", replacementCode: "E11.311" });
   });
 
-  it("suppresses SDoH capture while preserving contextual review", () => {
+  it("warns without hard-disabling direct capture when a replacement code is only recommended", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = data.conditions.find((item) => item.id === "cond-100-f")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
+    const selected = setDisposition(data, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Yes", false, settings);
+
+    expect(recommendation).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+    expect(result.disabledActions.some((item) => item.action === "Yes")).toBe(false);
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining("Change is recommended") })]));
+    expect(selected.conditions.find((item) => item.id === "cond-100-f")?.disposition?.action).toBe("Yes");
+  });
+
+  it("does not suppress an unrelated HCC because social context appears in evidence", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const condition = data.conditions.find((item) => item.id === "cond-100-e")!;
     const result = getRuleResult(condition, review, data, settings);
-    const blocked = setDisposition(data, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Add to Claim", false, settings);
+    const allowed = setDisposition(data, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Add to Claim", false, settings);
 
-    expect(result.ruleId).toBe("sdoh-context-suppression");
-    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Add to Claim", ruleId: "sdoh-context-suppression" })]));
-    expect(blocked.conditions.find((item) => item.id === "cond-100-e")?.disposition).toBeUndefined();
+    expect(condition.sdohCode).toBeUndefined();
+    expect(result.disabledActions.some((item) => item.ruleId === "sdoh-context-suppression")).toBe(false);
+    expect(allowed.conditions.find((item) => item.id === "cond-100-e")?.disposition?.action).toBe("Add to Claim");
   });
 
   it("recommends deletion rather than capture for quality-exclusion context", () => {
@@ -559,14 +616,44 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(completedAgain.audits.find((item) => item.reviewId === "rev-109")?.outcome).toBe("Agree");
   });
 
-  it("keeps coverage assignment separate from clinic defaults and records permanent reassignment", () => {
+  it("keeps temporary coverage separate from original assignment and records permanent reassignment", () => {
     const data = cloneSeed();
     const coverage = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Coverage", "Coverage day");
-    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-coder-4");
+    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-cdi-3");
+    expect(coverage.reviews.find((item) => item.id === "rev-106")?.coverage).toMatchObject({
+      originalAssignedUserId: "u-cdi-3",
+      coveringUserId: "u-coder-4",
+      initiatedByUserId: "u-manager-2"
+    });
     expect(coverage.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-3");
     const permanent = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Permanent reassignment", "Panel move");
+    expect(permanent.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-coder-4");
+    expect(permanent.reviews.find((item) => item.id === "rev-106")?.coverage).toBeUndefined();
     expect(permanent.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-4");
     expect(permanent.history[0].detail).toContain("Panel move");
+  });
+
+  it("allows a CDI/Coder to take coverage without changing the original assignee", () => {
+    const data = cloneSeed();
+    const covered = takeCoverage(data, "rev-100", user(data, "u-coder-2"));
+    const review = covered.reviews.find((item) => item.id === "rev-100")!;
+    expect(review.assignedUserId).toBe("u-coder-1");
+    expect(review.coverage).toMatchObject({
+      originalAssignedUserId: "u-coder-1",
+      coveringUserId: "u-coder-2",
+      initiatedByUserId: "u-coder-2"
+    });
+    expect(review.lock?.lockedByUserId).toBe("u-coder-2");
+    expect(canOpenReview(covered, review, user(covered, "u-coder-2"))).toBe(true);
+    expect(covered.history[0]).toMatchObject({ event: "Coverage assignment taken", reviewId: "rev-100", userId: "u-coder-2" });
+  });
+
+  it("prevents concurrent coverage from being taken by another CDI/Coder", () => {
+    const data = takeCoverage(cloneSeed(), "rev-100", user(seedData, "u-coder-2"));
+    const second = takeCoverage(data, "rev-100", user(data, "u-coder-3"));
+    const review = second.reviews.find((item) => item.id === "rev-100")!;
+    expect(review.coverage?.coveringUserId).toBe("u-coder-2");
+    expect(review.lock?.lockedByUserId).toBe("u-coder-2");
   });
 
   it("calculates personal statistics only for the selected user", () => {
