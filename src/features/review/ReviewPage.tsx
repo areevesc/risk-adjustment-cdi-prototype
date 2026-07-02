@@ -24,7 +24,7 @@ import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, Re
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
-import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute, hasAnyRole } from "../../domain/auth";
+import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
 
 const disagreeReasons: DisagreeReason[] = ["Not Enough MEAT", "Condition Resolved", "Conflicting Evidence", "Other"];
 const documentationIssues: DocumentationIssue[] = [
@@ -640,11 +640,11 @@ function ConditionCard({
   const evidence = getEvidenceForCondition(data, condition);
   const recommendation = getRecommendation(condition, review, data, settings);
   const ruleResult = getRuleResult(condition, review, data, settings);
-  const disabled = !editable || !!condition.ruleOutcome;
+  const disabled = !editable;
   const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
   const downstreamTasks = getDownstreamTasksForCondition(data, condition.id);
   const claim = getClaimForReview(data, review.id);
-  const showActionControls = !condition.ruleOutcome && (!condition.disposition || review.status === "Rework Required");
+  const showActionControls = !condition.disposition || review.status === "Rework Required";
 
   function act(action: RecommendationAction) {
     if (action === "Delete" && hasDeleteSafetyWarning(ruleResult)) {
@@ -665,7 +665,7 @@ function ConditionCard({
 
   function actionTitle(action: RecommendationAction) {
     if (!editable) return readOnlyTitle;
-    return disabledRule(action)?.reason ?? condition.ruleOutcome?.explanation;
+    return disabledRule(action)?.reason;
   }
 
   return (
@@ -773,7 +773,7 @@ function ConditionCard({
 }
 
 function hasDeleteSafetyWarning(ruleResult: RuleResult) {
-  return ruleResult.warnings.some((warning) => warning.severity === "blocking" && warning.evidenceIds?.length);
+  return ruleResult.warnings.some((warning) => warning.message.includes("Possible current-year supporting evidence") && warning.evidenceIds?.length);
 }
 
 function RuleMessages({ ruleResult, jumpToEvidence }: { ruleResult: RuleResult; jumpToEvidence: (evidence: EvidencePassage) => void }) {
@@ -944,9 +944,8 @@ function DeleteSafetyModal({
   const evidenceMap = byId(data.evidence);
   const documentMap = byId(data.documents);
   const conditionMap = byId(data.conditions);
-  const supportIds = Array.from(new Set(ruleResult.warnings.filter((warning) => warning.severity === "blocking").flatMap((warning) => warning.evidenceIds ?? [])));
+  const supportIds = Array.from(new Set(ruleResult.warnings.filter((warning) => warning.message.includes("Possible current-year supporting evidence")).flatMap((warning) => warning.evidenceIds ?? [])));
   const supportEvidence = supportIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
-  const canOverrideDelete = hasAnyRole(currentUser, ["Administrator", "Manager"]);
   const recommendation = getRecommendation(condition, review, data, settings);
   const [explanation, setExplanation] = useState("");
 
@@ -958,7 +957,7 @@ function DeleteSafetyModal({
   return (
     <Modal title="Deletion Safety Review" onClose={onClose}>
       <p className="modal-copy">
-        This prototype treats Delete as patient-year HCC deletion, not claim-line-only deletion. Verified current-year support must be cancelled, routed, or overridden with a manager/admin explanation.
+        This prototype treats Delete as patient-year HCC deletion, not claim-line-only deletion. The system found possible supporting evidence, but this is advisory. Review the evidence and record your deletion rationale if you proceed.
       </p>
       <div className="safety-evidence-list">
         {supportEvidence.map((evidence) => {
@@ -984,28 +983,24 @@ function DeleteSafetyModal({
           );
         })}
       </div>
-      {canOverrideDelete ? (
-        <label>
-          Override explanation
-          <textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder="Required manager/admin rationale for deleting despite verified support" />
-        </label>
-      ) : null}
+      <label>
+        Deletion rationale
+        <textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} placeholder="Required rationale when deleting despite possible current-year support" />
+      </label>
       <div className="modal-actions">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="secondary" onClick={() => routeForSafety("Auditor Queue")}>Route to Auditor Review</Button>
         <Button variant="secondary" onClick={() => routeForSafety("Manager Review Queue")}>Route to Manager Review</Button>
-        {canOverrideDelete ? (
-          <Button
-            variant="danger"
-            disabled={!explanation.trim()}
-            onClick={() => {
-              actions.setDisposition(reviewId, condition.id, "Delete", recommendation ? recommendation.action === "Delete" : undefined, undefined, explanation);
-              onClose();
-            }}
-          >
-            Override Delete
-          </Button>
-        ) : null}
+        <Button
+          variant="danger"
+          disabled={!explanation.trim()}
+          onClick={() => {
+            actions.setDisposition(reviewId, condition.id, "Delete", recommendation ? recommendation.action === "Delete" : undefined, undefined, explanation);
+            onClose();
+          }}
+        >
+          Save Delete
+        </Button>
       </div>
     </Modal>
   );

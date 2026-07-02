@@ -1236,6 +1236,7 @@ export const conditions: Condition[] = [
     hasCurrentYearCapture: false,
     hasClinicalIndicators: false,
     qualityExclusionCode: true,
+    trustedCodeMetadata: true,
     documentationIssues: []
   },
   {

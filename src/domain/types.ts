@@ -280,6 +280,7 @@ export interface Condition {
   trumpedByCode?: string;
   sdohCode?: boolean;
   qualityExclusionCode?: boolean;
+  trustedCodeMetadata?: boolean;
   seededRecommendation?: Recommendation;
   disposition?: UserDisposition;
   ruleOutcome?: RuleGeneratedOutcome;

@@ -46,15 +46,17 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       condition.ruleOutcome.conflictingEvidenceIds?.forEach((id) => conflictingEvidenceIds.add(id));
     }
 
-    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesNotOnClaim") {
+    if (!condition.disposition && condition.workflow === "codesNotOnClaim") {
       const selectedDuplicate = getSamePatientYearHccConditions(data, review, condition.hcc).find(
         (item) => item.id !== condition.id && item.workflow === "codesNotOnClaim" && item.disposition?.action === "Add to Claim"
       );
       if (selectedDuplicate) {
+        const selectedBy = data.users.find((item) => item.id === selectedDuplicate.disposition?.userId);
+        const selectedAt = selectedDuplicate.disposition?.decidedAt ? ` at ${selectedDuplicate.disposition.decidedAt}` : "";
         selectedDuplicate.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
         disabledActions.push({
           action: "Add to Claim",
-          reason: `Add to Claim unavailable because ${selectedDuplicate.icd10} was already selected for the same patient, calendar year, and ${condition.hcc}.`,
+          reason: `Add to Claim unavailable because ${selectedDuplicate.icd10} was selected by ${selectedBy?.name ?? "a reviewer"}${selectedAt} for the same patient, calendar year, and ${condition.hcc}.`,
           ruleId: "same-hcc-duplicate-add",
           source: "rule-suppressed",
           supportingEvidenceIds: selectedDuplicate.evidenceIds
@@ -64,8 +66,8 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
     if (condition.workflow === "codesOnClaim" && deleteSafety.supportingEvidenceIds.length > 0) {
       warnings.push({
-        message: `Current-year supporting evidence exists for ${condition.hcc}. Delete remains a user decision, but the prototype requires deletion-safety review before accepting a patient-year HCC deletion.`,
-        severity: "blocking",
+        message: "Possible current-year supporting evidence was identified. Review before deleting.",
+        severity: "warning",
         evidenceIds: deleteSafety.supportingEvidenceIds
       });
     }
@@ -99,12 +101,10 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (!condition.disposition && !condition.ruleOutcome && acuteExclusion.applies) {
-      disabledActions.push({
-        action: "Yes",
-        reason: "Prospective recapture is unavailable because this opportunity is explicitly marked acute-only in the synthetic scenario.",
-        ruleId: "acute-only-recapture-exclusion",
-        source: "rule-suppressed",
-        supportingEvidenceIds: acuteExclusion.evidenceIds
+      warnings.push({
+        message: "The rule engine recommends No because this appears acute or resolved in the synthetic scenario. This is advisory; the reviewer may still select Yes.",
+        severity: "warning",
+        evidenceIds: acuteExclusion.evidenceIds
       });
     }
 
@@ -129,18 +129,20 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (!condition.disposition && !condition.ruleOutcome && contextualExclusion.applies) {
-      contextualExclusion.disabledActions.forEach((action) =>
-        disabledActions.push({
-          action,
-          reason: contextualExclusion.reason,
-          ruleId: contextualExclusion.ruleId,
-          source: "rule-suppressed",
-          supportingEvidenceIds: contextualExclusion.evidenceIds
-        })
-      );
+      if (contextualExclusion.hardRestriction) {
+        contextualExclusion.disabledActions.forEach((action) =>
+          disabledActions.push({
+            action,
+            reason: contextualExclusion.reason,
+            ruleId: contextualExclusion.ruleId,
+            source: "rule-suppressed",
+            supportingEvidenceIds: contextualExclusion.evidenceIds
+          })
+        );
+      }
       warnings.push({
         message: contextualExclusion.reason,
-        severity: "info",
+        severity: contextualExclusion.hardRestriction ? "info" : "warning",
         evidenceIds: contextualExclusion.evidenceIds
       });
     }
@@ -341,9 +343,9 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
   getDisplayLabel(recommendation: Recommendation, settings: AppSettings) {
     if (settings.recommendationMode === "rules" && recommendation.source === "rules") {
-      return "Rule-Based Recommendation - Prototype Only";
+      return "Rule-Based Recommendation - Reviewer Decision Required";
     }
-    return recommendation.source === "seeded" ? "Seeded Rule-Based Recommendation - Prototype Only" : "Rule-Based Recommendation - Prototype Only";
+    return recommendation.source === "seeded" ? "Seeded Rule-Based Recommendation - Reviewer Decision Required" : "Rule-Based Recommendation - Reviewer Decision Required";
   }
 }
 
@@ -383,8 +385,7 @@ function evaluateHierarchySuppression(condition: Condition, review: PatientRevie
       (replacement.hasCurrentYearCapture ||
         replacement.disposition?.action === "Validate" ||
         replacement.disposition?.action === "Add to Claim" ||
-        replacement.disposition?.action === "Yes" ||
-        replacement.ruleOutcome?.source === "rule-resolved")
+        replacement.disposition?.action === "Yes")
   );
   if (!capturedReplacement) {
     return {
@@ -414,19 +415,24 @@ function evaluateContextualExclusion(condition: Condition) {
       recommendedAction: "Disagree" as RecommendationAction,
       disabledActions: [] as RecommendationAction[],
       evidenceIds: [] as string[],
-      reason: ""
+      reason: "",
+      hardRestriction: false
     };
   }
   const ruleId = condition.qualityExclusionCode ? "quality-exclusion-suppression" : "sdoh-context-suppression";
   const label = condition.qualityExclusionCode ? "quality-exclusion" : "SDoH";
   const recommendedAction: RecommendationAction = condition.workflow === "codesOnClaim" ? "Delete" : condition.workflow === "prospective" ? "No" : "Disagree";
+  const hardRestriction = condition.trustedCodeMetadata === true;
   return {
     applies: true,
     ruleId,
     recommendedAction,
-    disabledActions: getCaptureActionsForWorkflow(condition),
+    disabledActions: hardRestriction ? getCaptureActionsForWorkflow(condition) : [],
     evidenceIds: condition.evidenceIds,
-    reason: `Capture action is unavailable because the displayed diagnosis itself is marked as a prototype ${label} code. This curated classification is not an authoritative live code-set determination.`
+    reason: hardRestriction
+      ? `Capture action is unavailable because trusted prototype code metadata marks the displayed ICD-10 as an ineligible ${label} code.`
+      : `The simulated rules flagged ${label} context, but this is advisory only. Confirm whether the displayed diagnosis is actually an HCC opportunity before acting.`,
+    hardRestriction
   };
 }
 
@@ -504,8 +510,7 @@ function getCurrentYearCaptureEvidenceIds(condition: Condition, review: PatientR
     .filter(
       (item) =>
         item.hasCurrentYearCapture ||
-        (item.disposition?.action && captureActions.has(item.disposition.action)) ||
-        (item.ruleOutcome?.source === "rule-resolved" && item.ruleOutcome.action && captureActions.has(item.ruleOutcome.action))
+        (item.disposition?.action && captureActions.has(item.disposition.action))
     )
     .forEach((item) => item.evidenceIds.forEach((id) => evidenceIds.add(id)));
   return Array.from(evidenceIds).filter((id) => isCurrentYearEvidence(id, review, data));
@@ -538,8 +543,7 @@ function evaluateDeleteSafety(condition: Condition, review: PatientReview, data:
         item.hasSufficientMeat ||
         item.hasOtherSupportingEvidence ||
         item.disposition?.action === "Validate" ||
-        item.disposition?.action === "Add to Claim" ||
-        item.ruleOutcome?.action === "Validate"
+        item.disposition?.action === "Add to Claim"
     )
     .forEach((item) => item.evidenceIds.forEach((id) => supporting.add(id)));
 

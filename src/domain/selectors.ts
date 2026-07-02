@@ -81,8 +81,12 @@ export function getRuleResult(condition: Condition, review: PatientReview, data:
   return decisionSupportService.evaluateRules(condition, review, data, settings);
 }
 
+function isDeterministicRuleResolved(condition: Condition) {
+  return condition.ruleOutcome?.source === "rule-resolved" && condition.ruleOutcome.ruleId === "same-hcc-validation-threshold";
+}
+
 export function getUnresolvedConditions(data: SeedData, review: PatientReview) {
-  return reviewConditions(data, review).filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome);
+  return reviewConditions(data, review).filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition));
 }
 
 export function getPresentedOpportunitySummary(data: SeedData, review: PatientReview) {
@@ -130,9 +134,8 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
 
 export function getDispositionSummaryLabel(condition: Condition): DispositionSummaryLabel {
   if (!condition.disposition && condition.ruleOutcome) {
-    if (condition.ruleOutcome.source === "rule-suppressed") return "Rule Suppressed";
-    if (condition.ruleOutcome.action === "Validate") return "Validated";
-    if (condition.ruleOutcome.action === "Add to Claim") return "Added to Claim";
+    if (isDeterministicRuleResolved(condition) && condition.ruleOutcome.action === "Validate") return "Validated";
+    return "Unresolved";
   }
   switch (condition.disposition?.action) {
     case "Validate":
@@ -176,7 +179,7 @@ export function getRafSummary(data: SeedData, review: PatientReview) {
     .filter(
       (condition) =>
         (condition.disposition && selectedCapturedActions.has(condition.disposition.action)) ||
-        (condition.ruleOutcome?.source === "rule-resolved" && condition.ruleOutcome.action && selectedCapturedActions.has(condition.ruleOutcome.action))
+        (isDeterministicRuleResolved(condition) && condition.ruleOutcome?.action && selectedCapturedActions.has(condition.ruleOutcome.action))
     )
     .forEach((condition) => {
       capturedByHcc.set(condition.hcc, Math.max(capturedByHcc.get(condition.hcc) ?? 0, condition.raf));
@@ -186,23 +189,23 @@ export function getRafSummary(data: SeedData, review: PatientReview) {
   const unresolvedPotentialRaf = conditions
     .filter(
       (condition) =>
-        condition.actionable && !condition.disposition && !condition.ruleOutcome && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category)
+        condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category)
     )
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: potential additions are open, uncaptured opportunities and are not counted in current captured RAF.
   const potentialAdditionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && (condition.originalCategory ?? condition.category) === "potentialAddition")
+    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && (condition.originalCategory ?? condition.category) === "potentialAddition")
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: potential deletions are displayed separately as possible negative adjustment, not double-subtracted from projection.
   const potentialDeletionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && (condition.originalCategory ?? condition.category) === "potentialDelete")
+    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && (condition.originalCategory ?? condition.category) === "potentialDelete")
     .reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: recapture and suspect are separate prospective buckets and are excluded from unresolved potential RAF.
   const prospectiveRecaptureRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && condition.subtype === "recapture")
+    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && condition.subtype === "recapture")
     .reduce((sum, condition) => sum + condition.raf, 0);
   const prospectiveSuspectRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !condition.ruleOutcome && condition.subtype === "suspect")
+    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && condition.subtype === "suspect")
     .reduce((sum, condition) => sum + condition.raf, 0);
   const selectedDeletionRaf = conditions.filter((condition) => condition.disposition?.action === "Delete").reduce((sum, condition) => sum + condition.raf, 0);
   // Synthetic only: projected RAF after selected dispositions includes demographic RAF plus selected captures and subtracts selected deletions.
@@ -329,7 +332,7 @@ export function getOutreachStatusForReview(data: SeedData, review: PatientReview
     review.reviewType === "Prospective" ||
     data.downstreamTasks.some((item) => item.reviewId === review.id && item.type === "Prospective CDI Review" && item.status !== "Cancelled") ||
     reviewConditions(data, review).some((condition) => {
-      if (!condition.actionable || condition.ruleOutcome?.source === "rule-suppressed") return false;
+      if (!condition.actionable) return false;
       if (condition.workflow === "prospective" && !condition.disposition) return true;
       return ["Send to Prospective", "Yes", "Change"].includes(condition.disposition?.action ?? "");
     });

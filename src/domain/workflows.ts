@@ -230,7 +230,7 @@ export function completeReview(data: SeedData, reviewId: string, user: User, set
   if (unresolved.length > 0) return { data, unresolved };
 
   let next = updateReview(data, reviewId, (item) => ({ ...item, status: "Completed", lock: undefined, auditReturn: undefined }));
-  next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have a user-selected disposition or rule-generated outcome." });
+  next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have a user-selected disposition or deterministic rule-derived outcome." });
   if (shouldSampleReviewForAudit(reviewId, settings.auditSampleRate)) {
     next = startAudit(next, reviewId, user, true, settings.auditSampleRate);
   }
@@ -310,13 +310,8 @@ export function setDisposition(
   const conditionBefore = data.conditions.find((item) => item.id === conditionId);
   if (!review || !conditionBefore || !canSetConditionDisposition(review, user)) return data;
   const ruleResult = getRuleResult(conditionBefore, review, data, settings);
-  if (conditionBefore.ruleOutcome || ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
+  if (ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
-  const hasDeleteSafetySupport =
-    action === "Delete" &&
-    conditionBefore.workflow === "codesOnClaim" &&
-    ruleResult.warnings.some((warning) => warning.severity === "blocking" && warning.evidenceIds?.length);
-  if (hasDeleteSafetySupport && (!hasAnyRole(user, ["Administrator", "Manager"]) || !comments?.trim())) return data;
   const decidedAt = stamp();
   let next = updateCondition(data, conditionId, (condition) => ({
     ...condition,
@@ -440,7 +435,9 @@ function disableDuplicateHccAdditions(data: SeedData, reviewId: string, hcc: str
         !condition.auditorDisposition
     )
     .forEach((condition) => {
-      const explanation = `Add to Claim suppressed because ${selectedCondition.icd10} was selected for the same patient, calendar year, and ${hcc}.`;
+      const selectedBy = data.users.find((item) => item.id === selectedCondition.disposition?.userId)?.name ?? "a reviewer";
+      const selectedAt = selectedCondition.disposition?.decidedAt ? ` at ${selectedCondition.disposition.decidedAt}` : "";
+      const explanation = `Add to Claim suppressed because ${selectedCondition.icd10} was selected by ${selectedBy}${selectedAt} for the same patient, calendar year, and ${hcc}.`;
       next = updateCondition(next, condition.id, (item) => ({
         ...item,
         ruleOutcome: {
