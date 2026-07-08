@@ -292,6 +292,8 @@ describe("prototype workflow rules", () => {
     expect(generatedChart?.encounters.length).toBeGreaterThanOrEqual(2);
     expect(generatedChart?.labs[0].results.some((result) => result.component && result.referenceRange && result.flag)).toBe(true);
     expect(generatedChart?.claims[0]).toMatchObject({ cptCode: expect.any(String), providerTypeEligible: true, faceToFace: true, providerSignatureValid: true });
+    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-ap"))).toMatchObject({ sourceType: "planSentence", evidenceStrength: "strongCurrentYearMEAT" });
+    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-lab"))).toMatchObject({ sourceType: "labResultRow", evidenceStrength: "clinicalIndicatorOnly" });
   });
 
   it("seeds full embedded chart documentation for reviews", () => {
@@ -299,10 +301,13 @@ describe("prototype workflow rules", () => {
     const chart = data.charts.find((item) => item.reviewId === "rev-100")!;
     expect(chart.encounters[0]).toMatchObject({
       chiefComplaint: expect.any(String),
-      hpi: expect.stringContaining("diabetes"),
+      hpi: expect.stringContaining("glucose"),
       billingCode: "99214"
     });
+    expect(chart.encounters[0].hpi).toContain("Home glucose logs");
     expect(chart.encounters[0].assessmentPlan.length).toBeGreaterThan(0);
+    expect(chart.encounters[0].assessmentPlan[0].detail).toContain("Continue metformin ER");
+    expect(chart.encounters[0].assessmentPlan.map((item) => item.detail).join(" ")).not.toContain("risk adjustment items");
     expect(chart.problems.length).toBeGreaterThan(0);
     expect(chart.medications.length).toBeGreaterThan(0);
     expect(chart.labs[0].results[0]).toMatchObject({ component: expect.any(String), value: expect.any(String), unit: expect.any(String), referenceRange: expect.any(String), flag: expect.any(String) });
@@ -311,6 +316,16 @@ describe("prototype workflow rules", () => {
     expect(chart.specialistNotes.length).toBeGreaterThan(0);
     expect(chart.claims[0]).toMatchObject({ dateOfService: expect.any(String), provider: expect.any(String), payer: expect.any(String), cptCode: expect.any(String), encounterType: expect.any(String) });
     expect(data.evidence.find((item) => item.id === "ev-rev-100-d")?.chartAnchor).toMatchObject({ tab: "labs" });
+    expect(data.evidence.find((item) => item.id === "ev-rev-100-a")).toMatchObject({
+      sourceType: "planSentence",
+      evidenceStrength: "strongCurrentYearMEAT",
+      meatType: expect.arrayContaining(["Assessment", "Treatment"])
+    });
+    expect(data.evidence.find((item) => item.id === "ev-rev-100-d")).toMatchObject({
+      sourceType: "labResultRow",
+      evidenceStrength: "clinicalIndicatorOnly",
+      currentYearSupport: false
+    });
   });
 
   it("cycles evidence only inside the active condition evidence set", () => {

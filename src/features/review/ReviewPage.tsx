@@ -23,6 +23,7 @@ import {
   reviewConditions
 } from "../../domain/selectors";
 import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult } from "../../domain/types";
+import { evidenceStrengthLabel } from "../../domain/mockClinicalContent";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
@@ -36,6 +37,21 @@ const documentationIssues: DocumentationIssue[] = [
   "Invalid or missing provider signature",
   "Provider education"
 ];
+
+const strengthTokens = {
+  strongCurrentYearMEAT: { color: "#075e45", bg: "#e8f7ee", border: "#2bb673" },
+  weakMentionOnly: { color: "#7a4b00", bg: "#fff5db", border: "#d79b1e" },
+  clinicalIndicatorOnly: { color: "#0f4d78", bg: "#e8f4ff", border: "#5aa4d8" },
+  historicalOnly: { color: "#5b3a96", bg: "#f1ecff", border: "#9a7bd8" },
+  suspect: { color: "#8a3d00", bg: "#fff0e3", border: "#e18a35" },
+  conflicting: { color: "#991b1b", bg: "#fee2e2", border: "#ef4444" },
+  unsupported: { color: "#475569", bg: "#f1f5f9", border: "#94a3b8" }
+} satisfies Record<NonNullable<EvidencePassage["evidenceStrength"]>, { color: string; bg: string; border: string }>;
+
+function tokenForEvidence(evidence: EvidencePassage) {
+  if (evidence.evidenceStrength) return strengthTokens[evidence.evidenceStrength];
+  return evidence.subtype ? subtypeTokens[evidence.subtype] : categoryTokens[evidence.category];
+}
 
 export function ReviewPage() {
   const { reviewId } = useParams();
@@ -545,7 +561,7 @@ function ChartViewer({
   };
   const evidenceStyle = (items: EvidencePassage[]) => {
     const firstEvidence = items[0];
-    const token = firstEvidence?.subtype ? subtypeTokens[firstEvidence.subtype] : firstEvidence ? categoryTokens[firstEvidence.category] : undefined;
+    const token = firstEvidence ? tokenForEvidence(firstEvidence) : undefined;
     return token ? { borderColor: token.border } : undefined;
   };
   return (
@@ -801,7 +817,7 @@ function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], s
   let cursor = 0;
   spans.forEach((span) => {
     if (span.start < cursor) return;
-    const token = span.item.subtype ? subtypeTokens[span.item.subtype] : categoryTokens[span.item.category];
+    const token = tokenForEvidence(span.item);
     if (span.start > cursor) pieces.push(sectionText.slice(cursor, span.start));
     pieces.push(
       <mark
@@ -973,8 +989,12 @@ function ConditionCard({
             setActiveConditionId(condition.id);
             jumpToEvidence(item);
           }}>
-            <span>{item.summary}</span>
-            <small>{formatDate(item.date)}</small>
+            <span className="evidence-list-main">
+              <EvidenceStrengthBadge evidence={item} />
+              <span>{item.summary}</span>
+            </span>
+            <small>{item.sourceLocation ?? "Chart source"} - {formatDate(item.date)}</small>
+            {item.reviewerExplanation ? <small>{item.reviewerExplanation}</small> : null}
           </button>
         ))}
       </div>
@@ -1301,6 +1321,15 @@ function OverrideLockModal({ reviewId, onClose }: { reviewId: string; onClose: (
         </Button>
       </div>
     </Modal>
+  );
+}
+
+function EvidenceStrengthBadge({ evidence }: { evidence: EvidencePassage }) {
+  const token = tokenForEvidence(evidence);
+  return (
+    <span className="evidence-strength-badge" style={{ color: token.color, background: token.bg, borderColor: token.border }}>
+      {evidenceStrengthLabel(evidence.evidenceStrength)}
+    </span>
   );
 }
 
