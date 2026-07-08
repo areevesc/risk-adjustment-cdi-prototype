@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { LockKeyhole, UserCheck } from "lucide-react";
+import { Download, LockKeyhole, UserCheck } from "lucide-react";
 import { useAppState } from "../../state/AppState";
-import { byId, canManageLocks, getActionTotals, getPopulationRafSummary, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
+import { byId, canManageLocks, getActionTotals, getGeneratedExports, getPopulationRafSummary, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
 import { formatRaf } from "../../domain/format";
 import { Button, CloseDialogButton, Panel, StatusChip } from "../../ui/Primitives";
 import type { AssignmentMode, PatientReview, User } from "../../domain/types";
@@ -18,6 +18,7 @@ export function ManagerPage() {
   const statusTotals = getReviewStatusTotals(data);
   const actionTotals = getActionTotals(data);
   const populationRaf = getPopulationRafSummary(data);
+  const generatedExports = getGeneratedExports(data);
 
   return (
     <div className="page-stack">
@@ -123,6 +124,34 @@ export function ManagerPage() {
         </Panel>
       </div>
 
+      <Panel title="Export And Demo Files">
+        <div className="manager-export-grid">
+          <ManagerExportButton label="Export Manager Dashboard Data" filename="manager-dashboard-data.json" rows={[{ statusTotals, teamStats, actionTotals, populationRaf }]} format="json" />
+          <ManagerExportButton label="Export Reviews by Status" filename="reviews-by-status.csv" rows={statusTotals} />
+          <ManagerExportButton label="Export Team Workload" filename="team-workload.csv" rows={teamStats} />
+          <ManagerExportButton label="Export Action Totals" filename="action-totals.csv" rows={actionTotals} />
+          <ManagerExportButton label="Export RAF Reporting" filename="raf-reporting.json" rows={[populationRaf]} format="json" />
+          <ManagerExportButton label="Export Potential Deletes" filename="potential-deletes.csv" rows={generatedExports.find((item) => item.type === "Deletion list")?.rows ?? []} />
+          <ManagerExportButton label="Export Potential Additions" filename="potential-additions.csv" rows={generatedExports.find((item) => item.type === "Addition to claim list")?.rows ?? []} />
+          <ManagerExportButton
+            label="Export Prospective / Recapture / Suspect List"
+            filename="prospective-recapture-suspect.csv"
+            rows={data.conditions
+              .filter((condition) => condition.workflow === "prospective")
+              .map((condition) => ({ reviewId: condition.reviewId, icd10: condition.icd10, hcc: condition.hcc, subtype: condition.subtype ?? "suspect", raf: condition.raf }))}
+          />
+          <ManagerExportButton
+            label="Export Outreach / No Upcoming Visit List"
+            filename="outreach-no-upcoming-visit.csv"
+            rows={data.reviews
+              .filter((review) => !data.appointments.some((appointment) => appointment.patientId === review.patientId))
+              .map((review) => ({ reviewId: review.id, patient: maps.patients.get(review.patientId)?.name ?? "", status: review.status, assignedUserId: review.assignedUserId }))}
+          />
+          <ManagerExportButton label="Export ASM-style File" filename="asm-style-export.json" rows={generatedExports.find((item) => item.type === "Payer ASM export")?.rows ?? []} format="json" />
+        </div>
+        <p className="raf-note">Exports are simulated demo files generated from synthetic prototype data.</p>
+      </Panel>
+
       <Panel title="Assignments And Locks">
         <div className="assignment-table">
           <table className="data-table">
@@ -187,6 +216,41 @@ export function ManagerPage() {
       ) : null}
     </div>
   );
+}
+
+function ManagerExportButton({
+  label,
+  filename,
+  rows,
+  format = "csv"
+}: {
+  label: string;
+  filename: string;
+  rows: Record<string, unknown>[];
+  format?: "csv" | "json";
+}) {
+  return (
+    <Button onClick={() => downloadFile(filename, format === "json" ? JSON.stringify(rows, null, 2) : toCsv(rows))}>
+      <Download size={14} />
+      {label}
+    </Button>
+  );
+}
+
+function toCsv(rows: Record<string, unknown>[]) {
+  if (!rows.length) return "No rows";
+  const headers = Object.keys(rows[0]);
+  return [headers.join(","), ...rows.map((row) => headers.map((header) => JSON.stringify(row[header] ?? "")).join(","))].join("\n");
+}
+
+function downloadFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: filename.endsWith(".json") ? "application/json;charset=utf-8" : "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function AssignmentDialog({

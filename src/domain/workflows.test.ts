@@ -26,8 +26,10 @@ import {
 } from "./workflows";
 import {
   getActionTotals,
+  getActiveConditionEvidence,
   getAuditSamplingProfile,
   getDispositionSummary,
+  getEvidenceCycleTarget,
   getGeneratedExports,
   getOutreachStatusForReview,
   getPatientCalendarYearHccGroup,
@@ -256,10 +258,35 @@ describe("prototype workflow rules", () => {
     data = setDisposition(data, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
     const result = completeReview(data, "rev-100", user(data, "u-coder-1"), { ...settings, auditSampleRate: 0 });
     expect(result.unresolved).toHaveLength(0);
-    expect(result.data.history[0]).toMatchObject({
+    expect(result.data.history).toEqual(expect.arrayContaining([expect.objectContaining({
       event: "Review completed",
       detail: "All actionable conditions have a user-selected disposition or deterministic rule-derived outcome."
-    });
+    })]));
+    expect(result.data.reviews.some((review) => review.id.startsWith("gen-rev-") && review.assignedUserId === "u-coder-1")).toBe(true);
+  });
+
+  it("appends one deterministic generated chart to the completing CDI/Coder queue", () => {
+    const before = cloneSeed();
+    const result = disposeRev100(before, 0);
+    const generatedReviews = result.data.reviews.filter((review) => review.id.startsWith("gen-rev-"));
+    expect(generatedReviews).toHaveLength(1);
+    expect(generatedReviews[0]).toMatchObject({ assignedUserId: "u-coder-1", status: "Available", queue: "CDI/Coder Queue" });
+    expect(result.data.patients.some((patient) => patient.id === generatedReviews[0].patientId)).toBe(true);
+    expect(result.data.conditions.some((condition) => condition.reviewId === generatedReviews[0].id)).toBe(true);
+  });
+
+  it("cycles evidence only inside the active condition evidence set", () => {
+    const data = cloneSeed();
+    const relatedEvidence = data.evidence.filter((evidence) => evidence.reviewId === "rev-100");
+    const diabetesEvidence = getActiveConditionEvidence(data, relatedEvidence, "cond-100-a");
+    const chfEvidence = getActiveConditionEvidence(data, relatedEvidence, "cond-100-c");
+
+    expect(diabetesEvidence.map((evidence) => evidence.id)).toEqual(["ev-rev-100-a", "ev-rev-100-e"]);
+    expect(chfEvidence.map((evidence) => evidence.id)).toEqual(expect.arrayContaining(["ev-rev-100-b", "ev-rev-100-f"]));
+    expect(chfEvidence.map((evidence) => evidence.id)).not.toContain("ev-rev-100-a");
+    expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-a", "next")?.id).toBe("ev-rev-100-e");
+    expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-e", "next")?.id).toBe("ev-rev-100-a");
+    expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-a", "prev")?.id).toBe("ev-rev-100-e");
   });
 
   it("disables duplicate same-HCC additions after one add-to-claim selection", () => {

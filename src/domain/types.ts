@@ -182,6 +182,11 @@ export interface Claim {
   id: string;
   reviewId: string;
   dateOfService: string;
+  provider?: string;
+  cptCode?: string;
+  encounterType?: string;
+  payer?: string;
+  supportSummary?: string;
   riskEligible: boolean;
   cptSourceEligible: boolean;
   providerTypeEligible: boolean;

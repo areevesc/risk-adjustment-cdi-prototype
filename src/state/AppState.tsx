@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
-import { seedData } from "../data/seed";
+import { demoSeedData as seedData } from "../data/seed";
 import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, QueueType, RecommendationAction, Role, SeedData, User } from "../domain/types";
 import {
   assignReview,
