@@ -160,6 +160,132 @@ export interface DocumentSection {
   evidenceIds: string[];
 }
 
+export type ChartTab =
+  | "encounters"
+  | "problem-list"
+  | "pmh"
+  | "medications"
+  | "labs"
+  | "vitals"
+  | "imaging"
+  | "specialist-notes"
+  | "claims";
+
+export type LabFlag = "normal" | "abnormal" | "critical";
+export type ProblemStatus = "Active" | "Chronic" | "Resolved";
+export type EncounterQuality = "good" | "fair" | "poor";
+
+export interface ChartProblem {
+  id: string;
+  diagnosis: string;
+  code: string;
+  status: ProblemStatus;
+  dateAdded: string;
+  isHcc: boolean;
+  evidenceIds: string[];
+}
+
+export interface ChartMedication {
+  id: string;
+  name: string;
+  dose: string;
+  frequency: string;
+  route: string;
+  prescriber: string;
+  evidenceIds: string[];
+}
+
+export interface ChartLabResult {
+  id: string;
+  component: string;
+  value: string;
+  unit: string;
+  referenceRange: string;
+  flag: LabFlag;
+  evidenceIds: string[];
+}
+
+export interface ChartLabPanel {
+  id: string;
+  name: string;
+  date: string;
+  results: ChartLabResult[];
+}
+
+export interface ChartVital {
+  id: string;
+  date: string;
+  systolic: number;
+  diastolic: number;
+  heartRate: number;
+  temperature: number;
+  weight: number;
+  height: number;
+  bmi: number;
+  oxygenSaturation: number;
+  evidenceIds: string[];
+}
+
+export interface ChartImagingReport {
+  id: string;
+  type: string;
+  date: string;
+  indication: string;
+  findings: string;
+  impression: string[];
+  evidenceIds: string[];
+}
+
+export interface ChartAssessmentPlanItem {
+  id: string;
+  problem: string;
+  code?: string;
+  detail: string;
+  evidenceIds: string[];
+}
+
+export interface ChartEncounter {
+  id: string;
+  date: string;
+  type: string;
+  provider: string;
+  quality: EncounterQuality;
+  chiefComplaint: string;
+  hpi: string;
+  reviewOfSystems: string[];
+  physicalExam: Array<{ system: string; text: string }>;
+  vitals: ChartVital;
+  assessmentPlan: ChartAssessmentPlanItem[];
+  signatureTime: string;
+  billingCode: string;
+  evidenceIds: string[];
+  sectionEvidenceIds: Partial<Record<"chiefComplaint" | "hpi" | "ros" | "physicalExam" | "assessmentPlan" | "billing", string[]>>;
+}
+
+export interface ChartSpecialistNote {
+  id: string;
+  date: string;
+  specialty: string;
+  provider: string;
+  title: string;
+  note: string;
+  assessment: string[];
+  evidenceIds: string[];
+}
+
+export interface ClinicalChart {
+  reviewId: string;
+  problems: ChartProblem[];
+  encounters: ChartEncounter[];
+  medications: ChartMedication[];
+  labs: ChartLabPanel[];
+  vitals: ChartVital[];
+  imaging: ChartImagingReport[];
+  pastMedicalHistory: Array<{ id: string; text: string; evidenceIds: string[] }>;
+  specialistNotes: ChartSpecialistNote[];
+  claims: Claim[];
+}
+
 export interface EvidencePassage {
   id: string;
   reviewId: string;
@@ -176,6 +302,11 @@ export interface EvidencePassage {
   subtype?: ProspectiveSubtype;
   conditionIds: string[];
   summary: string;
+  chartAnchor?: {
+    tab: ChartTab;
+    itemId: string;
+    sectionId?: string;
+  };
 }
 
 export interface Claim {
@@ -386,6 +517,7 @@ export interface SeedData {
   documents: SourceDocument[];
   evidence: EvidencePassage[];
   claims: Claim[];
+  charts: ClinicalChart[];
   conditions: Condition[];
   appointments: UpcomingAppointment[];
   audits: Audit[];

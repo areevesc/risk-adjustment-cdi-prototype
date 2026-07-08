@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole, Play } from "lucide-react";
 import { useAppState } from "../../state/AppState";
@@ -22,7 +22,7 @@ import {
   isPrototypeCurrentYear,
   reviewConditions
 } from "../../domain/selectors";
-import type { Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult, SourceDocument } from "../../domain/types";
+import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult } from "../../domain/types";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
@@ -42,7 +42,7 @@ export function ReviewPage() {
   const { data, currentUser, settings, actions } = useAppState();
   const navigate = useNavigate();
   const review = data.reviews.find((item) => item.id === reviewId);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | undefined>();
+  const [activeChartTab, setActiveChartTab] = useState<ChartTab>("encounters");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
   const [activeConditionId, setActiveConditionId] = useState<string | undefined>();
   const [disagreeCondition, setDisagreeCondition] = useState<Condition | null>(null);
@@ -91,7 +91,7 @@ export function ReviewPage() {
   const documents = data.documents.filter((document) => relatedReviewIds.has(document.reviewId));
   const relatedEvidence = data.evidence.filter((item) => relatedReviewIds.has(item.reviewId));
   const activeEvidence = getActiveConditionEvidence(data, relatedEvidence, activeConditionId);
-  const activeDocument = documents.find((document) => document.id === selectedDocumentId) ?? documents[0];
+  const chart = data.charts.find((item) => item.reviewId === activeReview.id);
   const editable = canEditReview(activeReview, currentUser);
   const presentedSummary = getPresentedOpportunitySummary(data, activeReview);
   const dispositionSummary = getDispositionSummary(data, activeReview);
@@ -106,9 +106,12 @@ export function ReviewPage() {
   function jumpToEvidence(evidence: EvidencePassage) {
     if (evidence.conditionIds.length) setActiveConditionId(evidence.conditionIds[0]);
     setSelectedEvidenceId(evidence.id);
-    setSelectedDocumentId(evidence.documentId);
+    if (evidence.chartAnchor) setActiveChartTab(evidence.chartAnchor.tab);
     window.setTimeout(() => {
-      const target = document.getElementById(`span-${evidence.id}`) ?? document.getElementById(evidence.anchorId);
+      const target = evidence.chartAnchor
+        ? document.getElementById(chartElementId(evidence.chartAnchor.tab, evidence.chartAnchor.itemId, evidence.chartAnchor.sectionId)) ??
+          document.getElementById(`span-${evidence.id}`)
+        : document.getElementById(`span-${evidence.id}`) ?? document.getElementById(evidence.anchorId);
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 30);
   }
@@ -119,7 +122,7 @@ export function ReviewPage() {
   }
 
   function clearReviewLocalState() {
-    setSelectedDocumentId(undefined);
+    setActiveChartTab("encounters");
     setSelectedEvidenceId(undefined);
     setCompletionWarnings([]);
     setNextPatientMessage("");
@@ -345,7 +348,7 @@ export function ReviewPage() {
 
       <div className="split-workspace">
         <Panel
-          title="Source Documents And Evidence"
+          title="Embedded Chart And Evidence"
           actions={
             <div className="header-actions">
               <Button variant="secondary" onClick={() => stepEvidence("prev")}>
@@ -359,14 +362,19 @@ export function ReviewPage() {
             </div>
           }
         >
-          <DocumentViewer
+          {chart ? (
+          <ChartViewer
+            chart={chart}
             documents={documents}
-            activeDocument={activeDocument}
+            activeTab={activeChartTab}
             evidence={activeEvidence}
             selectedEvidenceId={selectedEvidenceId}
             activeConditionId={activeConditionId}
-            setSelectedDocumentId={setSelectedDocumentId}
+            setActiveTab={setActiveChartTab}
           />
+          ) : (
+            <EmptyState title="Chart unavailable" body="No embedded chart model exists for this review." />
+          )}
         </Panel>
 
         <Panel title="Conditions And Actions">
@@ -495,57 +503,286 @@ function CompactReviewSummary({
   );
 }
 
-function DocumentViewer({
+const chartTabs: Array<{ value: ChartTab; label: string }> = [
+  { value: "encounters", label: "Encounters" },
+  { value: "problem-list", label: "Problem List" },
+  { value: "pmh", label: "PMH" },
+  { value: "medications", label: "Medications" },
+  { value: "labs", label: "Labs" },
+  { value: "vitals", label: "Vitals" },
+  { value: "imaging", label: "Imaging" },
+  { value: "specialist-notes", label: "Specialist Notes" },
+  { value: "claims", label: "Claims" }
+];
+
+function chartElementId(tab: ChartTab, itemId: string, sectionId?: string) {
+  return `chart-${tab}-${itemId}${sectionId ? `-${sectionId}` : ""}`;
+}
+
+function ChartViewer({
+  chart,
   documents,
-  activeDocument,
+  activeTab,
   evidence,
   selectedEvidenceId,
   activeConditionId,
-  setSelectedDocumentId
+  setActiveTab
 }: {
-  documents: SourceDocument[];
-  activeDocument: SourceDocument;
+  chart: ClinicalChart;
+  documents: Array<{ id: string }>;
+  activeTab: ChartTab;
   evidence: EvidencePassage[];
   selectedEvidenceId?: string;
   activeConditionId?: string;
-  setSelectedDocumentId: (id: string) => void;
+  setActiveTab: (tab: ChartTab) => void;
 }) {
   const evidenceMap = new Map(evidence.map((item) => [item.id, item]));
+  const evidenceForIds = (ids: string[] = []) => ids.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
+  const rowClass = (ids: string[] = []) => {
+    const scoped = ids.some((id) => evidenceMap.has(id));
+    const selected = ids.includes(selectedEvidenceId ?? "");
+    return `chart-row ${scoped ? "has-evidence" : ""} ${selected ? "selected-evidence" : ""}`;
+  };
+  const evidenceStyle = (items: EvidencePassage[]) => {
+    const firstEvidence = items[0];
+    const token = firstEvidence?.subtype ? subtypeTokens[firstEvidence.subtype] : firstEvidence ? categoryTokens[firstEvidence.category] : undefined;
+    return token ? { borderColor: token.border } : undefined;
+  };
   return (
-    <div className="document-viewer">
-      <div className="document-tabs" role="tablist">
-        {documents.map((document) => (
-          <button key={document.id} className={document.id === activeDocument.id ? "active" : ""} onClick={() => setSelectedDocumentId(document.id)} type="button">
-            {document.type}
-            <span>{formatDate(document.date)}</span>
+    <div className="chart-viewer">
+      <div className="document-tabs chart-tabs" role="tablist" aria-label="Embedded chart sections">
+        {chartTabs.map((tab) => (
+          <button
+            key={tab.value}
+            className={tab.value === activeTab ? "active" : ""}
+            data-chart-tab={tab.value}
+            role="tab"
+            aria-selected={tab.value === activeTab}
+            onClick={() => setActiveTab(tab.value)}
+            type="button"
+          >
+            {tab.label}
+            <span>{tab.value === "encounters" ? `${chart.encounters.length} note(s)` : tab.value === "labs" ? `${chart.labs.length} panel(s)` : ""}</span>
           </button>
         ))}
       </div>
-      <article className="document-page">
+      <article className="document-page chart-page">
         <header>
-          <h3>{activeDocument.title}</h3>
+          <h3>Embedded Mock EMR Chart</h3>
           <div className="document-header-chips">
-            <StatusChip tone={activeDocument.isCurrentYear ? "info" : "warn"}>{activeDocument.isCurrentYear ? "Current calendar year" : "Historical evidence"}</StatusChip>
+            <StatusChip tone="info">{documents.length} source record(s)</StatusChip>
             <StatusChip tone={activeConditionId ? "purple" : "info"}>{activeConditionId ? "Condition-scoped evidence" : "All evidence visible"}</StatusChip>
           </div>
         </header>
-        {activeDocument.sections.map((section) => {
-          const sectionEvidence = section.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
-          const firstEvidence = sectionEvidence[0];
-          const isSelected = section.evidenceIds.includes(selectedEvidenceId ?? "");
-          const token = firstEvidence?.subtype ? subtypeTokens[firstEvidence.subtype] : firstEvidence ? categoryTokens[firstEvidence.category] : undefined;
-          return (
-            <p
-              id={section.id}
-              key={section.id}
-              className={`document-section ${section.evidenceIds.length ? "has-evidence" : ""} ${isSelected ? "selected-evidence" : ""}`}
-              style={token ? { borderColor: token.border } : undefined}
-            >
-              {renderEvidenceSpans(section.text, sectionEvidence, selectedEvidenceId)}
-            </p>
-          );
-        })}
+        {activeTab === "encounters" ? (
+          <div className="chart-stack">
+            {chart.encounters.map((encounter) => {
+              const hpiEvidence = evidenceForIds(encounter.sectionEvidenceIds.hpi);
+              const planEvidence = evidenceForIds(encounter.sectionEvidenceIds.assessmentPlan);
+              return (
+                <section key={encounter.id} className="chart-note">
+                  <div className="chart-note-header">
+                    <div>
+                      <strong>{formatDate(encounter.date)} - {encounter.type}</strong>
+                      <span>{encounter.provider}</span>
+                    </div>
+                    <StatusChip>{encounter.billingCode}</StatusChip>
+                  </div>
+                  <ChartSection title="Chief Complaint" id={chartElementId("encounters", encounter.id, "chiefComplaint")}>
+                    {encounter.chiefComplaint}
+                  </ChartSection>
+                  <ChartSection
+                    title="HPI"
+                    id={chartElementId("encounters", encounter.id, "hpi")}
+                    className={rowClass(encounter.sectionEvidenceIds.hpi)}
+                    style={evidenceStyle(hpiEvidence)}
+                  >
+                    {renderEvidenceSpans(encounter.hpi, hpiEvidence, selectedEvidenceId)}
+                  </ChartSection>
+                  <ChartSection title="Review Of Systems" id={chartElementId("encounters", encounter.id, "ros")}>
+                    <ul>{encounter.reviewOfSystems.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </ChartSection>
+                  <ChartSection title="Vitals" id={chartElementId("vitals", encounter.vitals.id)}>
+                    <div className={rowClass(encounter.vitals.evidenceIds)}>
+                      BP {encounter.vitals.systolic}/{encounter.vitals.diastolic} - HR {encounter.vitals.heartRate} - Temp {encounter.vitals.temperature}F - Wt {encounter.vitals.weight} lb - BMI {encounter.vitals.bmi} - O2 {encounter.vitals.oxygenSaturation}%
+                    </div>
+                  </ChartSection>
+                  <ChartSection title="Physical Exam" id={chartElementId("encounters", encounter.id, "physicalExam")}>
+                    <div className="exam-grid">
+                      {encounter.physicalExam.map((item) => (
+                        <div key={`${encounter.id}-${item.system}`}><strong>{item.system}</strong><span>{item.text}</span></div>
+                      ))}
+                    </div>
+                  </ChartSection>
+                  <ChartSection
+                    title="Assessment And Plan"
+                    id={chartElementId("encounters", encounter.id, "assessmentPlan")}
+                    className={rowClass(encounter.sectionEvidenceIds.assessmentPlan)}
+                    style={evidenceStyle(planEvidence)}
+                  >
+                    <ol className="plan-list">
+                      {encounter.assessmentPlan.map((plan, index) => {
+                        const itemEvidence = evidenceForIds(plan.evidenceIds);
+                        return (
+                          <li
+                            key={plan.id}
+                            id={chartElementId("encounters", plan.id, "assessmentPlan")}
+                            className={rowClass(plan.evidenceIds)}
+                            style={evidenceStyle(itemEvidence)}
+                          >
+                            <strong>{index + 1}. {plan.problem}</strong>
+                            <span>{renderEvidenceSpans(plan.detail, itemEvidence, selectedEvidenceId)}</span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </ChartSection>
+                  <footer>
+                    Electronically signed by {encounter.provider} on {formatDate(encounter.date)} at {encounter.signatureTime}. Billing code {encounter.billingCode}.
+                  </footer>
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
+        {activeTab === "problem-list" ? (
+          <ChartTable headers={["Diagnosis", "ICD-10", "Status", "Date Added", "HCC"]}>
+            {chart.problems.map((problem) => (
+              <tr key={problem.id} id={chartElementId("problem-list", problem.id)} className={rowClass(problem.evidenceIds)} style={evidenceStyle(evidenceForIds(problem.evidenceIds))}>
+                <td>{problem.diagnosis}</td>
+                <td className="mono">{problem.code}</td>
+                <td>{problem.status}</td>
+                <td>{formatDate(problem.dateAdded)}</td>
+                <td>{problem.isHcc ? "Yes" : "No"}</td>
+              </tr>
+            ))}
+          </ChartTable>
+        ) : null}
+        {activeTab === "pmh" ? (
+          <div className="chart-stack">
+            {chart.pastMedicalHistory.map((item) => (
+              <div key={item.id} id={chartElementId("pmh", item.id)} className={rowClass(item.evidenceIds)}>{item.text}</div>
+            ))}
+          </div>
+        ) : null}
+        {activeTab === "medications" ? (
+          <ChartTable headers={["Medication", "Dose", "Frequency", "Route", "Prescriber"]}>
+            {chart.medications.map((medication) => (
+              <tr key={medication.id} id={chartElementId("medications", medication.id)} className={rowClass(medication.evidenceIds)} style={evidenceStyle(evidenceForIds(medication.evidenceIds))}>
+                <td>{medication.name}</td>
+                <td>{medication.dose}</td>
+                <td>{medication.frequency}</td>
+                <td>{medication.route}</td>
+                <td>{medication.prescriber}</td>
+              </tr>
+            ))}
+          </ChartTable>
+        ) : null}
+        {activeTab === "labs" ? (
+          <div className="chart-stack">
+            {chart.labs.map((panel) => (
+              <section key={panel.id} className="chart-table-section">
+                <h4>{panel.name} <span>{formatDate(panel.date)}</span></h4>
+                <ChartTable headers={["Component", "Value", "Unit", "Reference", "Flag"]}>
+                  {panel.results.map((result) => (
+                    <tr key={result.id} id={chartElementId("labs", result.id)} className={rowClass(result.evidenceIds)} style={evidenceStyle(evidenceForIds(result.evidenceIds))}>
+                      <td>{result.component}</td>
+                      <td className={`lab-${result.flag}`}>{result.value}</td>
+                      <td>{result.unit}</td>
+                      <td>{result.referenceRange}</td>
+                      <td>{result.flag}</td>
+                    </tr>
+                  ))}
+                </ChartTable>
+              </section>
+            ))}
+          </div>
+        ) : null}
+        {activeTab === "vitals" ? (
+          <ChartTable headers={["Date", "BP", "HR", "Temp", "Weight", "Height", "BMI", "O2 Sat"]}>
+            {chart.vitals.map((vital) => (
+              <tr key={vital.id} id={chartElementId("vitals", vital.id)} className={rowClass(vital.evidenceIds)} style={evidenceStyle(evidenceForIds(vital.evidenceIds))}>
+                <td>{formatDate(vital.date)}</td>
+                <td>{vital.systolic}/{vital.diastolic}</td>
+                <td>{vital.heartRate}</td>
+                <td>{vital.temperature}F</td>
+                <td>{vital.weight} lb</td>
+                <td>{vital.height} in</td>
+                <td>{vital.bmi}</td>
+                <td>{vital.oxygenSaturation}%</td>
+              </tr>
+            ))}
+          </ChartTable>
+        ) : null}
+        {activeTab === "imaging" ? (
+          <div className="chart-stack">
+            {chart.imaging.map((report) => {
+              const reportEvidence = evidenceForIds(report.evidenceIds);
+              return (
+                <section key={report.id} id={chartElementId("imaging", report.id, "findings")} className={`chart-note ${rowClass(report.evidenceIds)}`} style={evidenceStyle(reportEvidence)}>
+                  <div className="chart-note-header"><strong>{report.type}</strong><span>{formatDate(report.date)} - {report.indication}</span></div>
+                  <ChartSection title="Findings">{renderEvidenceSpans(report.findings, reportEvidence, selectedEvidenceId)}</ChartSection>
+                  <ChartSection title="Impression"><ol>{report.impression.map((line) => <li key={line}>{line}</li>)}</ol></ChartSection>
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
+        {activeTab === "specialist-notes" ? (
+          <div className="chart-stack">
+            {chart.specialistNotes.map((note) => {
+              const noteEvidence = evidenceForIds(note.evidenceIds);
+              return (
+                <section key={note.id} id={chartElementId("specialist-notes", note.id, "note")} className={`chart-note ${rowClass(note.evidenceIds)}`} style={evidenceStyle(noteEvidence)}>
+                  <div className="chart-note-header"><strong>{note.title}</strong><span>{note.specialty} - {note.provider} - {formatDate(note.date)}</span></div>
+                  <p>{renderEvidenceSpans(note.note, noteEvidence, selectedEvidenceId)}</p>
+                  <ol>{note.assessment.map((line) => <li key={line}>{line}</li>)}</ol>
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
+        {activeTab === "claims" ? (
+          <ChartTable headers={["DOS", "Provider", "Payer", "CPT / Type", "ICD-10 Codes", "Eligibility", "Support"]}>
+            {chart.claims.map((claim) => {
+              const claimEvidence = evidence.filter((item) => item.chartAnchor?.tab === "claims" && item.chartAnchor.itemId === claim.id);
+              return (
+                <tr key={claim.id} id={chartElementId("claims", claim.id)} className={rowClass(claimEvidence.map((item) => item.id))} style={evidenceStyle(claimEvidence)}>
+                  <td>{formatDate(claim.dateOfService)}</td>
+                  <td>{claim.provider}</td>
+                  <td>{claim.payer}</td>
+                  <td>{claim.cptCode} / {claim.encounterType}</td>
+                  <td>{claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "No diagnosis on claim"}</td>
+                  <td>{claim.providerTypeEligible ? "Eligible provider" : "Provider issue"}; {claim.faceToFace ? "Face-to-face" : "Non-face-to-face"}; {claim.providerSignatureValid ? "Signed" : "Signature issue"}</td>
+                  <td>{renderEvidenceSpans(claim.supportSummary ?? "Claim support and eligibility reviewed.", claimEvidence, selectedEvidenceId)}</td>
+                </tr>
+              );
+            })}
+          </ChartTable>
+        ) : null}
       </article>
+    </div>
+  );
+}
+
+function ChartSection({ title, children, id, className = "", style }: { title: string; children: ReactNode; id?: string; className?: string; style?: CSSProperties }) {
+  return (
+    <section id={id} className={`chart-section ${className}`} style={style}>
+      <h4>{title}</h4>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function ChartTable({ headers, children }: { headers: string[]; children: ReactNode }) {
+  return (
+    <div className="chart-table-wrap">
+      <table className="chart-table">
+        <thead>
+          <tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
     </div>
   );
 }
