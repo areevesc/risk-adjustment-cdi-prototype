@@ -160,6 +160,31 @@ export interface DocumentSection {
   evidenceIds: string[];
 }
 
+export type EvidenceStrength =
+  | "strongCurrentYearMEAT"
+  | "weakMentionOnly"
+  | "clinicalIndicatorOnly"
+  | "historicalOnly"
+  | "suspect"
+  | "conflicting"
+  | "unsupported";
+
+export type MeatType = "Monitoring" | "Evaluation" | "Assessment" | "Treatment";
+
+export type EvidenceSourceType =
+  | "assessmentHeading"
+  | "planSentence"
+  | "hpiSentence"
+  | "medicationRow"
+  | "labResultRow"
+  | "vitalRow"
+  | "imagingImpression"
+  | "specialistAssessment"
+  | "problemListItem"
+  | "pmhItem"
+  | "claimLine"
+  | "morPayerRegistryHie";
+
 export type ChartTab =
   | "encounters"
   | "problem-list"
@@ -302,6 +327,15 @@ export interface EvidencePassage {
   subtype?: ProspectiveSubtype;
   conditionIds: string[];
   summary: string;
+  sourceType?: EvidenceSourceType;
+  sourceLocation?: string;
+  evidenceStrength?: EvidenceStrength;
+  meatType?: MeatType[];
+  currentYearSupport?: boolean;
+  historicalOnly?: boolean;
+  suspectOnly?: boolean;
+  recaptureOnly?: boolean;
+  reviewerExplanation?: string;
   chartAnchor?: {
     tab: ChartTab;
     itemId: string;

@@ -1375,6 +1375,25 @@ tr.chart-row.has-evidence td {
   border-color: var(--accent);
 }
 
+.evidence-list-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.evidence-strength-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 .evidence-list small,
 .disposition-row small,
 .timeline-item small,

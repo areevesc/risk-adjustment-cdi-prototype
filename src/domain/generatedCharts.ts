@@ -11,6 +11,8 @@ import type {
   Claim,
   ClinicalChart,
   Condition,
+  EvidenceSourceType,
+  EvidenceStrength,
   EvidencePassage,
   Patient,
   PatientReview,
@@ -18,6 +20,7 @@ import type {
   SourceDocument,
   UpcomingAppointment
 } from "./types";
+import { evidenceStrengthLabel, meatTypesForSource, sourceLocationFor } from "./mockClinicalContent";
 
 interface GeneratedChartBundle {
   patient: Patient;
@@ -204,6 +207,41 @@ function conditionWorkflow(category: Category): Condition["workflow"] {
   return "codesOnClaim";
 }
 
+function generatedEvidenceStrength(category: Category, subtype: ScenarioCondition["subtype"], sourceType: EvidenceSourceType): EvidenceStrength {
+  if (sourceType === "labResultRow") return "clinicalIndicatorOnly";
+  if (sourceType === "claimLine") return subtype === "recapture" ? "historicalOnly" : "weakMentionOnly";
+  if (category === "prospective") return subtype === "suspect" ? "suspect" : "historicalOnly";
+  if (sourceType === "planSentence") return "strongCurrentYearMEAT";
+  if (sourceType === "hpiSentence") return "weakMentionOnly";
+  return "weakMentionOnly";
+}
+
+function generatedEvidenceMeta(scenarioCondition: ScenarioCondition, sourceType: EvidenceSourceType) {
+  const evidenceStrength = generatedEvidenceStrength(scenarioCondition.category, scenarioCondition.subtype, sourceType);
+  const sourceLocation = sourceLocationFor(sourceType);
+  return {
+    sourceType,
+    sourceLocation,
+    evidenceStrength,
+    meatType: meatTypesForSource(sourceType, evidenceStrength),
+    currentYearSupport: evidenceStrength === "strongCurrentYearMEAT",
+    historicalOnly: evidenceStrength === "historicalOnly",
+    suspectOnly: evidenceStrength === "suspect" || scenarioCondition.subtype === "suspect",
+    recaptureOnly: scenarioCondition.subtype === "recapture" && evidenceStrength !== "strongCurrentYearMEAT",
+    summary: `${evidenceStrengthLabel(evidenceStrength)} - ${sourceLocation}`,
+    reviewerExplanation:
+      evidenceStrength === "strongCurrentYearMEAT"
+        ? `${sourceLocation} contains current-year MEAT support for ${scenarioCondition.description}.`
+        : evidenceStrength === "clinicalIndicatorOnly"
+          ? `${sourceLocation} is a clinical indicator for ${scenarioCondition.description}; it does not validate the diagnosis without assessment and plan support.`
+          : evidenceStrength === "historicalOnly"
+            ? `${sourceLocation} is lookback or prior-capture evidence for ${scenarioCondition.description}.`
+            : evidenceStrength === "suspect"
+              ? `${sourceLocation} supports a suspect opportunity for ${scenarioCondition.description}; provider confirmation is needed.`
+              : `${sourceLocation} mentions ${scenarioCondition.description} without complete current-year MEAT.`
+  };
+}
+
 export function buildGeneratedChart(data: SeedData, assignedUserId: string, calendarYear: number): GeneratedChartBundle {
   const index = nextGeneratedIndex(data);
   const scenario = scenarios[index % scenarios.length];
@@ -256,7 +294,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        summary: `${scenarioCondition.description} support in HPI`,
+        ...generatedEvidenceMeta(scenarioCondition, "hpiSentence"),
         chartAnchor: { tab: "encounters", itemId: `chart-${reviewId}-encounter-current`, sectionId: "hpi" }
       },
       {
@@ -270,7 +308,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        summary: `${scenarioCondition.description} assessment and plan`,
+        ...generatedEvidenceMeta(scenarioCondition, "planSentence"),
         chartAnchor: { tab: "encounters", itemId: `chart-${reviewId}-plan-${scenarioCondition.suffix}`, sectionId: "assessmentPlan" }
       },
       {
@@ -279,11 +317,12 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         documentId: `gen-doc-${reviewId}-labs`,
         anchorId: `chart-${reviewId}-lab-${scenarioCondition.suffix}-0`,
         text: scenarioCondition.labResults.map((result) => `${result.component} ${result.value} ${result.unit}`.trim()).join("; "),
+        exactText: scenarioCondition.labResults[0] ? `${scenarioCondition.labResults[0].component} ${scenarioCondition.labResults[0].value} ${scenarioCondition.labResults[0].unit}`.trim() : undefined,
         date: labDate,
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        summary: `${scenarioCondition.description} lab indicators`,
+        ...generatedEvidenceMeta(scenarioCondition, "labResultRow"),
         chartAnchor: { tab: "labs", itemId: `chart-${reviewId}-lab-${scenarioCondition.suffix}-0` }
       },
       {
@@ -296,7 +335,8 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        summary: `${scenarioCondition.description} claim line`,
+        exactText: `Claim support reviewed for ${scenarioCondition.icd10}`,
+        ...generatedEvidenceMeta(scenarioCondition, "claimLine"),
         chartAnchor: { tab: "claims", itemId: `gen-claim-${reviewId}-${scenarioCondition.suffix}` }
       }
     ];
@@ -322,7 +362,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
     type: "Established patient chronic care follow-up",
     provider: provider.name,
     quality: "good",
-    chiefComplaint: "Chronic condition follow-up, medication reconciliation, and risk adjustment documentation review.",
+    chiefComplaint: "Chronic condition follow-up and medication reconciliation.",
     hpi: `${patientName} returns for longitudinal review. ${scenario.conditions.map((item) => item.support).join(" ")}`,
     reviewOfSystems: [
       "Constitutional: no fever or acute weight loss.",
@@ -353,9 +393,9 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
     id: `chart-${reviewId}-encounter-prior`,
     date: priorDate,
     type: "Prior-year chronic care follow-up",
-    chiefComplaint: "Prior-year follow-up and risk condition lookback.",
-    hpi: "Historical capture pattern reviewed from payer return and prior chart documentation.",
-    assessmentPlan: assessmentPlan.map((plan) => ({ ...plan, id: `${plan.id}-prior`, detail: `Historical support reviewed: ${plan.problem}.` })),
+    chiefComplaint: "Prior-year chronic condition follow-up.",
+    hpi: "The patient was seen for longitudinal chronic disease follow-up with outside records, medications, and interval labs available for comparison.",
+    assessmentPlan: assessmentPlan.map((plan) => ({ ...plan, id: `${plan.id}-prior`, detail: `Longitudinal status reviewed for ${plan.problem}; current active status still depends on current-year provider assessment and management.` })),
     vitals: chartVitals[1],
     evidenceIds: [],
     sectionEvidenceIds: {}
@@ -436,7 +476,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
       cptCode: currentYearClaim ? "99214" : "G0439",
       encounterType: currentYearClaim ? "Established patient office visit" : "Annual wellness visit / historical capture",
       payer: payer.name,
-      supportSummary: scenarioCondition.support,
+      supportSummary: `Claim support reviewed for ${scenarioCondition.icd10}. ${scenarioCondition.support}`,
       riskEligible: true,
       cptSourceEligible: true,
       providerTypeEligible: true,
