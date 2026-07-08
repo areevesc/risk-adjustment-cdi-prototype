@@ -8,8 +8,10 @@ import {
   canEditReview,
   getClaimForReview,
   getDispositionSummary,
+  getActiveConditionEvidence,
   getDownstreamTaskForCondition,
   getDownstreamTasksForCondition,
+  getEvidenceCycleTarget,
   getEvidenceForCondition,
   getOutreachStatusForReview,
   getPresentedOpportunitySummary,
@@ -42,6 +44,7 @@ export function ReviewPage() {
   const review = data.reviews.find((item) => item.id === reviewId);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | undefined>();
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
+  const [activeConditionId, setActiveConditionId] = useState<string | undefined>();
   const [disagreeCondition, setDisagreeCondition] = useState<Condition | null>(null);
   const [changeCondition, setChangeCondition] = useState<Condition | null>(null);
   const [flagCondition, setFlagCondition] = useState<Condition | null>(null);
@@ -87,6 +90,7 @@ export function ReviewPage() {
   );
   const documents = data.documents.filter((document) => relatedReviewIds.has(document.reviewId));
   const relatedEvidence = data.evidence.filter((item) => relatedReviewIds.has(item.reviewId));
+  const activeEvidence = getActiveConditionEvidence(data, relatedEvidence, activeConditionId);
   const activeDocument = documents.find((document) => document.id === selectedDocumentId) ?? documents[0];
   const editable = canEditReview(activeReview, currentUser);
   const presentedSummary = getPresentedOpportunitySummary(data, activeReview);
@@ -100,6 +104,7 @@ export function ReviewPage() {
   const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while being edited by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
 
   function jumpToEvidence(evidence: EvidencePassage) {
+    if (evidence.conditionIds.length) setActiveConditionId(evidence.conditionIds[0]);
     setSelectedEvidenceId(evidence.id);
     setSelectedDocumentId(evidence.documentId);
     window.setTimeout(() => {
@@ -109,11 +114,8 @@ export function ReviewPage() {
   }
 
   function stepEvidence(direction: "prev" | "next") {
-    const all = relatedEvidence;
-    if (all.length === 0) return;
-    const currentIndex = Math.max(0, all.findIndex((item) => item.id === selectedEvidenceId));
-    const nextIndex = direction === "next" ? (currentIndex + 1) % all.length : (currentIndex - 1 + all.length) % all.length;
-    jumpToEvidence(all[nextIndex]);
+    const target = getEvidenceCycleTarget(activeEvidence, selectedEvidenceId, direction);
+    if (target) jumpToEvidence(target);
   }
 
   function clearReviewLocalState() {
@@ -296,12 +298,20 @@ export function ReviewPage() {
               <span>Prospective Suspect RAF {formatRaf(rafSummary.prospectiveSuspectRaf)}</span>
             </div>
             <div className="source-eligibility-row">
-              <EligibilityChip label="Risk-eligible source" ok={claim?.riskEligible !== false} />
-              <EligibilityChip label="Risk-eligible CPT" ok={claim?.cptSourceEligible !== false} />
-              <EligibilityChip label="Risk-eligible provider type" ok={claim?.providerTypeEligible !== false} />
-              <EligibilityChip label="Face-to-face service" ok={claim?.faceToFace !== false} />
+              <EligibilityChip label="Eligible CPT / encounter type" ok={claim?.cptSourceEligible !== false} />
+              <EligibilityChip label="Acceptable provider type" ok={claim?.providerTypeEligible !== false} />
+              <EligibilityChip label="Face-to-face visit" ok={claim?.faceToFace !== false} />
               <EligibilityChip label="Valid provider signature" ok={claim?.providerSignatureValid !== false} />
             </div>
+            {claim ? (
+              <div className="claim-detail-row">
+                <span>DOS {formatDate(claim.dateOfService)}</span>
+                <span>{claim.provider ?? provider?.name}</span>
+                <span>{claim.cptCode ?? "CPT"} {claim.encounterType ?? "Encounter"}</span>
+                <span>{claim.payer ?? payer?.name}</span>
+                <span>{claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "No claim diagnoses"}</span>
+              </div>
+            ) : null}
           </>
         ) : null}
         <div className="raf-note">Synthetic prototype values — not an authoritative CMS RAF calculation.</div>
@@ -352,8 +362,9 @@ export function ReviewPage() {
           <DocumentViewer
             documents={documents}
             activeDocument={activeDocument}
-            evidence={relatedEvidence}
+            evidence={activeEvidence}
             selectedEvidenceId={selectedEvidenceId}
+            activeConditionId={activeConditionId}
             setSelectedDocumentId={setSelectedDocumentId}
           />
         </Panel>
@@ -369,6 +380,8 @@ export function ReviewPage() {
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
+              activeConditionId={activeConditionId}
+              setActiveConditionId={setActiveConditionId}
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
@@ -383,6 +396,8 @@ export function ReviewPage() {
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
+              activeConditionId={activeConditionId}
+              setActiveConditionId={setActiveConditionId}
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
@@ -397,6 +412,8 @@ export function ReviewPage() {
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
+              activeConditionId={activeConditionId}
+              setActiveConditionId={setActiveConditionId}
               onDisagree={setDisagreeCondition}
               onChange={setChangeCondition}
               onFlag={setFlagCondition}
@@ -483,12 +500,14 @@ function DocumentViewer({
   activeDocument,
   evidence,
   selectedEvidenceId,
+  activeConditionId,
   setSelectedDocumentId
 }: {
   documents: SourceDocument[];
   activeDocument: SourceDocument;
   evidence: EvidencePassage[];
   selectedEvidenceId?: string;
+  activeConditionId?: string;
   setSelectedDocumentId: (id: string) => void;
 }) {
   const evidenceMap = new Map(evidence.map((item) => [item.id, item]));
@@ -505,7 +524,10 @@ function DocumentViewer({
       <article className="document-page">
         <header>
           <h3>{activeDocument.title}</h3>
-          <StatusChip tone={activeDocument.isCurrentYear ? "info" : "warn"}>{activeDocument.isCurrentYear ? "Current calendar year" : "Historical evidence"}</StatusChip>
+          <div className="document-header-chips">
+            <StatusChip tone={activeDocument.isCurrentYear ? "info" : "warn"}>{activeDocument.isCurrentYear ? "Current calendar year" : "Historical evidence"}</StatusChip>
+            <StatusChip tone={activeConditionId ? "purple" : "info"}>{activeConditionId ? "Condition-scoped evidence" : "All evidence visible"}</StatusChip>
+          </div>
         </header>
         {activeDocument.sections.map((section) => {
           const sectionEvidence = section.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
@@ -569,6 +591,8 @@ function ConditionGroup({
   readOnlyTitle,
   warningIds,
   jumpToEvidence,
+  activeConditionId,
+  setActiveConditionId,
   onDisagree,
   onChange,
   onFlag,
@@ -582,6 +606,8 @@ function ConditionGroup({
   readOnlyTitle?: string;
   warningIds: string[];
   jumpToEvidence: (evidence: EvidencePassage) => void;
+  activeConditionId?: string;
+  setActiveConditionId: (conditionId: string) => void;
   onDisagree: (condition: Condition) => void;
   onChange: (condition: Condition) => void;
   onFlag: (condition: Condition) => void;
@@ -601,6 +627,8 @@ function ConditionGroup({
           readOnlyTitle={readOnlyTitle}
           isWarning={warningIds.includes(condition.id)}
           jumpToEvidence={jumpToEvidence}
+          isActive={activeConditionId === condition.id}
+          setActiveConditionId={setActiveConditionId}
           onDisagree={onDisagree}
           onChange={onChange}
           onFlag={onFlag}
@@ -619,6 +647,8 @@ function ConditionCard({
   readOnlyTitle,
   isWarning,
   jumpToEvidence,
+  isActive,
+  setActiveConditionId,
   onDisagree,
   onChange,
   onFlag,
@@ -631,6 +661,8 @@ function ConditionCard({
   readOnlyTitle?: string;
   isWarning: boolean;
   jumpToEvidence: (evidence: EvidencePassage) => void;
+  isActive: boolean;
+  setActiveConditionId: (conditionId: string) => void;
   onDisagree: (condition: Condition) => void;
   onChange: (condition: Condition) => void;
   onFlag: (condition: Condition) => void;
@@ -669,7 +701,7 @@ function ConditionCard({
   }
 
   return (
-    <article className={`condition-card ${isWarning ? "needs-action" : ""}`}>
+    <article className={`condition-card ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
       <div className="condition-card-header">
         <div>
           <div className="condition-code">
@@ -685,11 +717,10 @@ function ConditionCard({
       <RecommendationBox recommendation={recommendation} settings={settings} />
       <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} />
       <div className="source-eligibility-row compact">
-        <EligibilityChip label="Risk source" ok={claim?.riskEligible !== false} />
-        <EligibilityChip label="CPT" ok={claim?.cptSourceEligible !== false} />
-        <EligibilityChip label="Provider type" ok={claim?.providerTypeEligible !== false} />
-        <EligibilityChip label="F2F" ok={claim?.faceToFace !== false} />
-        <EligibilityChip label="Signature" ok={claim?.providerSignatureValid !== false} />
+        <EligibilityChip label="Eligible CPT / encounter type" ok={claim?.cptSourceEligible !== false} />
+        <EligibilityChip label="Acceptable provider type" ok={claim?.providerTypeEligible !== false} />
+        <EligibilityChip label="Face-to-face visit" ok={claim?.faceToFace !== false} />
+        <EligibilityChip label="Valid provider signature" ok={claim?.providerSignatureValid !== false} />
       </div>
       <div className="condition-history">
         <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
@@ -701,7 +732,10 @@ function ConditionCard({
       </div>
       <div className="evidence-list">
         {evidence.map((item) => (
-          <button key={item.id} type="button" onClick={() => jumpToEvidence(item)}>
+          <button key={item.id} type="button" onClick={() => {
+            setActiveConditionId(condition.id);
+            jumpToEvidence(item);
+          }}>
             <span>{item.summary}</span>
             <small>{formatDate(item.date)}</small>
           </button>

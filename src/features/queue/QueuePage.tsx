@@ -24,6 +24,8 @@ interface QueueRow {
   payer: string;
   clinic: string;
   provider: string;
+  appointmentDate: string;
+  appointmentType: string;
   year: number;
   type: string;
   assigned: string;
@@ -81,6 +83,7 @@ export function QueuePage() {
       const coverageBy = review.coverage ? maps.users.get(review.coverage.coveringUserId)?.name ?? "Unknown CDI/Coder" : "";
       const categories = getPresentedOpportunitySummary(data, review);
       const counts = getProspectiveCounts(data, review);
+      const appointment = data.appointments.find((item) => item.id === review.appointmentId || item.patientId === patient.id);
       return {
         review,
         patient: patient.name,
@@ -89,6 +92,8 @@ export function QueuePage() {
         payer: maps.payers.get(patient.payerId)?.name ?? "-",
         clinic: maps.clinics.get(review.clinicId)?.name ?? "-",
         provider: maps.providers.get(review.providerId)?.name ?? "-",
+        appointmentDate: appointment ? formatDate(appointment.date) : "No upcoming visit",
+        appointmentType: appointment?.type ?? "Outreach list",
         year: review.calendarYear,
         type: review.reviewType,
         assigned: coverageBy ? `${assignedUsers || "Unassigned"} / Coverage: ${coverageBy}` : assignedUsers || "Unassigned",
@@ -242,6 +247,15 @@ export function QueuePage() {
   });
 
   const sortedRows = table.getRowModel().rows.map((row) => row.original);
+  const priorityRows = sortedRows.filter((row) => !row.noVisit);
+  const lowPriorityRows = sortedRows.filter((row) => row.noVisit);
+  const completedCount = rows.filter((row) => row.status === "Completed" || row.status === "Audit Complete").length;
+  const assignedCount = rows.length;
+  const averageRaf = rows.length
+    ? rows.reduce((sum, row) => sum + row.categories.validated.raf + row.categories.potentialAddition.raf + row.categories.prospective.raf - row.categories.potentialDelete.raf, 0) / rows.length
+    : 0;
+  const agreementCount = data.conditions.filter((condition) => condition.disposition?.agreedWithRecommendation).length;
+  const decisionCount = data.conditions.filter((condition) => condition.disposition).length;
 
   return (
     <div className="page-stack">
@@ -306,7 +320,15 @@ export function QueuePage() {
           </Button>
         </div>
         <div className="queue-count">{filteredRows.length} result(s)</div>
-        <div className="table-wrap queue-table-wrap" aria-label="Desktop work queue">
+        <div className="queue-metric-grid">
+          <QueueMetric label="Charts assigned" value={assignedCount} />
+          <QueueMetric label="Charts completed" value={completedCount} />
+          <QueueMetric label="Average RAF impact" value={averageRaf.toFixed(3)} />
+          <QueueMetric label="AI agreement" value={`${Math.round((agreementCount / Math.max(1, decisionCount)) * 100)}%`} />
+        </div>
+        <PatientQueueSection title="Upcoming Visits" rows={priorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
+        <PatientQueueSection title="Low Priority - No Upcoming Visit" rows={lowPriorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} lowPriority />
+        <div className="table-wrap queue-table-wrap legacy-queue-table" aria-label="Detailed desktop work queue">
           <table className="data-table queue-table">
             <colgroup>
               <col className="queue-col-patient" />
@@ -446,6 +468,85 @@ function MobileQueueCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function QueueMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="queue-metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function PatientQueueSection({
+  title,
+  rows,
+  data,
+  currentUser,
+  onOpen,
+  onCover,
+  lowPriority = false
+}: {
+  title: string;
+  rows: QueueRow[];
+  data: ReturnType<typeof useAppState>["data"];
+  currentUser: ReturnType<typeof useAppState>["currentUser"];
+  onOpen: (reviewId: string) => void;
+  onCover: (reviewId: string) => void;
+  lowPriority?: boolean;
+}) {
+  if (!rows.length) return null;
+  return (
+    <section className="patient-queue-section">
+      <div className="patient-queue-heading">
+        <h3>{title}</h3>
+        <StatusChip tone={lowPriority ? "warn" : "good"}>{rows.length} chart(s)</StatusChip>
+      </div>
+      <div className="patient-queue-list">
+        {rows.map((row) => (
+          <article key={row.review.id} className={`patient-queue-row ${lowPriority ? "low-priority" : ""}`}>
+            <div className="patient-queue-main">
+              <button type="button" onClick={() => onOpen(row.review.id)}>
+                <strong>{row.patient}</strong>
+                <span>
+                  DOB {row.dob} - {row.memberId}
+                </span>
+              </button>
+              <div className="patient-queue-meta">
+                <span>{row.payer}</span>
+                <span>
+                  {row.appointmentDate} - {row.provider}
+                </span>
+                <span>{row.appointmentType}</span>
+              </div>
+            </div>
+            <div className="category-strip" aria-label="Category indicators">
+              {Object.entries(row.categories).map(([category, value]) => (
+                <QueueCategoryBadge key={category} category={category as keyof typeof categoryTokens} count={value.count} />
+              ))}
+            </div>
+            <div className="patient-queue-status">
+              {lowPriority ? <StatusChip tone="warn">Low priority - no upcoming visit</StatusChip> : <StatusChip tone="good">Upcoming visit</StatusChip>}
+              <StatusChip>{row.status}</StatusChip>
+              <span>RAF {row.categories.validated.raf.toFixed(3)}</span>
+            </div>
+            <div className="row-actions">
+              <Button variant="primary" onClick={() => onOpen(row.review.id)}>
+                {canOpenReview(data, row.review, currentUser) ? "Open" : "View"}
+              </Button>
+              {canTakeCoverage(data, row.review, currentUser) && !isAssignedToUser(row.review, currentUser) ? (
+                <Button variant="secondary" onClick={() => onCover(row.review.id)}>
+                  <UserPlus size={14} />
+                  Take Coverage
+                </Button>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -1397,6 +1397,163 @@ export const exportsSeed: ExportRecord[] = [
   }
 ];
 
+const seedUserIdMap: Record<string, string> = {
+  "u-admin": "u-admin",
+  "u-manager-1": "u-manager-1",
+  "u-manager-2": "u-manager-1",
+  "u-auditor-1": "u-auditor-1",
+  "u-auditor-2": "u-auditor-1",
+  "u-coder-1": "u-coder-1",
+  "u-coder-2": "u-coder-2",
+  "u-coder-3": "u-coder-3",
+  "u-coder-4": "u-coder-4",
+  "u-coder-5": "u-coder-1",
+  "u-coder-6": "u-coder-1",
+  "u-cdi-1": "u-coder-1",
+  "u-cdi-2": "u-coder-2",
+  "u-cdi-3": "u-coder-3",
+  "u-cdi-4": "u-coder-4",
+  "u-cdi-5": "u-coder-4"
+};
+
+function seedUserId(id: string | undefined) {
+  return id ? seedUserIdMap[id] ?? id : id;
+}
+
+function richDocumentsFor(review: PatientReview): SourceDocument[] {
+  const noteDate = `${review.calendarYear}-04-12`;
+  const labDate = `${review.calendarYear}-03-05`;
+  return [
+    {
+      id: `doc-${review.id}-note`,
+      reviewId: review.id,
+      type: "Progress Note",
+      title: `${review.calendarYear} embedded EMR progress note`,
+      date: noteDate,
+      isCurrentYear: true,
+      cptSourceEligible: true,
+      providerTypeEligible: true,
+      faceToFace: true,
+      providerSignatureValid: true,
+      sections: [
+        section(`sec-${review.id}-note-1`, "Chief complaint: chronic condition follow-up, medication reconciliation, and pre-visit risk adjustment review.", []),
+        section(
+          `sec-${review.id}-note-2`,
+          "HPI: interval records were reviewed with diabetes, chronic kidney disease, heart failure symptoms, and medication adherence review. The patient reports variable home glucose readings, stable exertional dyspnea, and no acute chest pain.",
+          [`ev-${review.id}-a`, `ev-${review.id}-b`]
+        ),
+        section(`sec-${review.id}-note-ros`, "Review of systems: constitutional negative for fever; cardiovascular positive for trace edema; endocrine positive for glucose variability; renal negative for dysuria.", []),
+        section(`sec-${review.id}-note-exam`, "Physical exam: BP reviewed, lungs clear, regular rhythm, trace ankle edema, intact foot sensation except mild distal neuropathy.", []),
+        section(
+          `sec-${review.id}-note-3`,
+          "Assessment and plan: continue disease monitoring, reconcile specialist notes, and address open risk adjustment items at upcoming encounter. Diabetes, kidney disease, and cardiology follow-up remain active discussion points.",
+          [`ev-${review.id}-c`]
+        )
+      ]
+    },
+    {
+      id: `doc-${review.id}-lab`,
+      reviewId: review.id,
+      type: "Lab",
+      title: `${review.calendarYear} labs and vitals`,
+      date: labDate,
+      isCurrentYear: true,
+      sections: [
+        section(`sec-${review.id}-lab-1`, "Vitals: BP 138/76, HR 72, BMI 31.4, O2 saturation 95%. Labs: A1c, kidney function, lipid panel, and urine microalbumin were reviewed.", [`ev-${review.id}-d`]),
+        section(`sec-${review.id}-lab-2`, "Abnormal values include A1c 8.1%, eGFR 44 mL/min, urine microalbumin 142 mg/g, BNP 286 pg/mL, and LDL 118 mg/dL.", [`ev-${review.id}-e`])
+      ]
+    },
+    {
+      id: `doc-${review.id}-history`,
+      reviewId: review.id,
+      type: "Claims",
+      title: "Claims, MOR, payer registry, and HIE lookback",
+      date: `${review.calendarYear - 1}-10-20`,
+      isCurrentYear: false,
+      sections: [
+        section(
+          `sec-${review.id}-hist-1`,
+          "Prior capture history, registry flags, specialist referrals, and HIE data are summarized. Claims include date of service, provider, CPT 99214 or G0439, diagnosis codes, payer, eligible CPT / encounter type, acceptable provider type, face-to-face visit, and valid provider signature checks.",
+          [`ev-${review.id}-f`]
+        ),
+        section(`sec-${review.id}-hist-2`, "MOR / payer data: prior HCCs and suspect opportunities are retained separately from current-year documentation.", [])
+      ]
+    },
+    {
+      id: `doc-${review.id}-meds`,
+      reviewId: review.id,
+      type: "Registry",
+      title: "Medication list, problem list, PMH, imaging, and specialist notes",
+      date: `${review.calendarYear}-04-01`,
+      isCurrentYear: true,
+      sections: [
+        section(`sec-${review.id}-problem`, "Problem list: diabetes with complication, chronic kidney disease, heart failure history, hypertension, hyperlipidemia, and depression screening where applicable.", []),
+        section(`sec-${review.id}-pmh`, "Past medical history: Medicare Advantage member with chronic disease management, specialist involvement, and prior risk-adjustable conditions.", []),
+        section(`sec-${review.id}-medications`, "Medications: metformin, lisinopril, atorvastatin, carvedilol, furosemide, inhalers, and condition-specific therapy are reconciled against claims and registry evidence.", []),
+        section(`sec-${review.id}-imaging`, "Imaging / specialist notes: echo, renal ultrasound, chest imaging, nephrology, cardiology, pulmonology, and behavioral health snippets appear when relevant.", [])
+      ]
+    }
+  ];
+}
+
+function enrichDocuments(seedDocuments: SourceDocument[]) {
+  const baseDocumentIds = new Set(reviews.flatMap((review) => [`doc-${review.id}-note`, `doc-${review.id}-lab`, `doc-${review.id}-history`]));
+  const preservedSpecialDocuments = seedDocuments.filter((document) => !baseDocumentIds.has(document.id));
+  const generatedBase = reviews.flatMap(richDocumentsFor);
+  return [...generatedBase, ...preservedSpecialDocuments];
+}
+
+function enrichClaims(seedClaims: Claim[]): Claim[] {
+  return seedClaims.map((claim) => {
+    const review = reviews.find((item) => item.id === claim.reviewId);
+    const provider = review ? providers.find((item) => item.id === review.providerId) : undefined;
+    const patient = review ? patients.find((item) => item.id === review.patientId) : undefined;
+    const payer = patient ? payers.find((item) => item.id === patient.payerId) : undefined;
+    return {
+      ...claim,
+      provider: provider?.name,
+      cptCode: claim.cptSourceEligible ? "99214" : "99490",
+      encounterType: claim.cptSourceEligible ? "Established patient office visit" : "Care management/non-face-to-face review",
+      payer: payer?.name,
+      supportSummary: "Simulated claim row with eligibility fields for CDI review."
+    };
+  });
+}
+
+function simplifySeedUsers(data: SeedData): SeedData {
+  const simplifiedUsers: User[] = users
+    .filter((user) => ["u-admin", "u-manager-1", "u-auditor-1", "u-coder-1", "u-coder-2", "u-coder-3", "u-coder-4"].includes(user.id))
+    .map((user): User => (user.id === "u-admin" ? { ...user, roles: ["Administrator"], primaryRole: "Administrator" } : user));
+  return {
+    ...data,
+    users: simplifiedUsers,
+    teams: teams.map((team) => ({ ...team, managerId: seedUserId(team.managerId) ?? team.managerId })),
+    clinics: clinics.map((clinic, index) => ({ ...clinic, defaultAssigneeId: `u-coder-${(index % 4) + 1}` })),
+    reviews: data.reviews.map((review) => ({
+      ...review,
+      assignedUserId: seedUserId(review.assignedUserId) ?? "u-coder-1",
+      assignedAuditorId: seedUserId(review.assignedAuditorId),
+      lock: review.lock ? { ...review.lock, lockedByUserId: seedUserId(review.lock.lockedByUserId) ?? "u-coder-1" } : undefined,
+      coverage: review.coverage
+        ? {
+            ...review.coverage,
+            originalAssignedUserId: seedUserId(review.coverage.originalAssignedUserId) ?? review.assignedUserId,
+            coveringUserId: seedUserId(review.coverage.coveringUserId) ?? review.coverage.coveringUserId,
+            initiatedByUserId: seedUserId(review.coverage.initiatedByUserId) ?? review.coverage.initiatedByUserId
+          }
+        : undefined
+    })),
+    audits: data.audits.map((audit) => ({ ...audit, auditorId: seedUserId(audit.auditorId) ?? "u-auditor-1" })),
+    conditions: data.conditions.map((condition) => ({
+      ...condition,
+      disposition: condition.disposition ? { ...condition.disposition, userId: seedUserId(condition.disposition.userId) ?? "u-coder-1" } : undefined,
+      auditorDisposition: condition.auditorDisposition ? { ...condition.auditorDisposition, auditorId: seedUserId(condition.auditorDisposition.auditorId) ?? "u-auditor-1" } : undefined,
+      documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: seedUserId(issue.userId) ?? "u-coder-1" }))
+    })),
+    history: data.history.map((entry) => ({ ...entry, userId: seedUserId(entry.userId) ?? "u-coder-1" }))
+  };
+}
+
 export const seedData: SeedData = {
   users,
   teams,
@@ -1405,9 +1562,9 @@ export const seedData: SeedData = {
   payers,
   patients,
   reviews,
-  documents,
+  documents: enrichDocuments(documents),
   evidence,
-  claims,
+  claims: enrichClaims(claims),
   conditions,
   appointments,
   audits,
@@ -1415,4 +1572,6 @@ export const seedData: SeedData = {
   history,
   exports: exportsSeed
 };
+
+export const demoSeedData: SeedData = simplifySeedUsers(seedData);
 

@@ -280,6 +280,22 @@ export function getEvidenceForCondition(data: SeedData, condition: Condition): E
   return condition.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
 }
 
+export function getActiveConditionEvidence(data: SeedData, relatedEvidence: EvidencePassage[], activeConditionId?: string): EvidencePassage[] {
+  if (!activeConditionId) return relatedEvidence;
+  const condition = data.conditions.find((item) => item.id === activeConditionId);
+  if (!condition) return relatedEvidence.filter((item) => item.conditionIds.includes(activeConditionId));
+  const allowedIds = new Set(condition.evidenceIds);
+  return relatedEvidence.filter((item) => allowedIds.has(item.id) || item.conditionIds.includes(activeConditionId));
+}
+
+export function getEvidenceCycleTarget(evidence: EvidencePassage[], selectedEvidenceId: string | undefined, direction: "prev" | "next") {
+  if (evidence.length === 0) return undefined;
+  const currentIndex = evidence.findIndex((item) => item.id === selectedEvidenceId);
+  const normalizedIndex = currentIndex >= 0 ? currentIndex : direction === "next" ? -1 : 0;
+  const nextIndex = direction === "next" ? (normalizedIndex + 1) % evidence.length : (normalizedIndex - 1 + evidence.length) % evidence.length;
+  return evidence[nextIndex];
+}
+
 export function getAuditForReview(data: SeedData, reviewId: string): Audit | undefined {
   return data.audits.find((audit) => audit.reviewId === reviewId);
 }

@@ -62,7 +62,7 @@ export function RecommendationBox({
   settings: AppSettings;
 }) {
   if (!recommendation) return <div className="recommendation muted">Recommendation assistance is hidden or unavailable for this condition.</div>;
-  const label = decisionSupportService.getDisplayLabel(recommendation, settings);
+  const label = settings.recommendationMode === "simulated" ? `AI recommends ${recommendation.action}` : decisionSupportService.getDisplayLabel(recommendation, settings);
   const Icon = recommendation.source === "seeded" ? Sparkles : Bot;
   return (
     <div className="recommendation">
