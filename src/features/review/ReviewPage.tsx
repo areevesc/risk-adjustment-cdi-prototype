@@ -230,11 +230,19 @@ export function ReviewPage() {
         }
       >
         <div className="patient-title-row">
-          <div>
+          <div className="patient-title-block">
+            <button type="button" className="patient-back-link" onClick={returnToQueue}>
+              <ArrowLeft size={15} />
+              Back to Work Queue
+            </button>
             <h2>{patient.name}</h2>
-            <p>
-              DOB {formatDate(patient.dob)} - Member {patient.memberId} - {payer?.name}
-            </p>
+            <div className="patient-header-meta-strip">
+              <span><small>DOB</small>{formatDate(patient.dob)}</span>
+              <span><small>Member ID</small>{patient.memberId}</span>
+              <span><small>Plan / Payer</small>{payer?.name}</span>
+              <span><small>DOS / Visit</small>{displayAppointment ? formatDate(displayAppointment.date) : "No upcoming visit"}</span>
+              <span><small>Provider</small>{provider?.name}</span>
+            </div>
           </div>
           <div className="patient-meta">
             <span>CY {review.calendarYear}</span>
@@ -489,32 +497,26 @@ function CompactReviewSummary({
   const prospectiveOpen = dispositionSummary["Sent to Prospective"].count + dispositionSummary["Prospective Yes"].count + dispositionSummary["Prospective No"].count;
   return (
     <div className="compact-review-summary" aria-label="Compact review summary">
-      <span>
-        Validated <strong>{dispositionSummary.Validated.count}</strong>
-      </span>
-      <span>
-        Deleted <strong>{dispositionSummary.Deleted.count}</strong>
-      </span>
-      <span>
-        Added <strong>{dispositionSummary["Added to Claim"].count}</strong>
-      </span>
-      <span>
-        Prospective <strong>{prospectiveOpen}</strong>
-      </span>
-      <span>
-        Unresolved <strong>{dispositionSummary.Unresolved.count}</strong>
-      </span>
-      <span>
-        Projected RAF <strong>{formatRaf(projectedRaf)}</strong>
-      </span>
-      <span>
-        Open RAF <strong>{formatRaf(unresolvedRaf)}</strong>
-      </span>
-      <div className="compact-presented-summary">
-        {Object.entries(presentedSummary).map(([category, summary]) => (
-          <CategoryBadge key={category} category={category as keyof typeof categoryTokens} count={summary.count} />
-        ))}
+      <ReviewSummaryCard category="validated" label="Validated" value={presentedSummary.validated.count} raf={presentedSummary.validated.raf} />
+      <ReviewSummaryCard category="potentialDelete" label="Potential Delete" value={presentedSummary.potentialDelete.count} raf={presentedSummary.potentialDelete.raf} />
+      <ReviewSummaryCard category="potentialAddition" label="Potential Addition" value={presentedSummary.potentialAddition.count} raf={presentedSummary.potentialAddition.raf} />
+      <ReviewSummaryCard category="prospective" label="CDI Recapture / Suspect" value={presentedSummary.prospective.count || prospectiveOpen} raf={presentedSummary.prospective.raf} />
+      <div className="review-summary-card total-raf-card">
+        <span>Total RAF</span>
+        <strong>{formatRaf(projectedRaf)}</strong>
+        <small>Open RAF {formatRaf(unresolvedRaf)}</small>
       </div>
+    </div>
+  );
+}
+
+function ReviewSummaryCard({ category, label, value, raf }: { category: keyof typeof categoryTokens; label: string; value: number; raf: number }) {
+  const token = categoryTokens[category];
+  return (
+    <div className="review-summary-card" style={{ color: token.color, background: token.bg, borderColor: token.border }}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>RAF {formatRaf(raf)}</small>
     </div>
   );
 }
@@ -867,9 +869,15 @@ function ConditionGroup({
   onDeleteSafety: (condition: Condition) => void;
 }) {
   if (!conditions.length) return null;
+  const presentation = getConditionGroupPresentation(title);
   return (
-    <section className="condition-group">
-      <h3>{title}</h3>
+    <section className={`condition-group condition-group-${presentation.tone}`}>
+      <header className="condition-group-heading">
+        <div>
+          <h3><span className="condition-group-dot" />{title}</h3>
+          <p>{presentation.subtitle}</p>
+        </div>
+      </header>
       {conditions.map((condition) => (
         <ConditionCard
           key={condition.id}
@@ -890,6 +898,16 @@ function ConditionGroup({
       ))}
     </section>
   );
+}
+
+function getConditionGroupPresentation(title: string) {
+  if (title.includes("not on Claim")) {
+    return { tone: "addition", subtitle: "MEAT documentation suggests HCCs that may need capture." };
+  }
+  if (title.includes("Prospective")) {
+    return { tone: "prospective", subtitle: "3-year look-back, recapture, and suspect opportunities for CDI review." };
+  }
+  return { tone: "validated", subtitle: "HCCs on the CMS risk-eligible claim; validate MEAT documentation." };
 }
 
 function ConditionCard({
@@ -953,21 +971,52 @@ function ConditionCard({
     return disabledRule(action)?.reason;
   }
 
+  const token = condition.subtype ? subtypeTokens[condition.subtype] : categoryTokens[condition.category];
+  const marker =
+    condition.subtype === "recapture"
+      ? "R"
+      : condition.subtype === "suspect"
+        ? "S"
+        : condition.category === "potentialDelete"
+          ? "D"
+          : condition.category === "potentialAddition"
+            ? "A"
+            : "V";
+  const evidenceSummary = evidence[0]?.summary ?? recommendation?.rationale ?? "No focused evidence summary available in this synthetic review.";
+
   return (
-    <article className={`condition-card ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
+    <article className={`condition-card condition-${condition.category} ${condition.workflow === "prospective" ? "prospective-condition" : ""} ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
       <div className="condition-card-header">
+        <div className="condition-marker" style={{ color: token.color, background: token.bg, borderColor: token.border }}>{marker}</div>
         <div>
           <div className="condition-code">
             <span className="mono">{condition.icd10}</span>
             <strong>{condition.description}</strong>
           </div>
-          <p>
-            {condition.hcc} - RAF {formatRaf(condition.raf)} - {condition.claimStatus} - Source {formatDate(condition.sourceDate)}
-          </p>
+          <div className="condition-pill-row">
+            <span>{condition.hcc}</span>
+            <span>RAF {formatRaf(condition.raf)}</span>
+            <span>{condition.claimStatus}</span>
+            <span>Source {formatDate(condition.sourceDate)}</span>
+          </div>
+          <p className="condition-meat-line">MEAT: {evidenceSummary}</p>
         </div>
         <CategoryBadge category={condition.category} subtype={condition.subtype} />
       </div>
       <RecommendationBox recommendation={recommendation} settings={settings} />
+      {condition.workflow === "prospective" ? (
+        <div className="prospective-rationale">
+          <ul>
+            {evidence.slice(0, 3).map((item) => (
+              <li key={item.id}>{item.summary}</li>
+            ))}
+          </ul>
+          <div className="prospective-question">
+            <strong>Prospective CDI question</strong>
+            <span>{recommendation?.rationale ?? "Review whether this condition should be addressed during outreach or the upcoming encounter."}</span>
+          </div>
+        </div>
+      ) : null}
       <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} />
       <div className="source-eligibility-row compact">
         <EligibilityChip label="Eligible CPT / encounter type" ok={claim?.cptSourceEligible !== false} />
@@ -1035,22 +1084,22 @@ function ConditionCard({
         <div className="action-row">
           {condition.workflow === "codesOnClaim" ? (
             <>
-              <Button disabled={isDisabled("Validate")} title={actionTitle("Validate")} onClick={() => act("Validate")}>Validate</Button>
-              <Button variant="danger" disabled={isDisabled("Delete")} title={actionTitle("Delete")} onClick={() => act("Delete")}>Delete</Button>
-              <Button disabled={isDisabled("Send to Prospective")} title={actionTitle("Send to Prospective")} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
+              <Button className="action-validate" disabled={isDisabled("Validate")} title={actionTitle("Validate")} onClick={() => act("Validate")}>Validate</Button>
+              <Button className="action-delete" variant="danger" disabled={isDisabled("Delete")} title={actionTitle("Delete")} onClick={() => act("Delete")}>Delete</Button>
+              <Button className="action-prospective" disabled={isDisabled("Send to Prospective")} title={actionTitle("Send to Prospective")} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
             </>
           ) : null}
           {condition.workflow === "codesNotOnClaim" ? (
             <>
-              <Button disabled={isDisabled("Add to Claim")} title={actionTitle("Add to Claim")} onClick={() => act("Add to Claim")}>Add to Claim</Button>
+              <Button className="action-add" disabled={isDisabled("Add to Claim")} title={actionTitle("Add to Claim")} onClick={() => act("Add to Claim")}>Add to Claim</Button>
               <Button disabled={isDisabled("Disagree")} title={actionTitle("Disagree")} onClick={() => onDisagree(condition)}>Disagree</Button>
             </>
           ) : null}
           {condition.workflow === "prospective" ? (
             <>
-              <Button disabled={isDisabled("Yes")} title={actionTitle("Yes")} onClick={() => act("Yes")}>Yes</Button>
-              <Button disabled={isDisabled("No")} title={actionTitle("No")} onClick={() => act("No")}>No</Button>
-              <Button disabled={isDisabled("Change")} title={actionTitle("Change")} onClick={() => onChange(condition)}>Change</Button>
+              <Button className="action-validate" disabled={isDisabled("Yes")} title={actionTitle("Yes")} onClick={() => act("Yes")}>Yes</Button>
+              <Button className="action-delete" disabled={isDisabled("No")} title={actionTitle("No")} onClick={() => act("No")}>No</Button>
+              <Button className="action-prospective" disabled={isDisabled("Change")} title={actionTitle("Change")} onClick={() => onChange(condition)}>Change</Button>
             </>
           ) : null}
           <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>

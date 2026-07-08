@@ -39,6 +39,8 @@ interface QueueRow {
   suspect: number;
   sourceExamples: string[];
   noVisit: boolean;
+  age: number;
+  totalRaf: number;
 }
 
 const columnHelper = createColumnHelper<QueueRow>();
@@ -84,6 +86,7 @@ export function QueuePage() {
       const categories = getPresentedOpportunitySummary(data, review);
       const counts = getProspectiveCounts(data, review);
       const appointment = data.appointments.find((item) => item.id === review.appointmentId || item.patientId === patient.id);
+      const totalRaf = categories.validated.raf + categories.potentialAddition.raf + categories.prospective.raf - categories.potentialDelete.raf;
       return {
         review,
         patient: patient.name,
@@ -106,7 +109,9 @@ export function QueuePage() {
         recapture: counts.recapture,
         suspect: counts.suspect,
         sourceExamples: getReviewScenarioTags(data, review),
-        noVisit: !maps.appointments.has(patient.id)
+        noVisit: !maps.appointments.has(patient.id),
+        age: calculateAge(patient.dob, appointment?.date),
+        totalRaf
       };
     });
   }, [currentUser, data, maps]);
@@ -326,6 +331,7 @@ export function QueuePage() {
           <QueueMetric label="Average RAF impact" value={averageRaf.toFixed(3)} />
           <QueueMetric label="AI agreement" value={`${Math.round((agreementCount / Math.max(1, decisionCount)) * 100)}%`} />
         </div>
+        <CategoryLegend />
         <PatientQueueSection title="Upcoming Visits" rows={priorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
         <PatientQueueSection title="Low Priority - No Upcoming Visit" rows={lowPriorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} lowPriority />
         <div className="table-wrap queue-table-wrap legacy-queue-table" aria-label="Detailed desktop work queue">
@@ -480,6 +486,17 @@ function QueueMetric({ label, value }: { label: string; value: string | number }
   );
 }
 
+function CategoryLegend() {
+  return (
+    <div className="queue-category-legend" aria-label="Category legend">
+      <span><i className="legend-dot legend-validated" />Validated</span>
+      <span><i className="legend-dot legend-delete" />Potential Delete</span>
+      <span><i className="legend-dot legend-addition" />Potential Addition</span>
+      <span><i className="legend-dot legend-prospective" />CDI Recapture / Suspect</span>
+    </div>
+  );
+}
+
 function PatientQueueSection({
   title,
   rows,
@@ -504,33 +521,41 @@ function PatientQueueSection({
         <h3>{title}</h3>
         <StatusChip tone={lowPriority ? "warn" : "good"}>{rows.length} chart(s)</StatusChip>
       </div>
+      <div className="patient-queue-table-head" aria-hidden="true">
+        <span>Patient</span>
+        <span>DOS - Provider</span>
+        <span>Payer</span>
+        <span>Total RAF</span>
+        <span>Categories</span>
+        <span>Action</span>
+      </div>
       <div className="patient-queue-list">
         {rows.map((row) => (
           <article key={row.review.id} className={`patient-queue-row ${lowPriority ? "low-priority" : ""}`}>
-            <div className="patient-queue-main">
+            <div className="patient-queue-patient">
               <button type="button" onClick={() => onOpen(row.review.id)}>
                 <strong>{row.patient}</strong>
                 <span>
-                  DOB {row.dob} - {row.memberId}
+                  {row.memberId} - DOB {row.dob} - Age {row.age}
                 </span>
               </button>
-              <div className="patient-queue-meta">
-                <span>{row.payer}</span>
-                <span>
-                  {row.appointmentDate} - {row.provider}
-                </span>
-                <span>{row.appointmentType}</span>
+              {row.sourceExamples.length ? <ScenarioTagList tags={row.sourceExamples} limit={2} /> : null}
+              <div className="patient-queue-status">
+                {lowPriority ? <StatusChip tone="warn">Low priority - no upcoming visit</StatusChip> : <StatusChip tone="good">Upcoming visit</StatusChip>}
+                <StatusChip>{row.status}</StatusChip>
               </div>
             </div>
-            <div className="category-strip" aria-label="Category indicators">
-              {Object.entries(row.categories).map(([category, value]) => (
-                <QueueCategoryBadge key={category} category={category as keyof typeof categoryTokens} count={value.count} />
-              ))}
+            <div className="patient-queue-dos">
+              <strong>{row.appointmentDate}</strong>
+              <span>{row.provider}</span>
+              <small>{row.appointmentType}</small>
             </div>
-            <div className="patient-queue-status">
-              {lowPriority ? <StatusChip tone="warn">Low priority - no upcoming visit</StatusChip> : <StatusChip tone="good">Upcoming visit</StatusChip>}
-              <StatusChip>{row.status}</StatusChip>
-              <span>RAF {row.categories.validated.raf.toFixed(3)}</span>
+            <div className="patient-queue-payer">{row.payer}</div>
+            <div className="patient-queue-raf">{row.totalRaf.toFixed(3)}</div>
+            <div className="patient-queue-categories" aria-label="Category indicators">
+              {Object.entries(row.categories).map(([category, value]) => (
+                <QueueCategoryBadge key={category} category={category as keyof typeof categoryTokens} count={value.count} compact />
+              ))}
             </div>
             <div className="row-actions">
               <Button variant="primary" onClick={() => onOpen(row.review.id)}>
@@ -550,6 +575,15 @@ function PatientQueueSection({
   );
 }
 
+function calculateAge(dob: string, asOfDate?: string) {
+  const birthDate = new Date(`${dob}T00:00:00`);
+  const today = new Date(`${asOfDate ?? new Date().toISOString().slice(0, 10)}T00:00:00`);
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const hasHadBirthday = today.getMonth() > birthDate.getMonth() || (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+  if (!hasHadBirthday) age -= 1;
+  return age;
+}
+
 function ScenarioTagList({ tags, limit }: { tags: string[]; limit?: number }) {
   const visibleTags = typeof limit === "number" ? tags.slice(0, limit) : tags;
   const remaining = typeof limit === "number" ? tags.length - visibleTags.length : 0;
@@ -563,14 +597,14 @@ function ScenarioTagList({ tags, limit }: { tags: string[]; limit?: number }) {
   );
 }
 
-function QueueCategoryBadge({ category, count }: { category: keyof typeof categoryTokens; count: number }) {
+function QueueCategoryBadge({ category, count, compact = false }: { category: keyof typeof categoryTokens; count: number; compact?: boolean }) {
   const token = categoryTokens[category];
   const label =
     category === "potentialDelete" ? "Delete" : category === "potentialAddition" ? "Addition" : category === "prospective" ? "CDI" : token.label;
   return (
-    <span className="category-badge queue-category-badge" style={{ color: token.color, background: token.bg, borderColor: token.border }}>
-      <span className="dot" />
-      {label}
+    <span className={`category-badge queue-category-badge${compact ? " compact" : ""}`} style={{ color: token.color, background: token.bg, borderColor: token.border }}>
+      {compact ? null : <span className="dot" />}
+      {compact ? null : label}
       <strong>{count}</strong>
     </span>
   );
