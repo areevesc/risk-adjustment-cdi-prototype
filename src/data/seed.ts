@@ -2,6 +2,7 @@ import type {
   ActionHistory,
   Audit,
   Claim,
+  ClinicalChart,
   Clinic,
   Condition,
   EvidencePassage,
@@ -20,28 +21,19 @@ import type {
 const now = "2026-06-24T09:00:00.000Z";
 
 export const users: User[] = [
-  { id: "u-admin", name: "Jordan Avery", primaryRole: "Administrator", roles: ["Administrator", "Manager"], teamId: "t-admin", defaultClinicIds: [] },
+  { id: "u-admin", name: "Jordan Avery", primaryRole: "Administrator", roles: ["Administrator"], teamId: "t-admin", defaultClinicIds: [] },
   { id: "u-manager-1", name: "Maya Chen", primaryRole: "Manager", roles: ["Manager"], teamId: "t-north", defaultClinicIds: ["clinic-river", "clinic-oak"] },
-  { id: "u-manager-2", name: "Samir Patel", primaryRole: "Manager", roles: ["Manager"], teamId: "t-south", defaultClinicIds: ["clinic-lake", "clinic-canyon"] },
   { id: "u-auditor-1", name: "Tessa Morgan", primaryRole: "Auditor", roles: ["Auditor"], teamId: "t-audit", defaultClinicIds: [] },
-  { id: "u-auditor-2", name: "Leo Vargas", primaryRole: "Auditor", roles: ["Auditor"], teamId: "t-audit", defaultClinicIds: [] },
   { id: "u-coder-1", name: "Nina Brooks", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
   { id: "u-coder-2", name: "Evan Hale", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
   { id: "u-coder-3", name: "Grace Imani", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
-  { id: "u-coder-4", name: "Owen Reed", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
-  { id: "u-coder-5", name: "Priya Shah", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river", "clinic-oak"] },
-  { id: "u-cdi-1", name: "Clara Wood", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] },
-  { id: "u-cdi-2", name: "Hector Ruiz", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-oak"] },
-  { id: "u-cdi-3", name: "Amina Diallo", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake"] },
-  { id: "u-cdi-4", name: "Noah Kim", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] },
-  { id: "u-cdi-5", name: "Iris Stone", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-lake", "clinic-canyon"] },
-  { id: "u-coder-6", name: "Marcus Bell", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-north", defaultClinicIds: ["clinic-river"] }
+  { id: "u-coder-4", name: "Owen Reed", primaryRole: "CDI/Coder", roles: ["CDI/Coder"], teamId: "t-south", defaultClinicIds: ["clinic-canyon"] }
 ];
 
 export const teams: Team[] = [
   { id: "t-admin", name: "Administration", managerId: "u-admin" },
   { id: "t-north", name: "North Risk Adjustment", managerId: "u-manager-1" },
-  { id: "t-south", name: "South CDI Operations", managerId: "u-manager-2" },
+  { id: "t-south", name: "South CDI Operations", managerId: "u-manager-1" },
   { id: "t-audit", name: "Quality Audit", managerId: "u-admin" }
 ];
 
@@ -1520,6 +1512,216 @@ function enrichClaims(seedClaims: Claim[]): Claim[] {
   });
 }
 
+function chartAnchorForEvidence(evidence: EvidencePassage): EvidencePassage["chartAnchor"] {
+  if (evidence.id.includes("specialist") || evidence.id.includes("hierarchy")) {
+    return { tab: "specialist-notes", itemId: `chart-${evidence.reviewId}-specialist`, sectionId: "note" };
+  }
+  if (evidence.id.includes("imaging") || evidence.id.includes("pathology")) {
+    return { tab: "imaging", itemId: `chart-${evidence.reviewId}-imaging`, sectionId: "findings" };
+  }
+  if (evidence.id.includes("claim") || evidence.id.includes("mor") || evidence.id.includes("payer") || evidence.id.includes("lookback") || evidence.id.endsWith("-f")) {
+    return { tab: "claims", itemId: `claim-${evidence.reviewId}` };
+  }
+  if (evidence.id.endsWith("-d") || evidence.id.endsWith("-e") || evidence.id.includes("quality")) {
+    return { tab: "labs", itemId: `chart-${evidence.reviewId}-lab-risk` };
+  }
+  if (evidence.id.endsWith("-c")) {
+    return { tab: "encounters", itemId: `chart-${evidence.reviewId}-plan-open-items`, sectionId: "assessmentPlan" };
+  }
+  return { tab: "encounters", itemId: `chart-${evidence.reviewId}-encounter-current`, sectionId: "hpi" };
+}
+
+function enrichEvidence(seedEvidence: EvidencePassage[]): EvidencePassage[] {
+  return seedEvidence.map((item) => ({ ...item, chartAnchor: item.chartAnchor ?? chartAnchorForEvidence(item) }));
+}
+
+function medicationForCondition(condition: Condition, providerName: string, evidenceIds: string[]) {
+  const description = condition.description.toLowerCase();
+  if (description.includes("diabetes")) {
+    return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Metformin ER", dose: "500 mg", frequency: "daily", route: "PO", prescriber: providerName, evidenceIds };
+  }
+  if (description.includes("heart failure")) {
+    return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Furosemide", dose: "40 mg", frequency: "daily", route: "PO", prescriber: providerName, evidenceIds };
+  }
+  if (description.includes("copd") || description.includes("bronchitis")) {
+    return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Albuterol HFA", dose: "2 puffs", frequency: "as needed", route: "Inhaled", prescriber: providerName, evidenceIds };
+  }
+  if (description.includes("depress")) {
+    return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Sertraline", dose: "100 mg", frequency: "daily", route: "PO", prescriber: providerName, evidenceIds };
+  }
+  if (description.includes("kidney")) {
+    return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Lisinopril", dose: "20 mg", frequency: "daily", route: "PO", prescriber: providerName, evidenceIds };
+  }
+  return { id: `chart-${condition.reviewId}-med-${condition.id}`, name: "Atorvastatin", dose: "40 mg", frequency: "nightly", route: "PO", prescriber: providerName, evidenceIds };
+}
+
+function riskLabRows(reviewId: string, reviewEvidence: EvidencePassage[]) {
+  const evidenceIds = (suffix: string) => reviewEvidence.filter((item) => item.id.endsWith(suffix)).map((item) => item.id);
+  return [
+    { id: `chart-${reviewId}-lab-risk`, component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" as const, evidenceIds: evidenceIds("-d") },
+    { id: `chart-${reviewId}-lab-egfr`, component: "Estimated GFR", value: "44", unit: "mL/min", referenceRange: ">60", flag: "abnormal" as const, evidenceIds: evidenceIds("-d") },
+    { id: `chart-${reviewId}-lab-uacr`, component: "Urine Albumin/Creatinine Ratio", value: "142", unit: "mg/g", referenceRange: "<30", flag: "abnormal" as const, evidenceIds: evidenceIds("-d") },
+    { id: `chart-${reviewId}-lab-bnp`, component: "BNP", value: "286", unit: "pg/mL", referenceRange: "<100", flag: "abnormal" as const, evidenceIds: evidenceIds("-b").concat(evidenceIds("-f")) },
+    { id: `chart-${reviewId}-lab-ldl`, component: "LDL", value: "118", unit: "mg/dL", referenceRange: "<100", flag: "abnormal" as const, evidenceIds: evidenceIds("-e") }
+  ];
+}
+
+function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: EvidencePassage[], seedClaims: Claim[]): ClinicalChart[] {
+  return seedReviews.map((review) => {
+    const provider = providers.find((item) => item.id === review.providerId);
+    const providerName = provider?.name ?? "Primary Care Provider";
+    const patient = patients.find((item) => item.id === review.patientId);
+    const reviewEvidence = seedEvidence.filter((item) => item.reviewId === review.id);
+    const conditionMap = new Map(conditions.map((condition) => [condition.id, condition]));
+    const reviewConditions = review.conditionIds.map((id) => conditionMap.get(id)).filter(Boolean) as Condition[];
+    const conditionEvidenceIds = (condition: Condition) => reviewEvidence.filter((item) => item.conditionIds.includes(condition.id)).map((item) => item.id);
+    const hpiEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "encounters" && item.chartAnchor.sectionId === "hpi").map((item) => item.id);
+    const planEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "encounters" && item.chartAnchor.sectionId === "assessmentPlan").map((item) => item.id);
+    const claimEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "claims").map((item) => item.id);
+    const currentVital = {
+      id: `chart-${review.id}-vital-current`,
+      date: `${review.calendarYear}-04-12`,
+      systolic: 138,
+      diastolic: 76,
+      heartRate: 72,
+      temperature: 98.4,
+      weight: 188,
+      height: 65,
+      bmi: 31.4,
+      oxygenSaturation: 95,
+      evidenceIds: reviewEvidence.filter((item) => item.id.endsWith("-d") || item.id.endsWith("-e")).map((item) => item.id)
+    };
+    const priorVital = {
+      ...currentVital,
+      id: `chart-${review.id}-vital-prior`,
+      date: `${review.calendarYear - 1}-10-20`,
+      systolic: 146,
+      diastolic: 82,
+      heartRate: 78,
+      weight: 192,
+      bmi: 32.0,
+      evidenceIds: []
+    };
+    const assessmentPlan = reviewConditions.slice(0, 6).map((condition) => ({
+      id: condition.id === "cond-100-c" ? `chart-${review.id}-plan-open-items` : `chart-${review.id}-plan-${condition.id}`,
+      problem: `${condition.description} (${condition.icd10})`,
+      code: condition.icd10,
+      detail:
+        condition.workflow === "prospective"
+          ? `Prior capture and current clinical context reviewed; confirm active status and treatment plan for ${condition.description}.`
+          : `Assess, monitor, evaluate, and treat ${condition.description}; reconcile claim status and supporting documentation.`,
+      evidenceIds: condition.evidenceIds.filter((id) => planEvidenceIds.includes(id))
+    }));
+    const encounters = [
+      {
+        id: `chart-${review.id}-encounter-current`,
+        date: `${review.calendarYear}-04-12`,
+        type: "Established patient chronic care follow-up",
+        provider: providerName,
+        quality: "good" as const,
+        chiefComplaint: "Chronic condition follow-up and medication reconciliation.",
+        hpi:
+          `HPI: interval records were reviewed for ${patient?.name ?? "the member"}. ` +
+          "The chart documents diabetes, chronic kidney disease, heart failure symptoms, medication adherence review, and risk adjustment items needing condition-specific action.",
+        reviewOfSystems: [
+          "Constitutional: denies fever; appetite stable.",
+          "Cardiovascular: trace edema and exertional tolerance reviewed.",
+          "Respiratory: dyspnea and cough reviewed against pulmonary history.",
+          "Endocrine: glucose variability reviewed.",
+          "Psychiatric: mood, sleep, and safety screening reviewed."
+        ],
+        physicalExam: [
+          { system: "General", text: "Alert, no acute distress." },
+          { system: "Cardiovascular", text: "Regular rhythm; trace ankle edema where clinically relevant." },
+          { system: "Respiratory", text: "Lungs clear without acute distress." },
+          { system: "Extremities", text: "Foot sensation and edema reviewed." }
+        ],
+        vitals: currentVital,
+        assessmentPlan,
+        signatureTime: "4:15 PM",
+        billingCode: "99214",
+        evidenceIds: [...hpiEvidenceIds, ...planEvidenceIds],
+        sectionEvidenceIds: { hpi: hpiEvidenceIds, assessmentPlan: planEvidenceIds, billing: claimEvidenceIds }
+      },
+      {
+        id: `chart-${review.id}-encounter-lookback`,
+        date: `${review.calendarYear - 1}-10-20`,
+        type: "Prior-year chronic care follow-up",
+        provider: providerName,
+        quality: "fair" as const,
+        chiefComplaint: "Prior-year risk condition follow-up.",
+        hpi: "Historical capture, registry flags, specialist referrals, and HIE data were reviewed for three-year lookback context.",
+        reviewOfSystems: ["Constitutional: stable.", "Cardiovascular: chronic symptoms reviewed.", "Respiratory: chronic pulmonary symptoms reviewed when present."],
+        physicalExam: [{ system: "General", text: "Prior-year exam reviewed for longitudinal support." }],
+        vitals: priorVital,
+        assessmentPlan: assessmentPlan.map((item) => ({ ...item, id: `${item.id}-lookback`, detail: `Historical support reviewed for ${item.problem}.`, evidenceIds: claimEvidenceIds })),
+        signatureTime: "2:08 PM",
+        billingCode: "G0439",
+        evidenceIds: claimEvidenceIds,
+        sectionEvidenceIds: { hpi: claimEvidenceIds, assessmentPlan: claimEvidenceIds, billing: claimEvidenceIds }
+      }
+    ];
+    const chartClaims = seedClaims.filter((claim) => claim.reviewId === review.id);
+    return {
+      reviewId: review.id,
+      problems: reviewConditions.map((condition) => ({
+        id: `chart-${review.id}-problem-${condition.id}`,
+        diagnosis: condition.description,
+        code: condition.icd10,
+        status: condition.resolvedFlag ? "Resolved" : condition.persistence === "chronic" || condition.workflow !== "prospective" ? "Active" : "Chronic",
+        dateAdded: `${review.calendarYear - 2}-02-14`,
+        isHcc: !condition.sdohCode && !condition.qualityExclusionCode,
+        evidenceIds: conditionEvidenceIds(condition)
+      })),
+      encounters,
+      medications: reviewConditions.slice(0, 6).map((condition) => medicationForCondition(condition, providerName, conditionEvidenceIds(condition))),
+      labs: [
+        { id: `chart-${review.id}-panel-risk`, name: "Risk Adjustment Chronic Disease Panel", date: `${review.calendarYear}-03-05`, results: riskLabRows(review.id, reviewEvidence) },
+        {
+          id: `chart-${review.id}-panel-cmp`,
+          name: "Comprehensive Metabolic Panel",
+          date: `${review.calendarYear}-03-05`,
+          results: [
+            { id: `chart-${review.id}-lab-na`, component: "Sodium", value: "139", unit: "mmol/L", referenceRange: "136-145", flag: "normal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-k`, component: "Potassium", value: "4.2", unit: "mmol/L", referenceRange: "3.5-5.1", flag: "normal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-cr`, component: "Creatinine", value: "1.36", unit: "mg/dL", referenceRange: "0.60-1.20", flag: "abnormal", evidenceIds: hpiEvidenceIds }
+          ]
+        }
+      ],
+      vitals: [currentVital, priorVital],
+      imaging: [
+        {
+          id: `chart-${review.id}-imaging`,
+          type: review.id === "rev-100" ? "Chest imaging and pathology summary" : "Longitudinal imaging summary",
+          date: `${review.calendarYear}-05-11`,
+          indication: "Risk condition support and conflicting evidence review",
+          findings: "Imaging and external reports are reviewed for chronic condition support, acute-only findings, and trumping-control context.",
+          impression: ["No acute unsupported RAF capture should be inferred from imaging alone.", "Condition-specific findings are highlighted when selected."],
+          evidenceIds: reviewEvidence.filter((item) => item.chartAnchor?.tab === "imaging").map((item) => item.id)
+        }
+      ],
+      pastMedicalHistory: [
+        { id: `chart-${review.id}-pmh-1`, text: "Medicare Advantage member with longitudinal chronic disease management.", evidenceIds: [] },
+        { id: `chart-${review.id}-pmh-2`, text: "Prior risk-adjustable conditions reviewed through claims, registry, MOR, HIE, and specialist data.", evidenceIds: claimEvidenceIds },
+        { id: `chart-${review.id}-pmh-3`, text: "Hypertension, hyperlipidemia, diabetes complications, cardiopulmonary history, and behavioral health history appear when clinically relevant.", evidenceIds: [] }
+      ],
+      specialistNotes: [
+        {
+          id: `chart-${review.id}-specialist`,
+          date: `${review.calendarYear}-02-09`,
+          specialty: "Specialist / external chart",
+          provider: review.id === "rev-100" ? "Rachel Kline, MD" : providerName,
+          title: "Specialist documentation summary",
+          note: "Specialist notes document chronic disease status, treatment monitoring, conflicting evidence, and hierarchy examples when relevant to the selected condition.",
+          assessment: reviewConditions.slice(0, 4).map((condition) => `${condition.description}: ${condition.claimStatus}`),
+          evidenceIds: reviewEvidence.filter((item) => item.chartAnchor?.tab === "specialist-notes").map((item) => item.id)
+        }
+      ],
+      claims: chartClaims
+    };
+  });
+}
+
 function simplifySeedUsers(data: SeedData): SeedData {
   const simplifiedUsers: User[] = users
     .filter((user) => ["u-admin", "u-manager-1", "u-auditor-1", "u-coder-1", "u-coder-2", "u-coder-3", "u-coder-4"].includes(user.id))
@@ -1554,7 +1756,10 @@ function simplifySeedUsers(data: SeedData): SeedData {
   };
 }
 
-export const seedData: SeedData = {
+const enrichedEvidence = enrichEvidence(evidence);
+const enrichedClaims = enrichClaims(claims);
+
+const rawSeedData: SeedData = {
   users,
   teams,
   clinics,
@@ -1563,8 +1768,9 @@ export const seedData: SeedData = {
   patients,
   reviews,
   documents: enrichDocuments(documents),
-  evidence,
-  claims: enrichClaims(claims),
+  evidence: enrichedEvidence,
+  claims: enrichedClaims,
+  charts: buildClinicalCharts(reviews, enrichedEvidence, enrichedClaims),
   conditions,
   appointments,
   audits,
@@ -1573,5 +1779,6 @@ export const seedData: SeedData = {
   exports: exportsSeed
 };
 
-export const demoSeedData: SeedData = simplifySeedUsers(seedData);
+export const seedData: SeedData = simplifySeedUsers(rawSeedData);
+export const demoSeedData: SeedData = seedData;
 

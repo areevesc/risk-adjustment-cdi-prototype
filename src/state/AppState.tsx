@@ -88,6 +88,29 @@ const legacyRoleMap: Record<string, Role> = {
   "CDI/Coder": "CDI/Coder"
 };
 
+const legacyUserIdMap: Record<string, string> = {
+  "u-admin": "u-admin",
+  "u-manager-1": "u-manager-1",
+  "u-manager-2": "u-manager-1",
+  "u-auditor-1": "u-auditor-1",
+  "u-auditor-2": "u-auditor-1",
+  "u-coder-1": "u-coder-1",
+  "u-coder-2": "u-coder-2",
+  "u-coder-3": "u-coder-3",
+  "u-coder-4": "u-coder-4",
+  "u-coder-5": "u-coder-1",
+  "u-coder-6": "u-coder-1",
+  "u-cdi-1": "u-coder-1",
+  "u-cdi-2": "u-coder-2",
+  "u-cdi-3": "u-coder-3",
+  "u-cdi-4": "u-coder-4",
+  "u-cdi-5": "u-coder-4"
+};
+
+function normalizeUserId(id: string | undefined) {
+  return id ? legacyUserIdMap[id] ?? id : id;
+}
+
 function normalizeRole(role: unknown): Role {
   return legacyRoleMap[String(role)] ?? "CDI/Coder";
 }
@@ -112,28 +135,46 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
     };
   });
   const clinicById = new Map(clinics.map((clinic) => [clinic.id, clinic]));
-  const users = raw.users.map((user) => {
-    const roles = Array.from(new Set(user.roles.map(normalizeRole)));
-    return {
-      ...user,
-      roles,
-      primaryRole: normalizeRole(user.primaryRole)
-    };
-  });
+  const users = seedData.users;
   return {
     ...raw,
     users,
-    clinics,
+    teams: raw.teams.map((team) => ({ ...team, managerId: normalizeUserId(team.managerId) ?? "u-manager-1" })),
+    clinics: clinics.map((clinic) => ({ ...clinic, defaultAssigneeId: normalizeUserId(clinic.defaultAssigneeId) ?? "u-coder-1" })),
+    charts: raw.charts ?? seedData.charts,
     reviews: raw.reviews.map((review) => {
       const legacyReview = review as typeof review & { assignedCoderId?: string; assignedCdiId?: string };
       const { assignedCoderId: _assignedCoderId, assignedCdiId: _assignedCdiId, ...currentReview } = legacyReview;
+      const assignedUserId = normalizeUserId(review.assignedUserId ?? legacyReview.assignedCoderId ?? legacyReview.assignedCdiId ?? clinicById.get(review.clinicId)?.defaultAssigneeId) ?? "u-coder-1";
       return {
         ...currentReview,
         queue: normalizeQueue(review.queue),
-        assignedUserId: review.assignedUserId ?? legacyReview.assignedCoderId ?? legacyReview.assignedCdiId ?? clinicById.get(review.clinicId)?.defaultAssigneeId ?? "u-coder-1",
-        assignedAuditorId: review.assignedAuditorId
+        assignedUserId,
+        assignedAuditorId: normalizeUserId(review.assignedAuditorId),
+        lock: review.lock ? { ...review.lock, lockedByUserId: normalizeUserId(review.lock.lockedByUserId) ?? assignedUserId } : undefined,
+        coverage: review.coverage
+          ? {
+              ...review.coverage,
+              originalAssignedUserId: normalizeUserId(review.coverage.originalAssignedUserId) ?? assignedUserId,
+              coveringUserId: normalizeUserId(review.coverage.coveringUserId) ?? assignedUserId,
+              initiatedByUserId: normalizeUserId(review.coverage.initiatedByUserId) ?? assignedUserId
+            }
+          : undefined
       };
-    })
+    }),
+    audits: raw.audits.map((audit) => ({ ...audit, auditorId: normalizeUserId(audit.auditorId) ?? "u-auditor-1" })),
+    conditions: raw.conditions.map((condition) => ({
+      ...condition,
+      disposition: condition.disposition ? { ...condition.disposition, userId: normalizeUserId(condition.disposition.userId) ?? "u-coder-1" } : undefined,
+      auditorDisposition: condition.auditorDisposition ? { ...condition.auditorDisposition, auditorId: normalizeUserId(condition.auditorDisposition.auditorId) ?? "u-auditor-1" } : undefined,
+      documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: normalizeUserId(issue.userId) ?? "u-coder-1" }))
+    })),
+    downstreamTasks: (raw.downstreamTasks ?? []).map((task) => ({
+      ...task,
+      assignedUserId: normalizeUserId(task.assignedUserId),
+      createdByUserId: normalizeUserId(task.createdByUserId) ?? "u-coder-1"
+    })),
+    history: raw.history.map((entry) => ({ ...entry, userId: normalizeUserId(entry.userId) ?? "u-coder-1" }))
   };
 }
 

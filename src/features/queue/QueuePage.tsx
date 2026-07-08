@@ -258,7 +258,7 @@ export function QueuePage() {
   const decisionCount = data.conditions.filter((condition) => condition.disposition).length;
 
   return (
-    <div className="page-stack">
+    <div className={`page-stack ${canAssignReviews(currentUser) ? "manager-queue-page" : "cdi-queue-page"}`}>
       <Panel
         title="Work Queue"
         actions={

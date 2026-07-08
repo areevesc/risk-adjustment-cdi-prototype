@@ -96,9 +96,23 @@ describe("routing and prototype authorization", () => {
     legacy.reviews[0] = { ...legacy.reviews[0], assignedUserId: undefined as unknown as string, assignedCoderId: "u-coder-1", assignedCdiId: "u-cdi-1", queue: "Assigned Coder" as never } as never;
 
     const normalized = normalizeSeedData(legacy);
-    expect(normalized.users[5]).toMatchObject({ primaryRole: "CDI/Coder", roles: ["CDI/Coder"] });
-    expect(normalized.users[10]).toMatchObject({ primaryRole: "CDI/Coder", roles: ["CDI/Coder"] });
+    expect(normalized.users).toHaveLength(7);
+    expect(normalized.users.some((item) => item.id === "u-cdi-1")).toBe(false);
     expect(normalized.reviews[0]).toMatchObject({ assignedUserId: "u-coder-1", queue: "CDI/Coder Queue" });
+  });
+
+  it("uses the simplified seed user roster", () => {
+    const data = cloneSeed();
+    expect(data.users.map((item) => item.primaryRole).sort()).toEqual([
+      "Administrator",
+      "Auditor",
+      "CDI/Coder",
+      "CDI/Coder",
+      "CDI/Coder",
+      "CDI/Coder",
+      "Manager"
+    ]);
+    expect(data.users.map((item) => item.id).sort()).toEqual(["u-admin", "u-auditor-1", "u-coder-1", "u-coder-2", "u-coder-3", "u-coder-4", "u-manager-1"]);
   });
 });
 
@@ -269,10 +283,34 @@ describe("prototype workflow rules", () => {
     const before = cloneSeed();
     const result = disposeRev100(before, 0);
     const generatedReviews = result.data.reviews.filter((review) => review.id.startsWith("gen-rev-"));
+    const generatedChart = result.data.charts.find((chart) => chart.reviewId === generatedReviews[0]?.id);
     expect(generatedReviews).toHaveLength(1);
     expect(generatedReviews[0]).toMatchObject({ assignedUserId: "u-coder-1", status: "Available", queue: "CDI/Coder Queue" });
     expect(result.data.patients.some((patient) => patient.id === generatedReviews[0].patientId)).toBe(true);
     expect(result.data.conditions.some((condition) => condition.reviewId === generatedReviews[0].id)).toBe(true);
+    expect(generatedChart).toBeTruthy();
+    expect(generatedChart?.encounters.length).toBeGreaterThanOrEqual(2);
+    expect(generatedChart?.labs[0].results.some((result) => result.component && result.referenceRange && result.flag)).toBe(true);
+    expect(generatedChart?.claims[0]).toMatchObject({ cptCode: expect.any(String), providerTypeEligible: true, faceToFace: true, providerSignatureValid: true });
+  });
+
+  it("seeds full embedded chart documentation for reviews", () => {
+    const data = cloneSeed();
+    const chart = data.charts.find((item) => item.reviewId === "rev-100")!;
+    expect(chart.encounters[0]).toMatchObject({
+      chiefComplaint: expect.any(String),
+      hpi: expect.stringContaining("diabetes"),
+      billingCode: "99214"
+    });
+    expect(chart.encounters[0].assessmentPlan.length).toBeGreaterThan(0);
+    expect(chart.problems.length).toBeGreaterThan(0);
+    expect(chart.medications.length).toBeGreaterThan(0);
+    expect(chart.labs[0].results[0]).toMatchObject({ component: expect.any(String), value: expect.any(String), unit: expect.any(String), referenceRange: expect.any(String), flag: expect.any(String) });
+    expect(chart.vitals[0]).toMatchObject({ systolic: expect.any(Number), heartRate: expect.any(Number), bmi: expect.any(Number), oxygenSaturation: expect.any(Number) });
+    expect(chart.imaging.length).toBeGreaterThan(0);
+    expect(chart.specialistNotes.length).toBeGreaterThan(0);
+    expect(chart.claims[0]).toMatchObject({ dateOfService: expect.any(String), provider: expect.any(String), payer: expect.any(String), cptCode: expect.any(String), encounterType: expect.any(String) });
+    expect(data.evidence.find((item) => item.id === "ev-rev-100-d")?.chartAnchor).toMatchObject({ tab: "labs" });
   });
 
   it("cycles evidence only inside the active condition evidence set", () => {
@@ -661,21 +699,21 @@ describe("RAF, audit, assignment, stats, and exports", () => {
 
   it("prevents completed audit actions unless reopened", () => {
     const data = cloneSeed();
-    const completedAgain = completeAudit(data, "rev-109", user(data, "u-auditor-2"), "Disagree", "Late disagreement");
+    const completedAgain = completeAudit(data, "rev-109", user(data, "u-auditor-1"), "Disagree", "Late disagreement");
     expect(completedAgain.audits.find((item) => item.reviewId === "rev-109")?.outcome).toBe("Agree");
   });
 
   it("keeps temporary coverage separate from original assignment and records permanent reassignment", () => {
     const data = cloneSeed();
-    const coverage = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Coverage", "Coverage day");
-    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-cdi-3");
+    const coverage = assignReview(data, "rev-106", user(data, "u-manager-1"), "u-coder-4", "Coverage", "Coverage day");
+    expect(coverage.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-coder-3");
     expect(coverage.reviews.find((item) => item.id === "rev-106")?.coverage).toMatchObject({
-      originalAssignedUserId: "u-cdi-3",
+      originalAssignedUserId: "u-coder-3",
       coveringUserId: "u-coder-4",
-      initiatedByUserId: "u-manager-2"
+      initiatedByUserId: "u-manager-1"
     });
     expect(coverage.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-3");
-    const permanent = assignReview(data, "rev-106", user(data, "u-manager-2"), "u-coder-4", "Permanent reassignment", "Panel move");
+    const permanent = assignReview(data, "rev-106", user(data, "u-manager-1"), "u-coder-4", "Permanent reassignment", "Panel move");
     expect(permanent.reviews.find((item) => item.id === "rev-106")?.assignedUserId).toBe("u-coder-4");
     expect(permanent.reviews.find((item) => item.id === "rev-106")?.coverage).toBeUndefined();
     expect(permanent.clinics.find((item) => item.id === "clinic-lake")?.defaultAssigneeId).toBe("u-coder-4");
@@ -709,9 +747,9 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
     const coderOneStats = getPersonalStats(next, user(next, "u-coder-1"));
-    const coderSixStats = getPersonalStats(next, user(next, "u-coder-6"));
+    const coderFourStats = getPersonalStats(next, user(next, "u-coder-4"));
     expect(coderOneStats.validations).toBe(1);
-    expect(coderSixStats.validations).toBe(0);
+    expect(coderFourStats.validations).toBe(0);
   });
 
   it("generates exports from downstream tasks instead of duplicate generic seed records", () => {
@@ -793,9 +831,8 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const next = setDisposition(data, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
     const after = getPersonalStats(next, user(next, "u-coder-1"));
 
-    expect(before.validations).toBe(0);
-    expect(before.recommendationAgreement).toBe(0);
-    expect(after.validations).toBe(1);
+    expect(data.conditions.find((item) => item.id === "cond-100-a")?.disposition).toBeUndefined();
+    expect(after.validations).toBe(before.validations + 1);
     expect(next.conditions.find((item) => item.id === "cond-100-a")?.disposition?.agreedWithRecommendation).toBe(true);
   });
 });

@@ -630,6 +630,10 @@ label {
   margin-top: 14px;
 }
 
+.cdi-queue-page .legacy-queue-table {
+  display: none;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -993,10 +997,19 @@ label {
   gap: 12px;
 }
 
+.chart-viewer {
+  display: grid;
+  gap: 12px;
+}
+
 .document-tabs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
+}
+
+.chart-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
 }
 
 .document-tabs button {
@@ -1026,6 +1039,11 @@ label {
   background: #fffdf8;
   border: 1px solid #ddd3bd;
   border-radius: 8px;
+}
+
+.chart-page {
+  background: #ffffff;
+  border-color: var(--border);
 }
 
 .document-page header {
@@ -1075,6 +1093,147 @@ label {
 
 .document-section.selected-evidence {
   outline: 3px solid rgba(18, 100, 179, 0.35);
+}
+
+.chart-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.chart-note,
+.chart-table-section {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: #fffdf8;
+  border: 1px solid #ddd3bd;
+  border-radius: 8px;
+}
+
+.chart-note-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e6ddcb;
+}
+
+.chart-note-header div {
+  display: grid;
+  gap: 3px;
+}
+
+.chart-note-header span,
+.chart-table-section h4 span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.chart-section {
+  display: grid;
+  gap: 6px;
+  padding: 9px 0 0;
+  border-top: 1px solid #eef0f4;
+  line-height: 1.52;
+}
+
+.chart-section h4,
+.chart-table-section h4 {
+  margin: 0;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.chart-section ul,
+.chart-section ol,
+.chart-note ol,
+.plan-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.exam-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.exam-grid div {
+  display: grid;
+  gap: 3px;
+}
+
+.plan-list {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-list li {
+  display: grid;
+  gap: 4px;
+}
+
+.chart-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.chart-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.chart-table th,
+.chart-table td {
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-table th {
+  color: #475569;
+  background: #f8fafc;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.chart-row.has-evidence,
+.chart-section.has-evidence {
+  border-left: 4px solid #8ab4e8;
+}
+
+tr.chart-row.has-evidence td {
+  background: #f8fbff;
+}
+
+.chart-row.selected-evidence,
+.chart-section.selected-evidence {
+  outline: 3px solid rgba(18, 100, 179, 0.35);
+  outline-offset: 1px;
+}
+
+.lab-abnormal {
+  color: #a15c05;
+  font-weight: 900;
+}
+
+.lab-critical {
+  color: #b42318;
+  font-weight: 900;
+}
+
+.lab-normal {
+  color: #087443;
+  font-weight: 800;
 }
 
 .evidence-span {
@@ -1230,6 +1389,36 @@ label {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.condition-card .action-row {
+  padding-top: 2px;
+}
+
+.condition-card .action-row .button {
+  min-height: 32px;
+  border-color: #d7dce6;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.condition-card .action-row .button-secondary:not(:disabled) {
+  color: #0b315a;
+  background: #f8fbff;
+}
+
+.condition-card .action-row .button-primary:not(:disabled) {
+  color: #ffffff;
+  background: #1264b3;
+}
+
+.condition-card .action-row .button-danger:not(:disabled) {
+  background: #b42318;
+}
+
+.condition-card .action-row .button-ghost:not(:disabled) {
+  color: #5b4ab4;
+  background: #f7f4ff;
+  border-color: #ded7ff;
 }
 
 .disabled-reason {
