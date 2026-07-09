@@ -22,24 +22,24 @@ export const categoryTokens: Record<Category, { label: string; color: string; bg
   },
   prospective: {
     label: "CDI Recapture/Suspect",
-    color: "#6d55d8",
-    bg: "#f1efff",
-    border: "#c3bbff"
+    color: "#b45309",
+    bg: "#ffedd5",
+    border: "#fdba74"
   }
 };
 
 export const subtypeTokens: Record<ProspectiveSubtype, { label: string; color: string; bg: string; border: string }> = {
   recapture: {
     label: "Recapture",
-    color: "#5b45bd",
-    bg: "#f0edff",
-    border: "#bcb1f4"
+    color: "#b45309",
+    bg: "#ffedd5",
+    border: "#fdba74"
   },
   suspect: {
     label: "Suspect",
-    color: "#8a5a00",
-    bg: "#fff5dd",
-    border: "#f2c46d"
+    color: "#9a3412",
+    bg: "#fff7ed",
+    border: "#fed7aa"
   }
 };
 
@@ -59,15 +59,15 @@ export const dispositionTokens: Record<DispositionSummaryLabel, { label: string;
   },
   "Sent to Prospective": {
     label: "Sent to Prospective",
-    color: "#5b45bd",
-    bg: "#f0edff",
-    border: "#bcb1f4"
+    color: "#b45309",
+    bg: "#ffedd5",
+    border: "#fdba74"
   },
   "Prospective Yes": {
     label: "Prospective Yes",
-    color: "#5b45bd",
-    bg: "#f0edff",
-    border: "#bcb1f4"
+    color: "#b45309",
+    bg: "#ffedd5",
+    border: "#fdba74"
   },
   "Prospective No": {
     label: "Prospective No",
