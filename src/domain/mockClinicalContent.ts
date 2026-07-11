@@ -42,23 +42,23 @@ const defaultLabs: Omit<ChartLabResult, "id" | "evidenceIds">[] = [
 
 function defaultProfile(condition: Condition): ClinicalConditionProfile {
   return {
-    hpi: `${condition.description} appears in longitudinal chart review, but the current visit does not document active assessment or a condition-specific plan.`,
-    plan: `${condition.description}: condition carried forward for reconciliation. No current treatment change documented in this note.`,
-    weakMention: `${condition.description} listed in the problem list without current-year MEAT documentation.`,
+    hpi: "Patient returns for follow-up of chronic medical conditions. Medication list, interval symptoms, and outside-office updates were discussed with the patient.",
+    plan: "Medication list reconciled. Continue current chronic medications, request outside records when needed, and schedule routine follow-up.",
+    weakMention: `${condition.description} appears on the active problem list without a diagnosis-specific assessment or management plan in this encounter.`,
     labResults: defaultLabs,
     medication: { name: "Atorvastatin", dose: "40 mg", route: "PO", frequency: "nightly", prescriber: "" },
     imaging: {
       type: "Longitudinal imaging summary",
       indication: "Chronic condition surveillance",
-      findings: "No acute imaging finding provides standalone risk-adjustment support for this condition.",
-      impression: ["No imaging-only RAF capture should be inferred without provider assessment."]
+      findings: "No acute imaging finding is documented for this diagnosis in the current encounter.",
+      impression: ["No acute imaging abnormality identified for this diagnosis."]
     },
     specialist: {
       specialty: "External chart",
       provider: "Consulting Specialist",
       title: "External documentation note",
-      note: `${condition.description} appears in longitudinal records without a current assessment and plan.`,
-      assessment: ["Historical diagnosis carried forward", "Confirm active status before capture"]
+      note: `${condition.description} appears in older outside records. The current primary care note does not include a diagnosis-specific assessment.`,
+      assessment: ["Historical diagnosis in outside records", "Current status not addressed in primary care note"]
     },
     pmh: `${condition.description} in past medical history.`,
     ros: ["Constitutional: no fever or acute weight loss.", "Cardiovascular: no syncope.", "Respiratory: no acute distress."],
@@ -172,8 +172,8 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   }
   if (text.includes("macular") || text.includes("eye")) {
     return {
-      hpi: "Payer registry flags diabetes with possible eye complication. Current primary care note documents diabetes but does not assess diabetic macular edema.",
-      plan: "Diabetes eye complication remains a suspect opportunity. Request ophthalmology records and ask provider to confirm whether diabetic macular edema is active before selecting a capture action.",
+      hpi: "Patient reports no acute vision loss today. Diabetes follow-up continues in primary care, and outside ophthalmology records were requested for interval retinal treatment history.",
+      plan: "Diabetes assessed today. Continue glucose management, request the most recent ophthalmology note, and defer retinal treatment decisions to ophthalmology.",
       weakMention: "Registry lists diabetic eye disease history without current primary care assessment.",
       labResults: [{ component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" }],
       medication: { name: "Insulin glargine", dose: "18 units", route: "SC", frequency: "nightly", prescriber: "" },
@@ -181,7 +181,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
         type: "Ophthalmology retinal imaging",
         indication: "Diabetic retinopathy surveillance",
         findings: "Retinal imaging from prior ophthalmology visit showed macular thickening in the right eye.",
-        impression: ["Prior diabetic macular edema; current-year active status not confirmed in primary care note."]
+        impression: ["Prior diabetic macular edema documented by ophthalmology.", "Primary care note does not document current retinal treatment status."]
       },
       specialist: {
         specialty: "Ophthalmology",
@@ -361,7 +361,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
       ...defaultProfile(condition),
       hpi: "Blood pressure readings were reviewed. Patient reports taking lisinopril but does not bring a home log.",
       plan: "Blood pressure 128/78 in office. Continue lisinopril, reinforce low-sodium diet, and ask patient to bring home BP readings to next visit.",
-      weakMention: "Essential hypertension appears on the active problem list; no HCC-specific MEAT support is present.",
+      weakMention: "Essential hypertension appears on the active problem list.",
       labResults: [{ component: "Blood Pressure", value: "128/78", unit: "mmHg", referenceRange: "<130/80", flag: "normal" }],
       medication: { name: "Lisinopril", dose: "20 mg", route: "PO", frequency: "daily", prescriber: "" },
       pmh: "Essential hypertension."
@@ -374,14 +374,38 @@ export function evidenceStrengthLabel(strength?: EvidenceStrength) {
   switch (strength) {
     case "strongCurrentYearMEAT":
       return "Strong current-year MEAT";
+    case "assessmentWithPlan":
+      return "Assessment with plan";
+    case "assessmentWithoutPlan":
+      return "Assessment without plan";
+    case "treatmentEvidence":
+      return "Treatment evidence";
+    case "monitoringEvidence":
+      return "Monitoring evidence";
+    case "evaluationEvidence":
+      return "Evaluation evidence";
     case "weakMentionOnly":
       return "Mention only";
+    case "problemListOnly":
+      return "Problem list only";
+    case "pmhOnly":
+      return "PMH only";
+    case "historicalClaimOnly":
+      return "Historical claim only";
     case "clinicalIndicatorOnly":
       return "Clinical indicator only";
+    case "labIndicatorOnly":
+      return "Lab indicator only";
+    case "imagingIndicatorOnly":
+      return "Imaging indicator only";
+    case "specialistHistoricalOnly":
+      return "Specialist historical only";
     case "historicalOnly":
       return "Historical only";
     case "suspect":
       return "Suspect";
+    case "recapture":
+      return "Recapture";
     case "conflicting":
       return "Conflicting";
     case "unsupported":
@@ -452,7 +476,7 @@ export function assessmentPlanTextForCondition(condition: Condition) {
   }
   if (!condition.hasSufficientMeat) {
     if (condition.hasClinicalIndicators || condition.hasOtherSupportingEvidence) {
-      return `${profile.weakMention} Symptoms, labs, outside records, or prior capture history are reviewed, but this visit does not include a complete diagnosis-specific treatment or monitoring plan.`;
+      return `Current visit includes interval symptom and medication review. ${condition.description} is not assessed with a diagnosis-specific treatment or monitoring plan today.`;
     }
     return profile.weakMention;
   }
@@ -460,7 +484,7 @@ export function assessmentPlanTextForCondition(condition: Condition) {
 }
 
 export function meatTypesForSource(sourceType: EvidenceSourceType, strength: EvidenceStrength): MeatType[] | undefined {
-  if (strength !== "strongCurrentYearMEAT" && strength !== "clinicalIndicatorOnly") return undefined;
+  if (!["strongCurrentYearMEAT", "assessmentWithPlan", "treatmentEvidence", "monitoringEvidence", "evaluationEvidence", "clinicalIndicatorOnly", "labIndicatorOnly", "imagingIndicatorOnly"].includes(strength)) return undefined;
   switch (sourceType) {
     case "assessmentHeading":
       return ["Assessment"];
@@ -508,11 +532,11 @@ export function clinicalExactTextForSource(condition: Condition, sourceType: Evi
     case "pmhItem":
       return profile.pmh;
     case "claimLine":
-      return `Claim support reviewed for ${condition.icd10}`;
+      return condition.claimStatus === "On claim" ? `ICD-10 ${condition.icd10} submitted on claim` : `No ${condition.icd10} diagnosis submitted on claim`;
     case "morPayerRegistryHie":
       return condition.subtype === "suspect"
         ? `${condition.description} appears in payer, registry, or HIE data`
-        : `Prior capture history reviewed for ${condition.description}`;
+        : `Prior claim or MOR record lists ${condition.description}`;
   }
 }
 
@@ -520,13 +544,25 @@ export function reviewerExplanationForEvidence(condition: Condition, sourceType:
   const source = sourceLocationFor(sourceType);
   switch (strength) {
     case "strongCurrentYearMEAT":
+    case "assessmentWithPlan":
+    case "treatmentEvidence":
+    case "monitoringEvidence":
       return `${source} contains current-year MEAT support for ${condition.description}.`;
     case "clinicalIndicatorOnly":
+    case "labIndicatorOnly":
+    case "imagingIndicatorOnly":
+    case "evaluationEvidence":
       return `${source} is a clinical indicator for ${condition.description}, but it is not enough by itself without provider assessment or management.`;
+    case "problemListOnly":
+    case "pmhOnly":
     case "weakMentionOnly":
       return `${source} mentions ${condition.description} without a current-year assessment and plan.`;
+    case "historicalClaimOnly":
+    case "specialistHistoricalOnly":
     case "historicalOnly":
       return `${source} is lookback or prior-capture context and should not be treated as standalone current-year validation.`;
+    case "recapture":
+      return `${source} supports recapture review for ${condition.description}; provider confirmation is still needed.`;
     case "suspect":
       return `${source} supports a suspect or prospective opportunity for ${condition.description}; provider confirmation is still needed.`;
     case "conflicting":
@@ -539,12 +575,15 @@ export function reviewerExplanationForEvidence(condition: Condition, sourceType:
 export function inferEvidenceStrength(condition: Condition, category: Category, sourceType: EvidenceSourceType): EvidenceStrength {
   if (condition.conflictingEvidence) return "conflicting";
   if (condition.resolvedFlag) return "unsupported";
-  if (sourceType === "labResultRow" || sourceType === "vitalRow") return "clinicalIndicatorOnly";
+  if (sourceType === "labResultRow" || sourceType === "vitalRow") return "labIndicatorOnly";
+  if (sourceType === "imagingImpression") return "imagingIndicatorOnly";
   if (sourceType === "hpiSentence") return condition.subtype === "suspect" ? "suspect" : "weakMentionOnly";
-  if (sourceType === "problemListItem" || sourceType === "pmhItem") return "weakMentionOnly";
-  if (sourceType === "claimLine") return condition.hadPriorCapture && !condition.hasCurrentYearCapture ? "historicalOnly" : "weakMentionOnly";
-  if (sourceType === "morPayerRegistryHie") return condition.subtype === "suspect" ? "suspect" : "historicalOnly";
-  if (condition.hasSufficientMeat && sourceType === "planSentence") return "strongCurrentYearMEAT";
+  if (sourceType === "problemListItem") return "problemListOnly";
+  if (sourceType === "pmhItem") return "pmhOnly";
+  if (sourceType === "claimLine") return condition.hadPriorCapture && !condition.hasCurrentYearCapture ? "historicalClaimOnly" : "weakMentionOnly";
+  if (sourceType === "specialistAssessment") return condition.hasSufficientMeat ? "assessmentWithPlan" : "specialistHistoricalOnly";
+  if (sourceType === "morPayerRegistryHie") return condition.subtype === "suspect" ? "suspect" : "recapture";
+  if (condition.hasSufficientMeat && sourceType === "planSentence") return "assessmentWithPlan";
   if (condition.workflow === "prospective" || category === "prospective") return condition.subtype === "recapture" ? "historicalOnly" : "suspect";
   return condition.hasSufficientMeat ? "strongCurrentYearMEAT" : "weakMentionOnly";
 }

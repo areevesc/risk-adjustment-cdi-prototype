@@ -292,8 +292,8 @@ describe("prototype workflow rules", () => {
     expect(generatedChart?.encounters.length).toBeGreaterThanOrEqual(2);
     expect(generatedChart?.labs[0].results.some((result) => result.component && result.referenceRange && result.flag)).toBe(true);
     expect(generatedChart?.claims[0]).toMatchObject({ cptCode: expect.any(String), providerTypeEligible: true, faceToFace: true, providerSignatureValid: true });
-    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-ap"))).toMatchObject({ sourceType: "planSentence", evidenceStrength: "strongCurrentYearMEAT" });
-    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-lab"))).toMatchObject({ sourceType: "labResultRow", evidenceStrength: "clinicalIndicatorOnly" });
+    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-ap"))).toMatchObject({ sourceType: "planSentence", evidenceStrength: "assessmentWithPlan" });
+    expect(result.data.evidence.find((evidence) => evidence.id.endsWith("-lab"))).toMatchObject({ sourceType: "labResultRow", evidenceStrength: "labIndicatorOnly" });
   });
 
   it("seeds full embedded chart documentation for reviews", () => {
@@ -318,12 +318,12 @@ describe("prototype workflow rules", () => {
     expect(data.evidence.find((item) => item.id === "ev-rev-100-d")?.chartAnchor).toMatchObject({ tab: "labs" });
     expect(data.evidence.find((item) => item.id === "ev-rev-100-a")).toMatchObject({
       sourceType: "planSentence",
-      evidenceStrength: "strongCurrentYearMEAT",
+      evidenceStrength: "assessmentWithPlan",
       meatType: expect.arrayContaining(["Assessment", "Treatment"])
     });
     expect(data.evidence.find((item) => item.id === "ev-rev-100-d")).toMatchObject({
       sourceType: "labResultRow",
-      evidenceStrength: "clinicalIndicatorOnly",
+      evidenceStrength: "labIndicatorOnly",
       currentYearSupport: false
     });
   });
