@@ -38,11 +38,29 @@ const documentationIssues: DocumentationIssue[] = [
   "Provider education"
 ];
 
+const validationToken = { color: "#075e45", bg: "#e8f7ee", border: "#2bb673" };
+const mentionToken = { color: "#7a4b00", bg: "#fff5db", border: "#d79b1e" };
+const indicatorToken = { color: "#0f4d78", bg: "#e8f4ff", border: "#5aa4d8" };
+const historyToken = { color: "#5b3a96", bg: "#f1ecff", border: "#9a7bd8" };
+const suspectToken = { color: "#8a3d00", bg: "#fff0e3", border: "#e18a35" };
+
 const strengthTokens = {
   strongCurrentYearMEAT: { color: "#075e45", bg: "#e8f7ee", border: "#2bb673" },
+  assessmentWithPlan: validationToken,
+  assessmentWithoutPlan: mentionToken,
+  treatmentEvidence: validationToken,
+  monitoringEvidence: validationToken,
+  evaluationEvidence: indicatorToken,
   weakMentionOnly: { color: "#7a4b00", bg: "#fff5db", border: "#d79b1e" },
+  problemListOnly: mentionToken,
+  pmhOnly: mentionToken,
+  historicalClaimOnly: historyToken,
   clinicalIndicatorOnly: { color: "#0f4d78", bg: "#e8f4ff", border: "#5aa4d8" },
+  labIndicatorOnly: indicatorToken,
+  imagingIndicatorOnly: indicatorToken,
+  specialistHistoricalOnly: historyToken,
   historicalOnly: { color: "#5b3a96", bg: "#f1ecff", border: "#9a7bd8" },
+  recapture: historyToken,
   suspect: { color: "#8a3d00", bg: "#fff0e3", border: "#e18a35" },
   conflicting: { color: "#991b1b", bg: "#fee2e2", border: "#ef4444" },
   unsupported: { color: "#475569", bg: "#f1f5f9", border: "#94a3b8" }
@@ -627,8 +645,8 @@ function ChartViewer({
                   </ChartSection>
                   <ChartSection title="Physical Exam" id={chartElementId("encounters", encounter.id, "physicalExam")}>
                     <div className="exam-grid">
-                      {encounter.physicalExam.map((item) => (
-                        <div key={`${encounter.id}-${item.system}`}><strong>{item.system}</strong><span>{item.text}</span></div>
+                      {encounter.physicalExam.map((item, index) => (
+                        <div key={`${encounter.id}-${item.system}-${index}`}><strong>{item.system}</strong><span>{item.text}</span></div>
                       ))}
                     </div>
                   </ChartSection>

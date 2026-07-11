@@ -354,8 +354,8 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
     isCurrentYear: true,
     sections: [
       section(`sec-${review.id}-note-1`, "Chief concern: chronic condition follow-up and medication review.", []),
-      section(`sec-${review.id}-note-2`, "Assessment includes diabetes, chronic kidney disease, heart failure symptoms, and medication adherence review.", [`ev-${review.id}-a`, `ev-${review.id}-b`]),
-      section(`sec-${review.id}-note-3`, "Plan: continue disease monitoring, reconcile specialist notes, and address open risk adjustment items.", [`ev-${review.id}-c`])
+      section(`sec-${review.id}-note-2`, "Assessment and Plan: diabetes and kidney function addressed with glucose log review, renal-dose medication review, repeat labs, and follow-up plan.", [`ev-${review.id}-a`, `ev-${review.id}-b`]),
+      section(`sec-${review.id}-note-3`, "Plan: continue disease monitoring, reconcile specialist notes, adjust medications when clinically indicated, and schedule follow-up.", [`ev-${review.id}-c`])
     ]
   },
   {
@@ -367,7 +367,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
     isCurrentYear: true,
     sections: [
       section(`sec-${review.id}-lab-1`, "A1c, kidney function, lipid panel, and urine microalbumin were reviewed.", [`ev-${review.id}-d`]),
-      section(`sec-${review.id}-lab-2`, "Abnormal values are pre-annotated for prototype evidence navigation.", [`ev-${review.id}-e`])
+      section(`sec-${review.id}-lab-2`, "Selected abnormal values: HbA1c 8.4%, eGFR 41 mL/min, BNP 412 pg/mL, and urine albumin/creatinine ratio 186 mg/g.", [`ev-${review.id}-e`])
     ]
   },
   {
@@ -378,8 +378,8 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
     date: `${review.calendarYear - 1}-10-20`,
     isCurrentYear: false,
     sections: [
-      section(`sec-${review.id}-hist-1`, "Prior capture history, registry flags, specialist referrals, and HIE data are summarized for three-year lookback review.", [`ev-${review.id}-f`]),
-      section(`sec-${review.id}-hist-2`, "Historical evidence is shown separately from current-calendar-year documentation.", [])
+      section(`sec-${review.id}-hist-1`, "Prior-year claims, registry entries, specialist referrals, and HIE records list chronic diagnoses for comparison with the current encounter.", [`ev-${review.id}-f`]),
+      section(`sec-${review.id}-hist-2`, "Historical records are shown separately from the current encounter note.", [])
     ]
   },
   ...(review.id === "rev-100"
@@ -457,7 +457,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           providerTypeEligible: true,
           faceToFace: true,
           providerSignatureValid: true,
-          sections: [section(`sec-${review.id}-image-1`, "Imaging shows acute bronchitis only; quality-exclusion logic keeps it out of RAF capture.", [`ev-${review.id}-imaging`])]
+          sections: [section(`sec-${review.id}-image-1`, "Chest imaging shows acute bronchitic airway thickening without chronic emphysema or focal pneumonia.", [`ev-${review.id}-imaging`])]
         }
       ]
     : []),
@@ -521,7 +521,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           providerTypeEligible: true,
           faceToFace: true,
           providerSignatureValid: true,
-          sections: [section(`sec-${review.id}-acute-2025`, "Prior evidence is explicitly marked acute-only and resolved for future recapture review.", [`ev-${review.id}-acute-2025`])]
+          sections: [section(`sec-${review.id}-acute-2025`, "Prior note documents acute respiratory failure during hospitalization with discharge summary stating the episode resolved before follow-up.", [`ev-${review.id}-acute-2025`])]
         }
       ]
     : []),
@@ -539,7 +539,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           providerTypeEligible: true,
           faceToFace: true,
           providerSignatureValid: true,
-          sections: [section(`sec-${review.id}-quality`, "Payer quality file marks this item as quality-exclusion context for prototype RAF safeguards.", [`ev-${review.id}-quality`])]
+          sections: [section(`sec-${review.id}-quality`, "Payer quality file lists Z55.0 for social context reporting; no HCC diagnosis is attached to this item.", [`ev-${review.id}-quality`])]
         }
       ]
     : []),
@@ -575,12 +575,12 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-2`,
     sectionId: `sec-${review.id}-note-2`,
-    text: "Assessment includes diabetes, chronic kidney disease, heart failure symptoms, and medication adherence review.",
-    exactText: "diabetes, chronic kidney disease",
+    text: "A1c 8.4%, eGFR 41, creatinine 1.42, and urine albumin/creatinine ratio 186 mg/g reviewed. Continue metformin ER 500 mg daily given renal function, increase basal insulin to 18 units nightly, continue lisinopril for renal protection, avoid NSAIDs, repeat A1c/BMP/urine microalbumin in 3 months, and review glucose log at follow-up.",
+    exactText: "repeat A1c/BMP/urine microalbumin in 3 months",
     date: `${review.calendarYear}-04-12`,
     category: "validated",
     conditionIds: review.conditionIds.slice(0, 2),
-    summary: "Current-year progress note documents active chronic condition management."
+    summary: "Assessment and plan includes diagnosis-specific monitoring and treatment."
   },
   {
     id: `ev-${review.id}-b`,
@@ -588,13 +588,13 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-2`,
     sectionId: `sec-${review.id}-note-2`,
-    text: "Heart failure symptoms and medication adherence review.",
-    exactText: "heart failure symptoms",
+    text: "Patient reports dyspnea on exertion and intermittent ankle edema. Daily weights fluctuate by 2 to 3 lb with higher sodium intake; no chest pain reported today.",
+    exactText: "dyspnea on exertion and intermittent ankle edema",
     date: `${review.calendarYear}-04-12`,
     category: "prospective",
     subtype: "recapture",
     conditionIds: review.conditionIds.slice(2, 3),
-    summary: "Clinical note references a condition requiring prospective confirmation."
+    summary: "HPI mentions symptoms/history without a complete current A&P plan."
   },
   {
     id: `ev-${review.id}-c`,
@@ -602,13 +602,13 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     documentId: `doc-${review.id}-note`,
     anchorId: `sec-${review.id}-note-3`,
     sectionId: `sec-${review.id}-note-3`,
-    text: "Address open risk adjustment items at upcoming encounter.",
-    exactText: "address open risk adjustment items",
+    text: "Diabetes eye complication appears in outside ophthalmology records; current primary care note requests the most recent ophthalmology note before confirming active retinal treatment status.",
+    exactText: "requests the most recent ophthalmology note",
     date: `${review.calendarYear}-04-12`,
     category: "prospective",
     subtype: "suspect",
     conditionIds: review.conditionIds.slice(3, 4),
-    summary: "Provider plan leaves a prospective risk adjustment opportunity open."
+    summary: "Outside-source condition needs provider confirmation before capture."
   },
   {
     id: `ev-${review.id}-d`,
@@ -629,12 +629,12 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     documentId: `doc-${review.id}-lab`,
     anchorId: `sec-${review.id}-lab-2`,
     sectionId: `sec-${review.id}-lab-2`,
-    text: "Abnormal values are pre-annotated for prototype evidence navigation.",
-    exactText: "Abnormal values",
+    text: "HbA1c 8.4%; Estimated GFR 41 mL/min; BNP 412 pg/mL; Urine Albumin/Creatinine Ratio 186 mg/g.",
+    exactText: "Estimated GFR 41 mL/min",
     date: `${review.calendarYear}-03-05`,
     category: "potentialDelete",
     conditionIds: review.conditionIds.slice(0, 1),
-    summary: "Structured lab evidence creates a validation or deletion conflict."
+    summary: "Lab indicator supports clinical review but is not standalone diagnosis validation."
   },
   {
     id: `ev-${review.id}-f`,
@@ -642,13 +642,13 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     documentId: `doc-${review.id}-history`,
     anchorId: `sec-${review.id}-hist-1`,
     sectionId: `sec-${review.id}-hist-1`,
-    text: "Prior capture history, registry flags, specialist referrals, and HIE data are summarized.",
-    exactText: "registry flags, specialist referrals, and HIE data",
+    text: "Prior-year claim and outside specialty notes list chronic HCC diagnoses; current primary care note does not assess every listed diagnosis.",
+    exactText: "Prior-year claim and outside specialty notes",
     date: `${review.calendarYear - 1}-10-20`,
     category: "prospective",
     subtype: "recapture",
     conditionIds: review.conditionIds.slice(2, 5),
-    summary: "Historical lookback evidence supports recapture or suspect review."
+    summary: "Historical lookback evidence supports recapture review."
   },
   ...(review.id === "rev-100"
     ? [
@@ -789,8 +789,8 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-acute-2025`,
           anchorId: `sec-${review.id}-acute-2025`,
           sectionId: `sec-${review.id}-acute-2025`,
-          text: "Prior evidence is explicitly marked acute-only and resolved for future recapture review.",
-          exactText: "acute-only and resolved",
+          text: "Discharge summary documents acute respiratory failure during hospitalization, resolved before outpatient follow-up.",
+          exactText: "resolved before outpatient follow-up",
           date: "2025-11-03",
           category: "prospective" as const,
           subtype: "recapture" as const,
@@ -807,8 +807,8 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-quality`,
           anchorId: `sec-${review.id}-quality`,
           sectionId: `sec-${review.id}-quality`,
-          text: "Payer quality file marks this item as quality-exclusion context for prototype RAF safeguards.",
-          exactText: "quality-exclusion context",
+          text: "Payer quality file lists Z55.0 for social context reporting with no HCC diagnosis attached.",
+          exactText: "Z55.0 for social context reporting",
           date: "2026-04-18",
           category: "potentialDelete" as const,
           conditionIds: ["cond-115-a"],
@@ -1488,10 +1488,10 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
       sections: [
         section(
           `sec-${review.id}-hist-1`,
-          "Prior capture history, registry flags, specialist referrals, and HIE data are summarized. Claims include date of service, provider, CPT 99214 or G0439, diagnosis codes, payer, eligible CPT / encounter type, acceptable provider type, face-to-face visit, and valid provider signature checks.",
+          "Prior-year claims, registry entries, specialist referrals, and HIE records are listed with date of service, provider, CPT 99214 or G0439, diagnosis codes, payer, eligible encounter type, provider type, face-to-face status, and signature status.",
           [`ev-${review.id}-f`]
         ),
-        section(`sec-${review.id}-hist-2`, "MOR / payer data: prior HCCs and suspect opportunities are retained separately from current-year documentation.", [])
+        section(`sec-${review.id}-hist-2`, "MOR / payer data: prior HCCs, registry entries, and HIE records are listed separately from the current encounter note.", [])
       ]
     },
     {
@@ -1503,8 +1503,8 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
       isCurrentYear: true,
       sections: [
         section(`sec-${review.id}-problem`, "Problem list: diabetes with complication, chronic kidney disease, heart failure history, hypertension, hyperlipidemia, and depression screening where applicable.", []),
-        section(`sec-${review.id}-pmh`, "Past medical history: Medicare Advantage member with chronic disease management, specialist involvement, and prior risk-adjustable conditions.", []),
-        section(`sec-${review.id}-medications`, "Medications: metformin, lisinopril, atorvastatin, carvedilol, furosemide, inhalers, and condition-specific therapy are reconciled against claims and registry evidence.", []),
+        section(`sec-${review.id}-pmh`, "Past medical history: Medicare Advantage member with chronic disease management, specialist involvement, and prior chronic diagnoses.", []),
+        section(`sec-${review.id}-medications`, "Medications: metformin, lisinopril, atorvastatin, carvedilol, furosemide, inhalers, and condition-specific therapy were reconciled during the visit.", []),
         section(`sec-${review.id}-imaging`, "Imaging / specialist notes: echo, renal ultrasound, chest imaging, nephrology, cardiology, pulmonology, and behavioral health snippets appear when relevant.", [])
       ]
     }
@@ -1536,7 +1536,7 @@ function enrichClaims(seedClaims: Claim[], seedEvidence: EvidencePassage[]): Cla
       payer: payer?.name,
       supportSummary: claimEvidenceText.length
         ? claimEvidenceText.join(" ")
-        : `Claim support reviewed for ${claim.icd10Codes[0] ?? "the submitted diagnosis"} with source eligibility fields.`
+        : `${claim.dateOfService} claim from ${provider?.name ?? "rendering provider"}; ICD-10 codes: ${claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "none listed"}.`
     };
   });
 }
@@ -1558,7 +1558,7 @@ function chartAnchorForEvidence(evidence: EvidencePassage): EvidencePassage["cha
     return { tab: "encounters", itemId: `chart-${evidence.reviewId}-encounter-current`, sectionId: "assessmentPlan" };
   }
   if (evidence.id.endsWith("-c")) {
-    return { tab: "encounters", itemId: `chart-${evidence.reviewId}-plan-open-items`, sectionId: "assessmentPlan" };
+    return { tab: "encounters", itemId: `chart-${evidence.reviewId}-encounter-current`, sectionId: "hpi" };
   }
   return { tab: "encounters", itemId: `chart-${evidence.reviewId}-encounter-current`, sectionId: "hpi" };
 }
@@ -1584,10 +1584,10 @@ function enrichEvidence(seedEvidence: EvidencePassage[]): EvidencePassage[] {
       sourceLocation,
       evidenceStrength,
       meatType: item.meatType ?? meatTypesForSource(sourceType, evidenceStrength),
-      currentYearSupport: item.currentYearSupport ?? evidenceStrength === "strongCurrentYearMEAT",
-      historicalOnly: item.historicalOnly ?? evidenceStrength === "historicalOnly",
+      currentYearSupport: item.currentYearSupport ?? ["strongCurrentYearMEAT", "assessmentWithPlan", "treatmentEvidence", "monitoringEvidence"].includes(evidenceStrength),
+      historicalOnly: item.historicalOnly ?? ["historicalOnly", "historicalClaimOnly", "specialistHistoricalOnly", "recapture"].includes(evidenceStrength),
       suspectOnly: item.suspectOnly ?? (evidenceStrength === "suspect" || item.subtype === "suspect"),
-      recaptureOnly: item.recaptureOnly ?? (item.subtype === "recapture" && evidenceStrength !== "strongCurrentYearMEAT"),
+      recaptureOnly: item.recaptureOnly ?? (item.subtype === "recapture" && !["strongCurrentYearMEAT", "assessmentWithPlan"].includes(evidenceStrength)),
       reviewerExplanation: item.reviewerExplanation ?? reviewerExplanationForEvidence(condition, sourceType, evidenceStrength),
       summary: generatedClinicalEvidence ? `${evidenceStrengthLabel(evidenceStrength)} - ${sourceLocation}` : item.summary
     };
@@ -1682,7 +1682,8 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
       bmi: 32.0,
       evidenceIds: []
     };
-    const assessmentPlan = reviewConditions.slice(0, 6).map((condition) => ({
+    const assessmentPlanConditions = reviewConditions.filter((condition) => condition.hasSufficientMeat).slice(0, 6);
+    const assessmentPlan = assessmentPlanConditions.map((condition) => ({
       id: condition.id === "cond-100-c" ? `chart-${review.id}-plan-open-items` : `chart-${review.id}-plan-${condition.id}`,
       problem: `${condition.description} (${condition.icd10})`,
       code: condition.icd10,
@@ -1713,12 +1714,12 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
         type: "Prior-year chronic care follow-up",
         provider: providerName,
         quality: "fair" as const,
-        chiefComplaint: "Prior-year risk condition follow-up.",
-        hpi: `${patientName} was seen for longitudinal chronic disease follow-up. Prior capture history, outside specialist notes, registry flags, and claims were available for comparison with current-year assessment and plan documentation.`,
+        chiefComplaint: "Prior-year chronic condition follow-up.",
+        hpi: `${patientName} was seen for chronic disease follow-up. Medication adherence, interval symptoms, outside specialist follow-up, and recent lab results were discussed.`,
         reviewOfSystems: clinicalReviewOfSystems(reviewConditions).slice(0, 4),
         physicalExam: clinicalPhysicalExam(reviewConditions).slice(0, 4),
         vitals: priorVital,
-        assessmentPlan: assessmentPlan.map((item) => ({ ...item, id: `${item.id}-lookback`, detail: `Longitudinal status for ${item.problem} was reviewed against medications, labs, and outside records; active current-year management still depends on the current encounter note.`, evidenceIds: claimEvidenceIds })),
+        assessmentPlan: assessmentPlan.map((item) => ({ ...item, id: `${item.id}-lookback`, detail: `Continue existing chronic-care regimen for ${item.problem}. Follow up with primary care and specialists as scheduled.`, evidenceIds: claimEvidenceIds })),
         signatureTime: "2:08 PM",
         billingCode: "G0439",
         evidenceIds: claimEvidenceIds,
@@ -1740,7 +1741,7 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
       encounters,
       medications: reviewConditions.slice(0, 6).map((condition) => medicationForCondition(condition, providerName, conditionEvidenceIds(condition))),
       labs: [
-        { id: `chart-${review.id}-panel-risk`, name: "Risk Adjustment Chronic Disease Panel", date: `${review.calendarYear}-03-05`, results: riskLabRows(review.id, reviewEvidence, reviewConditions) },
+        { id: `chart-${review.id}-panel-risk`, name: "Chronic Disease Monitoring Panel", date: `${review.calendarYear}-03-05`, results: riskLabRows(review.id, reviewEvidence, reviewConditions) },
         {
           id: `chart-${review.id}-panel-cmp`,
           name: "Comprehensive Metabolic Panel",

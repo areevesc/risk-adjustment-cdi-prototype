@@ -162,10 +162,22 @@ export interface DocumentSection {
 
 export type EvidenceStrength =
   | "strongCurrentYearMEAT"
+  | "assessmentWithPlan"
+  | "assessmentWithoutPlan"
+  | "treatmentEvidence"
+  | "monitoringEvidence"
+  | "evaluationEvidence"
   | "weakMentionOnly"
+  | "problemListOnly"
+  | "pmhOnly"
+  | "historicalClaimOnly"
   | "clinicalIndicatorOnly"
+  | "labIndicatorOnly"
+  | "imagingIndicatorOnly"
+  | "specialistHistoricalOnly"
   | "historicalOnly"
   | "suspect"
+  | "recapture"
   | "conflicting"
   | "unsupported";
 
