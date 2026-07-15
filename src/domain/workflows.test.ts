@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { seedData } from "../data/seed";
 import { decisionSupportService } from "../decisionSupport/DecisionSupportService";
+import { targetForEvidence } from "../features/review/ReviewPage";
 import { canAccessRoute, canOpenReview, canTakeCoverage, getVisibleReviews } from "./auth";
 import { normalizeSeedData } from "../state/AppState";
 import {
@@ -94,11 +95,17 @@ describe("routing and prototype authorization", () => {
     legacy.users[5] = { ...legacy.users[5], primaryRole: "Coder", roles: ["Coder"] } as never;
     legacy.users[10] = { ...legacy.users[10], primaryRole: "CDI Specialist", roles: ["CDI Specialist"] } as never;
     legacy.reviews[0] = { ...legacy.reviews[0], assignedUserId: undefined as unknown as string, assignedCoderId: "u-coder-1", assignedCdiId: "u-cdi-1", queue: "Assigned Coder" as never } as never;
+    legacy.charts[0] = { ...legacy.charts[0], encounters: legacy.charts[0].encounters.slice(0, 2), labs: legacy.charts[0].labs.slice(0, 2), vitals: legacy.charts[0].vitals.slice(0, 2) };
+    legacy.claims[0] = { ...legacy.claims[0], icd10Codes: ["DX-100-a", "DX-100-b"] };
 
     const normalized = normalizeSeedData(legacy);
     expect(normalized.users).toHaveLength(7);
     expect(normalized.users.some((item) => item.id === "u-cdi-1")).toBe(false);
     expect(normalized.reviews[0]).toMatchObject({ assignedUserId: "u-coder-1", queue: "CDI/Coder Queue" });
+    expect(normalized.charts[0].encounters).toHaveLength(5);
+    expect(normalized.charts[0].labs).toHaveLength(5);
+    expect(normalized.charts[0].vitals).toHaveLength(5);
+    expect(normalized.claims[0].icd10Codes).toEqual(["E11.65", "I10"]);
   });
 
   it("uses the simplified seed user roster", () => {
@@ -308,13 +315,20 @@ describe("prototype workflow rules", () => {
     expect(chart.encounters[0].assessmentPlan.length).toBeGreaterThan(0);
     expect(chart.encounters[0].assessmentPlan[0].detail).toContain("Continue metformin ER");
     expect(chart.encounters[0].assessmentPlan.map((item) => item.detail).join(" ")).not.toContain("risk adjustment items");
+    expect(chart.encounters).toHaveLength(5);
     expect(chart.problems.length).toBeGreaterThan(0);
     expect(chart.medications.length).toBeGreaterThan(0);
     expect(chart.labs[0].results[0]).toMatchObject({ component: expect.any(String), value: expect.any(String), unit: expect.any(String), referenceRange: expect.any(String), flag: expect.any(String) });
+    expect(chart.labs).toHaveLength(5);
     expect(chart.vitals[0]).toMatchObject({ systolic: expect.any(Number), heartRate: expect.any(Number), bmi: expect.any(Number), oxygenSaturation: expect.any(Number) });
+    expect(chart.vitals).toHaveLength(5);
     expect(chart.imaging.length).toBeGreaterThan(0);
     expect(chart.specialistNotes.length).toBeGreaterThan(0);
     expect(chart.claims[0]).toMatchObject({ dateOfService: expect.any(String), provider: expect.any(String), payer: expect.any(String), cptCode: expect.any(String), encounterType: expect.any(String) });
+    expect(chart.claims[0].icd10Codes).toEqual(["E11.65", "I10"]);
+    const labEvidence = data.evidence.find((item) => item.id === "ev-rev-100-d")!;
+    const anchoredLabResult = chart.labs.flatMap((panel) => panel.results).find((result) => result.evidenceIds.includes(labEvidence.id))!;
+    expect(targetForEvidence(chart, labEvidence.id, labEvidence)).toBe(`chart-labs-${anchoredLabResult.id}`);
     expect(data.evidence.find((item) => item.id === "ev-rev-100-d")?.chartAnchor).toMatchObject({ tab: "labs" });
     expect(data.evidence.find((item) => item.id === "ev-rev-100-a")).toMatchObject({
       sourceType: "planSentence",
