@@ -136,12 +136,27 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
   });
   const clinicById = new Map(clinics.map((clinic) => [clinic.id, clinic]));
   const users = seedData.users;
+  const rawCharts = raw.charts ?? [];
+  const rawClaims = raw.claims ?? [];
+  const seededChartByReviewId = new Map(seedData.charts.map((chart) => [chart.reviewId, chart]));
+  const seededClaimByReviewId = new Map(seedData.claims.map((claim) => [claim.reviewId, claim]));
+  const persistedChartReviewIds = new Set(rawCharts.map((chart) => chart.reviewId));
+  const persistedClaimReviewIds = new Set(rawClaims.map((claim) => claim.reviewId));
+  const charts = [
+    ...rawCharts.map((chart) => seededChartByReviewId.get(chart.reviewId) ?? chart),
+    ...seedData.charts.filter((chart) => !persistedChartReviewIds.has(chart.reviewId))
+  ];
+  const claims = [
+    ...rawClaims.map((claim) => seededClaimByReviewId.get(claim.reviewId) ?? claim),
+    ...seedData.claims.filter((claim) => !persistedClaimReviewIds.has(claim.reviewId))
+  ];
   return {
     ...raw,
     users,
     teams: raw.teams.map((team) => ({ ...team, managerId: normalizeUserId(team.managerId) ?? "u-manager-1" })),
     clinics: clinics.map((clinic) => ({ ...clinic, defaultAssigneeId: normalizeUserId(clinic.defaultAssigneeId) ?? "u-coder-1" })),
-    charts: raw.charts ?? seedData.charts,
+    charts,
+    claims,
     reviews: raw.reviews.map((review) => {
       const legacyReview = review as typeof review & { assignedCoderId?: string; assignedCdiId?: string };
       const { assignedCoderId: _assignedCoderId, assignedCdiId: _assignedCdiId, ...currentReview } = legacyReview;

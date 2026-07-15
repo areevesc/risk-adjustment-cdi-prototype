@@ -848,18 +848,6 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     : [])
 ]);
 
-export const claims: Claim[] = reviews.map((review) => ({
-  id: `claim-${review.id}`,
-  reviewId: review.id,
-  dateOfService: `${review.calendarYear}-04-12`,
-  riskEligible: true,
-  cptSourceEligible: review.id !== "rev-103",
-  providerTypeEligible: review.id !== "rev-106",
-  faceToFace: review.id !== "rev-107",
-  providerSignatureValid: review.id !== "rev-108",
-  icd10Codes: review.conditionIds.slice(0, 2).map((id) => id.replace("cond-", "DX-"))
-}));
-
 const disposed = (action: "Validate" | "Add to Claim" | "Yes" | "Delete", userId = "u-coder-2") => ({
   action,
   userId,
@@ -1372,6 +1360,21 @@ export const conditions: Condition[] = [
     })
 ];
 
+export const claims: Claim[] = reviews.map((review) => ({
+  id: `claim-${review.id}`,
+  reviewId: review.id,
+  dateOfService: `${review.calendarYear}-04-12`,
+  riskEligible: true,
+  cptSourceEligible: review.id !== "rev-103",
+  providerTypeEligible: review.id !== "rev-106",
+  faceToFace: review.id !== "rev-107",
+  providerSignatureValid: review.id !== "rev-108",
+  icd10Codes: review.conditionIds
+    .slice(0, 2)
+    .map((id) => conditions.find((condition) => condition.id === id)?.icd10)
+    .filter((code): code is string => Boolean(code))
+}));
+
 export const audits: Audit[] = [
   { id: "audit-105", reviewId: "rev-105", auditorId: "u-auditor-1", status: "In Progress" },
   { id: "audit-109", reviewId: "rev-109", auditorId: "u-auditor-2", status: "Complete", outcome: "Agree", comments: "Audit complete with agreement.", completedAt: "2026-06-20T16:00:00.000Z" }
@@ -1682,6 +1685,44 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
       bmi: 32.0,
       evidenceIds: []
     };
+    const preventiveVital = {
+      ...currentVital,
+      id: `chart-${review.id}-vital-preventive`,
+      date: `${review.calendarYear}-02-08`,
+      systolic: 132,
+      diastolic: 74,
+      heartRate: 70,
+      weight: 190,
+      bmi: 31.6,
+      oxygenSaturation: 96,
+      evidenceIds: []
+    };
+    const intervalVital = {
+      ...currentVital,
+      id: `chart-${review.id}-vital-interval`,
+      date: `${review.calendarYear - 1}-07-16`,
+      systolic: 142,
+      diastolic: 80,
+      heartRate: 76,
+      temperature: 98.1,
+      weight: 194,
+      bmi: 32.3,
+      oxygenSaturation: 95,
+      evidenceIds: []
+    };
+    const baselineVital = {
+      ...currentVital,
+      id: `chart-${review.id}-vital-baseline`,
+      date: `${review.calendarYear - 2}-11-04`,
+      systolic: 150,
+      diastolic: 84,
+      heartRate: 80,
+      temperature: 98.6,
+      weight: 198,
+      bmi: 33.0,
+      oxygenSaturation: 94,
+      evidenceIds: []
+    };
     const assessmentPlanConditions = reviewConditions.filter((condition) => condition.hasSufficientMeat).slice(0, 6);
     const assessmentPlan = assessmentPlanConditions.map((condition) => ({
       id: condition.id === "cond-100-c" ? `chart-${review.id}-plan-open-items` : `chart-${review.id}-plan-${condition.id}`,
@@ -1690,6 +1731,13 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
       detail: assessmentPlanTextForCondition(condition),
       evidenceIds: condition.evidenceIds.filter((id) => planEvidenceIds.includes(id))
     }));
+    const historicalAssessmentPlan = (suffix: string, direction: string, evidenceIds: string[] = []) =>
+      assessmentPlan.map((item) => ({
+        ...item,
+        id: `${item.id}-${suffix}`,
+        detail: `${direction} ${item.problem}. Medication adherence and follow-up precautions were reviewed with the patient.`,
+        evidenceIds
+      }));
     const encounters = [
       {
         id: `chart-${review.id}-encounter-current`,
@@ -1709,6 +1757,23 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
         sectionEvidenceIds: { hpi: hpiEvidenceIds, assessmentPlan: planEvidenceIds, billing: claimEvidenceIds }
       },
       {
+        id: `chart-${review.id}-encounter-preventive`,
+        date: `${review.calendarYear}-02-08`,
+        type: "Annual wellness and preventive care visit",
+        provider: providerName,
+        quality: "good" as const,
+        chiefComplaint: "Annual wellness visit with preventive screening and chronic-care review.",
+        hpi: `${patientName} completed an annual wellness evaluation. Functional status, fall risk, medication access, preventive screening gaps, and chronic disease self-management were reviewed. No acute cardiopulmonary complaints were reported.`,
+        reviewOfSystems: ["Constitutional: No fever, chills, or unintentional weight loss.", "Cardiovascular: No chest pain or new edema.", "Respiratory: No new cough or dyspnea.", "Neurologic: No dizziness, syncope, or focal weakness."],
+        physicalExam: clinicalPhysicalExam(reviewConditions).slice(0, 5),
+        vitals: preventiveVital,
+        assessmentPlan: historicalAssessmentPlan("preventive", "Continue longitudinal monitoring for"),
+        signatureTime: "11:42 AM",
+        billingCode: "G0439",
+        evidenceIds: [],
+        sectionEvidenceIds: {}
+      },
+      {
         id: `chart-${review.id}-encounter-lookback`,
         date: `${review.calendarYear - 1}-10-20`,
         type: "Prior-year chronic care follow-up",
@@ -1724,6 +1789,40 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
         billingCode: "G0439",
         evidenceIds: claimEvidenceIds,
         sectionEvidenceIds: { hpi: claimEvidenceIds, assessmentPlan: claimEvidenceIds, billing: claimEvidenceIds }
+      },
+      {
+        id: `chart-${review.id}-encounter-interval`,
+        date: `${review.calendarYear - 1}-07-16`,
+        type: "Medication and laboratory follow-up",
+        provider: providerName,
+        quality: "fair" as const,
+        chiefComplaint: "Interval medication check and review of laboratory trends.",
+        hpi: `${patientName} returned for an interval medication review. Home readings, tolerance of prescribed therapy, specialist recommendations, diet, activity, and recent laboratory trends were discussed.`,
+        reviewOfSystems: clinicalReviewOfSystems(reviewConditions).slice(0, 5),
+        physicalExam: clinicalPhysicalExam(reviewConditions).slice(0, 5),
+        vitals: intervalVital,
+        assessmentPlan: historicalAssessmentPlan("interval", "Maintain the documented treatment plan for"),
+        signatureTime: "9:36 AM",
+        billingCode: "99214",
+        evidenceIds: [],
+        sectionEvidenceIds: {}
+      },
+      {
+        id: `chart-${review.id}-encounter-baseline`,
+        date: `${review.calendarYear - 2}-11-04`,
+        type: "New patient history and chronic-care baseline",
+        provider: providerName,
+        quality: "poor" as const,
+        chiefComplaint: "Establish care and reconcile chronic medical history.",
+        hpi: `${patientName} established primary care and reviewed available outside records. Chronic diagnoses, prior procedures, medication history, social supports, and recommended surveillance were reconciled.`,
+        reviewOfSystems: clinicalReviewOfSystems(reviewConditions).slice(0, 4),
+        physicalExam: clinicalPhysicalExam(reviewConditions).slice(0, 4),
+        vitals: baselineVital,
+        assessmentPlan: historicalAssessmentPlan("baseline", "Establish baseline monitoring for"),
+        signatureTime: "3:18 PM",
+        billingCode: "99204",
+        evidenceIds: [],
+        sectionEvidenceIds: {}
       }
     ];
     const chartClaims = seedClaims.filter((claim) => claim.reviewId === review.id);
@@ -1751,9 +1850,38 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
             { id: `chart-${review.id}-lab-k`, component: "Potassium", value: "4.2", unit: "mmol/L", referenceRange: "3.5-5.1", flag: "normal", evidenceIds: [] },
             { id: `chart-${review.id}-lab-cr`, component: "Creatinine", value: "1.36", unit: "mg/dL", referenceRange: "0.60-1.20", flag: "abnormal", evidenceIds: hpiEvidenceIds }
           ]
+        },
+        {
+          id: `chart-${review.id}-panel-cbc`,
+          name: "Complete Blood Count",
+          date: `${review.calendarYear}-01-18`,
+          results: [
+            { id: `chart-${review.id}-lab-wbc`, component: "White Blood Cells", value: "7.2", unit: "K/uL", referenceRange: "4.0-11.0", flag: "normal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-hgb`, component: "Hemoglobin", value: "12.8", unit: "g/dL", referenceRange: "12.0-16.0", flag: "normal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-plt`, component: "Platelets", value: "248", unit: "K/uL", referenceRange: "150-400", flag: "normal", evidenceIds: [] }
+          ]
+        },
+        {
+          id: `chart-${review.id}-panel-lipid`,
+          name: "Lipid Panel",
+          date: `${review.calendarYear - 1}-10-12`,
+          results: [
+            { id: `chart-${review.id}-lab-chol`, component: "Total Cholesterol", value: "186", unit: "mg/dL", referenceRange: "<200", flag: "normal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-ldl`, component: "LDL Cholesterol", value: "112", unit: "mg/dL", referenceRange: "<100", flag: "abnormal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-hdl`, component: "HDL Cholesterol", value: "48", unit: "mg/dL", referenceRange: ">=40", flag: "normal", evidenceIds: [] }
+          ]
+        },
+        {
+          id: `chart-${review.id}-panel-urine`,
+          name: "Urine Albumin Monitoring",
+          date: `${review.calendarYear - 1}-07-10`,
+          results: [
+            { id: `chart-${review.id}-lab-uacr`, component: "Albumin/Creatinine Ratio", value: "42", unit: "mg/g", referenceRange: "<30", flag: "abnormal", evidenceIds: [] },
+            { id: `chart-${review.id}-lab-urine-cr`, component: "Urine Creatinine", value: "96", unit: "mg/dL", referenceRange: "20-275", flag: "normal", evidenceIds: [] }
+          ]
         }
       ],
-      vitals: [currentVital, priorVital],
+      vitals: [currentVital, preventiveVital, priorVital, intervalVital, baselineVital],
       imaging: [
         {
           id: `chart-${review.id}-imaging`,

@@ -1,7 +1,28 @@
-import { useMemo, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FileWarning, Flag, LockKeyhole, Play } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  FileClock,
+  FileText,
+  FileWarning,
+  Flag,
+  FlaskConical,
+  HeartPulse,
+  Image as ImageIcon,
+  LockKeyhole,
+  Pill,
+  Play,
+  ReceiptText,
+  Search,
+  Stethoscope
+} from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
@@ -24,6 +45,8 @@ import {
 } from "../../domain/selectors";
 import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult } from "../../domain/types";
 import { evidenceStrengthLabel } from "../../domain/mockClinicalContent";
+import { buildChartSearchResults, normalizeChartSearchQuery } from "../../domain/chartSearch";
+import type { ChartSearchResult } from "../../domain/chartSearch";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
@@ -390,7 +413,7 @@ export function ReviewPage() {
 
       <div className="split-workspace">
         <Panel
-          title="Embedded Chart And Evidence"
+          title="Patient Chart & Evidence"
           actions={
             <div className="header-actions">
               <Button variant="secondary" onClick={() => stepEvidence("prev")}>
@@ -539,20 +562,97 @@ function ReviewSummaryCard({ category, label, value, raf }: { category: keyof ty
   );
 }
 
-const chartTabs: Array<{ value: ChartTab; label: string }> = [
-  { value: "encounters", label: "Encounters" },
-  { value: "problem-list", label: "Problem List" },
-  { value: "pmh", label: "PMH" },
-  { value: "medications", label: "Medications" },
-  { value: "labs", label: "Labs" },
-  { value: "vitals", label: "Vitals" },
-  { value: "imaging", label: "Imaging" },
-  { value: "specialist-notes", label: "Specialist Notes" },
-  { value: "claims", label: "Claims" }
+const chartTabs: Array<{
+  value: ChartTab;
+  label: string;
+  icon: typeof Stethoscope;
+  count: (chart: ClinicalChart) => number;
+  countLabel: string;
+}> = [
+  { value: "encounters", label: "Encounters", icon: Stethoscope, count: (chart) => chart.encounters.length, countLabel: "notes" },
+  { value: "problem-list", label: "Problem List", icon: ClipboardList, count: (chart) => chart.problems.length, countLabel: "items" },
+  { value: "pmh", label: "Past Medical Hx", icon: FileClock, count: (chart) => chart.pastMedicalHistory.length, countLabel: "items" },
+  { value: "medications", label: "Medications", icon: Pill, count: (chart) => chart.medications.length, countLabel: "medications" },
+  { value: "labs", label: "Labs", icon: FlaskConical, count: (chart) => chart.labs.length, countLabel: "panels" },
+  { value: "vitals", label: "Vitals", icon: HeartPulse, count: (chart) => chart.vitals.length, countLabel: "records" },
+  { value: "imaging", label: "Imaging", icon: ImageIcon, count: (chart) => chart.imaging.length, countLabel: "reports" },
+  { value: "specialist-notes", label: "Specialist Notes", icon: FileText, count: (chart) => chart.specialistNotes.length, countLabel: "notes" },
+  { value: "claims", label: "Claims", icon: ReceiptText, count: (chart) => chart.claims.length, countLabel: "claims" }
 ];
 
 function chartElementId(tab: ChartTab, itemId: string, sectionId?: string) {
   return `chart-${tab}-${itemId}${sectionId ? `-${sectionId}` : ""}`;
+}
+
+function withExpandedItem(current: Set<string>, itemId: string, open: boolean) {
+  const hasItem = current.has(itemId);
+  if (hasItem === open) return current;
+  const next = new Set(current);
+  if (open) next.add(itemId);
+  else next.delete(itemId);
+  return next;
+}
+
+function accordionParentForEvidence(chart: ClinicalChart, evidenceId: string, passage?: EvidencePassage) {
+  const tab = passage?.chartAnchor?.tab;
+  if (tab === "encounters") {
+    return chart.encounters.find(
+      (encounter) =>
+        encounter.evidenceIds.includes(evidenceId) ||
+        Object.values(encounter.sectionEvidenceIds).some((ids) => ids?.includes(evidenceId)) ||
+        encounter.vitals.evidenceIds.includes(evidenceId) ||
+        encounter.assessmentPlan.some((plan) => plan.evidenceIds.includes(evidenceId))
+    )?.id;
+  }
+  if (tab === "labs") return chart.labs.find((panel) => panel.results.some((result) => result.evidenceIds.includes(evidenceId)))?.id;
+  if (tab === "imaging") return chart.imaging.find((report) => report.evidenceIds.includes(evidenceId))?.id ?? passage?.chartAnchor?.itemId;
+  if (tab === "specialist-notes") return chart.specialistNotes.find((note) => note.evidenceIds.includes(evidenceId))?.id ?? passage?.chartAnchor?.itemId;
+  if (tab === "claims") return passage?.chartAnchor?.itemId;
+  return undefined;
+}
+
+export function targetForEvidence(chart: ClinicalChart, evidenceId: string, passage?: EvidencePassage) {
+  const anchor = passage?.chartAnchor;
+  if (anchor?.tab === "encounters") {
+    for (const encounter of chart.encounters) {
+      const matchingPlan = encounter.assessmentPlan.find((plan) => plan.evidenceIds.includes(evidenceId));
+      if (matchingPlan) return chartElementId("encounters", matchingPlan.id, "assessmentPlan");
+      const matchingSection = Object.entries(encounter.sectionEvidenceIds).find(([, ids]) => ids?.includes(evidenceId));
+      if (matchingSection) return chartElementId("encounters", encounter.id, matchingSection[0]);
+      if (encounter.vitals.evidenceIds.includes(evidenceId)) return chartElementId("encounters", encounter.vitals.id, "vitals");
+    }
+  }
+  if (anchor?.tab === "labs") {
+    for (const panel of chart.labs) {
+      const result = panel.results.find((item) => item.evidenceIds.includes(evidenceId));
+      if (result) return chartElementId("labs", result.id);
+    }
+  }
+  if (anchor?.tab === "problem-list") {
+    const problem = chart.problems.find((item) => item.evidenceIds.includes(evidenceId));
+    if (problem) return chartElementId("problem-list", problem.id);
+  }
+  if (anchor?.tab === "medications") {
+    const medication = chart.medications.find((item) => item.evidenceIds.includes(evidenceId));
+    if (medication) return chartElementId("medications", medication.id);
+  }
+  if (anchor?.tab === "vitals") {
+    const vital = chart.vitals.find((item) => item.evidenceIds.includes(evidenceId));
+    if (vital) return chartElementId("vitals", vital.id);
+  }
+  if (anchor?.tab === "imaging") {
+    const report = chart.imaging.find((item) => item.evidenceIds.includes(evidenceId));
+    if (report) return chartElementId("imaging", report.id, "findings");
+  }
+  if (anchor?.tab === "pmh") {
+    const history = chart.pastMedicalHistory.find((item) => item.evidenceIds.includes(evidenceId));
+    if (history) return chartElementId("pmh", history.id);
+  }
+  if (anchor?.tab === "specialist-notes") {
+    const specialist = chart.specialistNotes.find((item) => item.evidenceIds.includes(evidenceId));
+    if (specialist) return chartElementId("specialist-notes", specialist.id, "note");
+  }
+  return anchor ? chartElementId(anchor.tab, anchor.itemId, anchor.sectionId) : undefined;
 }
 
 function ChartViewer({
@@ -572,7 +672,18 @@ function ChartViewer({
   activeConditionId?: string;
   setActiveTab: (tab: ChartTab) => void;
 }) {
-  const evidenceMap = new Map(evidence.map((item) => [item.id, item]));
+  const [searchQuery, setSearchQuery] = useState("");
+  const [focusedSearchResult, setFocusedSearchResult] = useState<ChartSearchResult | null>(null);
+  const [openEncounterIds, setOpenEncounterIds] = useState<Set<string>>(() => new Set());
+  const [openLabIds, setOpenLabIds] = useState<Set<string>>(() => new Set());
+  const [openImagingIds, setOpenImagingIds] = useState<Set<string>>(() => new Set());
+  const [openSpecialistIds, setOpenSpecialistIds] = useState<Set<string>>(() => new Set());
+  const [openClaimIds, setOpenClaimIds] = useState<Set<string>>(() => new Set());
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const normalizedSearchQuery = normalizeChartSearchQuery(deferredSearchQuery);
+  const searchResults = useMemo(() => buildChartSearchResults(chart, normalizedSearchQuery), [chart, normalizedSearchQuery]);
+  const visibleSearchResults = searchResults.slice(0, 12);
+  const evidenceMap = useMemo(() => new Map(evidence.map((item) => [item.id, item])), [evidence]);
   const evidenceForIds = (ids: string[] = []) => ids.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
   const rowClass = (ids: string[] = []) => {
     const scoped = ids.some((id) => evidenceMap.has(id));
@@ -584,99 +695,233 @@ function ChartViewer({
     const token = firstEvidence ? tokenForEvidence(firstEvidence) : undefined;
     return token ? { borderColor: token.border } : undefined;
   };
+
+  function setAccordionOpen(tab: ChartTab, itemId: string, open: boolean) {
+    if (tab === "encounters") setOpenEncounterIds((current) => withExpandedItem(current, itemId, open));
+    if (tab === "labs") setOpenLabIds((current) => withExpandedItem(current, itemId, open));
+    if (tab === "imaging") setOpenImagingIds((current) => withExpandedItem(current, itemId, open));
+    if (tab === "specialist-notes") setOpenSpecialistIds((current) => withExpandedItem(current, itemId, open));
+    if (tab === "claims") setOpenClaimIds((current) => withExpandedItem(current, itemId, open));
+  }
+
+  function focusSearchResult(result: ChartSearchResult) {
+    setFocusedSearchResult(result);
+    setActiveTab(result.tab);
+    if (result.parentId) setAccordionOpen(result.tab, result.parentId, true);
+    window.setTimeout(() => {
+      document.getElementById(chartElementId(result.tab, result.itemId, result.sectionId))?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+  }
+
+  useEffect(() => {
+    setSearchQuery("");
+    setFocusedSearchResult(null);
+    setOpenEncounterIds(new Set());
+    setOpenLabIds(new Set());
+    setOpenImagingIds(new Set());
+    setOpenSpecialistIds(new Set());
+    setOpenClaimIds(new Set());
+  }, [chart.reviewId]);
+
+  useEffect(() => {
+    if (!selectedEvidenceId) return;
+    const passage = evidenceMap.get(selectedEvidenceId);
+    if (!passage?.chartAnchor) return;
+    const parentId = accordionParentForEvidence(chart, selectedEvidenceId, passage);
+    if (parentId) setAccordionOpen(passage.chartAnchor.tab, parentId, true);
+    const targetId = targetForEvidence(chart, selectedEvidenceId, passage);
+    window.setTimeout(() => {
+      const target = document.getElementById(`span-${selectedEvidenceId}`) ?? (targetId ? document.getElementById(targetId) : null);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  }, [chart, evidenceMap, selectedEvidenceId]);
+
+  const isFocused = (tab: ChartTab, itemId: string, sectionId?: string) =>
+    focusedSearchResult?.tab === tab &&
+    focusedSearchResult.itemId === itemId &&
+    (focusedSearchResult.sectionId ?? "") === (sectionId ?? "");
+
+  function handleChartTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex: number | undefined;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (currentIndex + 1) % chartTabs.length;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (currentIndex - 1 + chartTabs.length) % chartTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = chartTabs.length - 1;
+    if (nextIndex === undefined) return;
+
+    event.preventDefault();
+    const nextTab = chartTabs[nextIndex].value;
+    setActiveTab(nextTab);
+    window.requestAnimationFrame(() => document.getElementById(`chart-tab-${nextTab}`)?.focus());
+  }
+
   return (
     <div className="chart-viewer">
-      <div className="document-tabs chart-tabs" role="tablist" aria-label="Embedded chart sections">
-        {chartTabs.map((tab) => (
-          <button
-            key={tab.value}
-            className={tab.value === activeTab ? "active" : ""}
-            data-chart-tab={tab.value}
-            role="tab"
-            aria-selected={tab.value === activeTab}
-            onClick={() => setActiveTab(tab.value)}
-            type="button"
-          >
-            {tab.label}
-            <span>{tab.value === "encounters" ? `${chart.encounters.length} note(s)` : tab.value === "labs" ? `${chart.labs.length} panel(s)` : ""}</span>
-          </button>
-        ))}
+      <section className="chart-search-card" aria-label="Chart search">
+        <div className="chart-search-copy">
+          <span>Chart Search</span>
+          <p>Find diagnoses and evidence across notes, results, specialist records, and claims.</p>
+        </div>
+        <div className="chart-search-input">
+          <Search size={16} aria-hidden="true" />
+          <label className="sr-only" htmlFor="full-chart-search">Search the full patient chart</label>
+          <input
+            id="full-chart-search"
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              setFocusedSearchResult(null);
+            }}
+            placeholder="Search the full patient chart"
+          />
+          {searchQuery ? <button type="button" onClick={() => { setSearchQuery(""); setFocusedSearchResult(null); }}>Clear</button> : null}
+        </div>
+        {normalizedSearchQuery ? (
+          <div className="chart-search-results" aria-live="polite">
+            <div className="chart-search-results-heading">
+              <strong>{searchResults.length} match{searchResults.length === 1 ? "" : "es"}</strong>
+              <span>for “{normalizedSearchQuery}”</span>
+            </div>
+            {visibleSearchResults.length ? (
+              <div className="chart-search-result-list">
+                {visibleSearchResults.map((result) => (
+                  <button
+                    key={result.id}
+                    type="button"
+                    className={focusedSearchResult?.id === result.id ? "active" : ""}
+                    onClick={() => focusSearchResult(result)}
+                  >
+                    <span><strong>{result.sourceLabel}</strong><small>{result.sectionLabel}</small></span>
+                    <span>{renderSearchText(result.preview, normalizedSearchQuery, `${result.id}-preview`)}</span>
+                    <StatusChip tone="info">{result.matchCount}</StatusChip>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="chart-search-empty">No matching chart records.</p>
+            )}
+            {searchResults.length > visibleSearchResults.length ? <small>Showing the first 12 results. Refine the search to narrow the list.</small> : null}
+          </div>
+        ) : null}
+      </section>
+
+      <div className="chart-tabs-scroll">
+        <div className="document-tabs chart-tabs" role="tablist" aria-label="Patient chart sections" aria-orientation="horizontal">
+          {chartTabs.map((tab, index) => {
+            const Icon = tab.icon;
+            const count = tab.count(chart);
+            return (
+              <button
+                id={`chart-tab-${tab.value}`}
+                key={tab.value}
+                className={tab.value === activeTab ? "active" : ""}
+                data-chart-tab={tab.value}
+                role="tab"
+                aria-controls={`chart-panel-${tab.value}`}
+                aria-selected={tab.value === activeTab}
+                tabIndex={tab.value === activeTab ? 0 : -1}
+                onClick={() => setActiveTab(tab.value)}
+                onKeyDown={(event) => handleChartTabKeyDown(event, index)}
+                type="button"
+              >
+                <Icon size={16} aria-hidden="true" />
+                <span className="chart-tab-copy"><strong>{tab.label}</strong><small>{count} {tab.countLabel}</small></span>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <article className="document-page chart-page">
+
+      <article
+        id={`chart-panel-${activeTab}`}
+        className="document-page chart-page"
+        role="tabpanel"
+        aria-labelledby={`chart-tab-${activeTab}`}
+      >
         <header>
-          <h3>Embedded Mock EMR Chart</h3>
+          <div>
+            <span className="eyebrow">Clinical Record</span>
+            <h3>Longitudinal Patient Chart</h3>
+          </div>
           <div className="document-header-chips">
             <StatusChip tone="info">{documents.length} source record(s)</StatusChip>
             <StatusChip tone={activeConditionId ? "purple" : "info"}>{activeConditionId ? "Condition-scoped evidence" : "All evidence visible"}</StatusChip>
           </div>
         </header>
         {activeTab === "encounters" ? (
-          <div className="chart-stack">
+          <div className="chart-accordion-list">
             {chart.encounters.map((encounter) => {
               const hpiEvidence = evidenceForIds(encounter.sectionEvidenceIds.hpi);
               const planEvidence = evidenceForIds(encounter.sectionEvidenceIds.assessmentPlan);
               return (
-                <section key={encounter.id} className="chart-note">
-                  <div className="chart-note-header">
+                <details
+                  key={encounter.id}
+                  className={`chart-accordion ${focusedSearchResult?.parentId === encounter.id ? "search-focus" : ""}`}
+                  open={openEncounterIds.has(encounter.id)}
+                  onToggle={(event) => setAccordionOpen("encounters", encounter.id, event.currentTarget.open)}
+                >
+                  <summary className="chart-accordion-summary">
                     <div>
-                      <strong>{formatDate(encounter.date)} - {encounter.type}</strong>
-                      <span>{encounter.provider}</span>
+                      <strong>{formatDate(encounter.date)}</strong>
+                      <span>{renderSearchText(`${encounter.type} · ${encounter.provider}`, normalizedSearchQuery, `${encounter.id}-summary`)}</span>
                     </div>
                     <StatusChip>{encounter.billingCode}</StatusChip>
-                  </div>
-                  <ChartSection title="Chief Complaint" id={chartElementId("encounters", encounter.id, "chiefComplaint")}>
-                    {encounter.chiefComplaint}
-                  </ChartSection>
-                  <ChartSection
-                    title="HPI"
-                    id={chartElementId("encounters", encounter.id, "hpi")}
-                    className={rowClass(encounter.sectionEvidenceIds.hpi)}
-                    style={evidenceStyle(hpiEvidence)}
-                  >
-                    {renderEvidenceSpans(encounter.hpi, hpiEvidence, selectedEvidenceId)}
-                  </ChartSection>
-                  <ChartSection title="Review Of Systems" id={chartElementId("encounters", encounter.id, "ros")}>
-                    <ul>{encounter.reviewOfSystems.map((item) => <li key={item}>{item}</li>)}</ul>
-                  </ChartSection>
-                  <ChartSection title="Vitals" id={chartElementId("vitals", encounter.vitals.id)}>
-                    <div className={rowClass(encounter.vitals.evidenceIds)}>
-                      BP {encounter.vitals.systolic}/{encounter.vitals.diastolic} - HR {encounter.vitals.heartRate} - Temp {encounter.vitals.temperature}F - Wt {encounter.vitals.weight} lb - BMI {encounter.vitals.bmi} - O2 {encounter.vitals.oxygenSaturation}%
-                    </div>
-                  </ChartSection>
-                  <ChartSection title="Physical Exam" id={chartElementId("encounters", encounter.id, "physicalExam")}>
-                    <div className="exam-grid">
-                      {encounter.physicalExam.map((item, index) => (
-                        <div key={`${encounter.id}-${item.system}-${index}`}><strong>{item.system}</strong><span>{item.text}</span></div>
-                      ))}
-                    </div>
-                  </ChartSection>
-                  <ChartSection
-                    title="Assessment And Plan"
-                    id={chartElementId("encounters", encounter.id, "assessmentPlan")}
-                    className={rowClass(encounter.sectionEvidenceIds.assessmentPlan)}
-                    style={evidenceStyle(planEvidence)}
-                  >
-                    <ol className="plan-list">
-                      {encounter.assessmentPlan.map((plan, index) => {
-                        const itemEvidence = evidenceForIds(plan.evidenceIds);
-                        return (
-                          <li
-                            key={plan.id}
-                            id={chartElementId("encounters", plan.id, "assessmentPlan")}
-                            className={rowClass(plan.evidenceIds)}
-                            style={evidenceStyle(itemEvidence)}
-                          >
-                            <strong>{index + 1}. {plan.problem}</strong>
-                            <span>{renderEvidenceSpans(plan.detail, itemEvidence, selectedEvidenceId)}</span>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </ChartSection>
-                  <footer>
-                    Electronically signed by {encounter.provider} on {formatDate(encounter.date)} at {encounter.signatureTime}. Billing code {encounter.billingCode}.
-                  </footer>
-                </section>
+                  </summary>
+                  <section className="chart-note chart-accordion-content">
+                    <ChartSection title="Chief Complaint" id={chartElementId("encounters", encounter.id, "chiefComplaint")} className={isFocused("encounters", encounter.id, "chiefComplaint") ? "search-focus" : ""}>
+                      {renderSearchText(encounter.chiefComplaint, normalizedSearchQuery, `${encounter.id}-chief`)}
+                    </ChartSection>
+                    <ChartSection
+                      title="History of Present Illness"
+                      id={chartElementId("encounters", encounter.id, "hpi")}
+                      className={`${rowClass(encounter.sectionEvidenceIds.hpi)} ${isFocused("encounters", encounter.id, "hpi") ? "search-focus" : ""}`}
+                      style={evidenceStyle(hpiEvidence)}
+                    >
+                      {renderEvidenceSpans(encounter.hpi, hpiEvidence, selectedEvidenceId, normalizedSearchQuery)}
+                    </ChartSection>
+                    <ChartSection title="Review Of Systems" id={chartElementId("encounters", encounter.id, "ros")} className={isFocused("encounters", encounter.id, "ros") ? "search-focus" : ""}>
+                      <ul>{encounter.reviewOfSystems.map((item) => <li key={item}>{renderSearchText(item, normalizedSearchQuery, `${encounter.id}-ros-${item}`)}</li>)}</ul>
+                    </ChartSection>
+                    <ChartSection title="Vitals" id={chartElementId("encounters", encounter.vitals.id, "vitals")} className={isFocused("encounters", encounter.vitals.id, "vitals") ? "search-focus" : ""}>
+                      <div id={chartElementId("vitals", encounter.vitals.id)} className={`encounter-vitals ${rowClass(encounter.vitals.evidenceIds)}`}>
+                        <span>BP {encounter.vitals.systolic}/{encounter.vitals.diastolic}</span><span>HR {encounter.vitals.heartRate}</span><span>Temp {encounter.vitals.temperature}F</span><span>Wt {encounter.vitals.weight} lb</span><span>BMI {encounter.vitals.bmi}</span><span>O2 {encounter.vitals.oxygenSaturation}%</span>
+                      </div>
+                    </ChartSection>
+                    <ChartSection title="Physical Exam" id={chartElementId("encounters", encounter.id, "physicalExam")} className={isFocused("encounters", encounter.id, "physicalExam") ? "search-focus" : ""}>
+                      <div className="exam-grid">
+                        {encounter.physicalExam.map((item, index) => (
+                          <div key={`${encounter.id}-${item.system}-${index}`}><strong>{renderSearchText(item.system, normalizedSearchQuery, `${encounter.id}-exam-system-${index}`)}</strong><span>{renderSearchText(item.text, normalizedSearchQuery, `${encounter.id}-exam-${index}`)}</span></div>
+                        ))}
+                      </div>
+                    </ChartSection>
+                    <ChartSection
+                      title="Assessment And Plan"
+                      id={chartElementId("encounters", encounter.id, "assessmentPlan")}
+                      className={`${rowClass(encounter.sectionEvidenceIds.assessmentPlan)} ${isFocused("encounters", encounter.id, "assessmentPlan") ? "search-focus" : ""}`}
+                      style={evidenceStyle(planEvidence)}
+                    >
+                      <ol className="plan-list">
+                        {encounter.assessmentPlan.map((plan, index) => {
+                          const itemEvidence = evidenceForIds(plan.evidenceIds);
+                          return (
+                            <li
+                              key={plan.id}
+                              id={chartElementId("encounters", plan.id, "assessmentPlan")}
+                              className={`${rowClass(plan.evidenceIds)} ${isFocused("encounters", plan.id, "assessmentPlan") ? "search-focus" : ""}`}
+                              style={evidenceStyle(itemEvidence)}
+                            >
+                              <strong>{index + 1}. {renderSearchText(plan.problem, normalizedSearchQuery, `${plan.id}-problem`)}</strong>
+                              <span>{renderEvidenceSpans(plan.detail, itemEvidence, selectedEvidenceId, normalizedSearchQuery)}</span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </ChartSection>
+                    <footer id={chartElementId("encounters", encounter.id, "billing")} className={isFocused("encounters", encounter.id, "billing") ? "search-focus" : ""}>
+                      Electronically signed by {encounter.provider} on {formatDate(encounter.date)} at {encounter.signatureTime}. Billing code {encounter.billingCode}.
+                    </footer>
+                  </section>
+                </details>
               );
             })}
           </div>
@@ -684,9 +929,9 @@ function ChartViewer({
         {activeTab === "problem-list" ? (
           <ChartTable headers={["Diagnosis", "ICD-10", "Status", "Date Added", "HCC"]}>
             {chart.problems.map((problem) => (
-              <tr key={problem.id} id={chartElementId("problem-list", problem.id)} className={rowClass(problem.evidenceIds)} style={evidenceStyle(evidenceForIds(problem.evidenceIds))}>
-                <td>{problem.diagnosis}</td>
-                <td className="mono">{problem.code}</td>
+              <tr key={problem.id} id={chartElementId("problem-list", problem.id)} className={`${rowClass(problem.evidenceIds)} ${isFocused("problem-list", problem.id) ? "search-focus" : ""}`} style={evidenceStyle(evidenceForIds(problem.evidenceIds))}>
+                <td>{renderSearchText(problem.diagnosis, normalizedSearchQuery, `${problem.id}-diagnosis`)}</td>
+                <td className="mono">{renderSearchText(problem.code, normalizedSearchQuery, `${problem.id}-code`)}</td>
                 <td>{problem.status}</td>
                 <td>{formatDate(problem.dateAdded)}</td>
                 <td>{problem.isHcc ? "Yes" : "No"}</td>
@@ -697,47 +942,58 @@ function ChartViewer({
         {activeTab === "pmh" ? (
           <div className="chart-stack">
             {chart.pastMedicalHistory.map((item) => (
-              <div key={item.id} id={chartElementId("pmh", item.id)} className={rowClass(item.evidenceIds)}>{item.text}</div>
+              <div key={item.id} id={chartElementId("pmh", item.id)} className={`chart-list-row ${rowClass(item.evidenceIds)} ${isFocused("pmh", item.id) ? "search-focus" : ""}`}>{renderSearchText(item.text, normalizedSearchQuery, `${item.id}-pmh`)}</div>
             ))}
           </div>
         ) : null}
         {activeTab === "medications" ? (
           <ChartTable headers={["Medication", "Dose", "Frequency", "Route", "Prescriber"]}>
             {chart.medications.map((medication) => (
-              <tr key={medication.id} id={chartElementId("medications", medication.id)} className={rowClass(medication.evidenceIds)} style={evidenceStyle(evidenceForIds(medication.evidenceIds))}>
-                <td>{medication.name}</td>
-                <td>{medication.dose}</td>
-                <td>{medication.frequency}</td>
-                <td>{medication.route}</td>
-                <td>{medication.prescriber}</td>
+              <tr key={medication.id} id={chartElementId("medications", medication.id)} className={`${rowClass(medication.evidenceIds)} ${isFocused("medications", medication.id) ? "search-focus" : ""}`} style={evidenceStyle(evidenceForIds(medication.evidenceIds))}>
+                <td>{renderSearchText(medication.name, normalizedSearchQuery, `${medication.id}-name`)}</td>
+                <td>{renderSearchText(medication.dose, normalizedSearchQuery, `${medication.id}-dose`)}</td>
+                <td>{renderSearchText(medication.frequency, normalizedSearchQuery, `${medication.id}-frequency`)}</td>
+                <td>{renderSearchText(medication.route, normalizedSearchQuery, `${medication.id}-route`)}</td>
+                <td>{renderSearchText(medication.prescriber, normalizedSearchQuery, `${medication.id}-prescriber`)}</td>
               </tr>
             ))}
           </ChartTable>
         ) : null}
         {activeTab === "labs" ? (
-          <div className="chart-stack">
+          <div className="chart-accordion-list">
             {chart.labs.map((panel) => (
-              <section key={panel.id} className="chart-table-section">
-                <h4>{panel.name} <span>{formatDate(panel.date)}</span></h4>
-                <ChartTable headers={["Component", "Value", "Unit", "Reference", "Flag"]}>
-                  {panel.results.map((result) => (
-                    <tr key={result.id} id={chartElementId("labs", result.id)} className={rowClass(result.evidenceIds)} style={evidenceStyle(evidenceForIds(result.evidenceIds))}>
-                      <td>{result.component}</td>
-                      <td className={`lab-${result.flag}`}>{result.value}</td>
-                      <td>{result.unit}</td>
-                      <td>{result.referenceRange}</td>
-                      <td>{result.flag}</td>
-                    </tr>
-                  ))}
-                </ChartTable>
-              </section>
+              <details
+                key={panel.id}
+                id={chartElementId("labs", panel.id)}
+                className={`chart-accordion ${focusedSearchResult?.parentId === panel.id ? "search-focus" : ""}`}
+                open={openLabIds.has(panel.id)}
+                onToggle={(event) => setAccordionOpen("labs", panel.id, event.currentTarget.open)}
+              >
+                <summary className="chart-accordion-summary">
+                  <div><strong>{renderSearchText(panel.name, normalizedSearchQuery, `${panel.id}-name`)}</strong><span>{formatDate(panel.date)}</span></div>
+                  <FlaskConical size={17} aria-hidden="true" />
+                </summary>
+                <div className="chart-accordion-content chart-table-section">
+                  <ChartTable headers={["Component", "Value", "Unit", "Reference", "Flag"]}>
+                    {panel.results.map((result) => (
+                      <tr key={result.id} id={chartElementId("labs", result.id)} className={`${rowClass(result.evidenceIds)} ${isFocused("labs", result.id) ? "search-focus" : ""}`} style={evidenceStyle(evidenceForIds(result.evidenceIds))}>
+                        <td>{renderSearchText(result.component, normalizedSearchQuery, `${result.id}-component`)}</td>
+                        <td className={`lab-${result.flag}`}>{renderSearchText(result.value, normalizedSearchQuery, `${result.id}-value`)}</td>
+                        <td>{result.unit}</td>
+                        <td>{result.referenceRange}</td>
+                        <td><span className={`lab-flag lab-flag-${result.flag}`}>{result.flag}</span></td>
+                      </tr>
+                    ))}
+                  </ChartTable>
+                </div>
+              </details>
             ))}
           </div>
         ) : null}
         {activeTab === "vitals" ? (
           <ChartTable headers={["Date", "BP", "HR", "Temp", "Weight", "Height", "BMI", "O2 Sat"]}>
             {chart.vitals.map((vital) => (
-              <tr key={vital.id} id={chartElementId("vitals", vital.id)} className={rowClass(vital.evidenceIds)} style={evidenceStyle(evidenceForIds(vital.evidenceIds))}>
+              <tr key={vital.id} id={chartElementId("vitals", vital.id)} className={`${rowClass(vital.evidenceIds)} ${isFocused("vitals", vital.id) ? "search-focus" : ""}`} style={evidenceStyle(evidenceForIds(vital.evidenceIds))}>
                 <td>{formatDate(vital.date)}</td>
                 <td>{vital.systolic}/{vital.diastolic}</td>
                 <td>{vital.heartRate}</td>
@@ -751,50 +1007,56 @@ function ChartViewer({
           </ChartTable>
         ) : null}
         {activeTab === "imaging" ? (
-          <div className="chart-stack">
+          <div className="chart-accordion-list">
             {chart.imaging.map((report) => {
               const reportEvidence = evidenceForIds(report.evidenceIds);
               return (
-                <section key={report.id} id={chartElementId("imaging", report.id, "findings")} className={`chart-note ${rowClass(report.evidenceIds)}`} style={evidenceStyle(reportEvidence)}>
-                  <div className="chart-note-header"><strong>{report.type}</strong><span>{formatDate(report.date)} - {report.indication}</span></div>
-                  <ChartSection title="Findings">{renderEvidenceSpans(report.findings, reportEvidence, selectedEvidenceId)}</ChartSection>
-                  <ChartSection title="Impression"><ol>{report.impression.map((line) => <li key={line}>{line}</li>)}</ol></ChartSection>
-                </section>
+                <details key={report.id} className={`chart-accordion ${focusedSearchResult?.parentId === report.id ? "search-focus" : ""}`} open={openImagingIds.has(report.id)} onToggle={(event) => setAccordionOpen("imaging", report.id, event.currentTarget.open)}>
+                  <summary id={chartElementId("imaging", report.id, "indication")} className="chart-accordion-summary"><div><strong>{renderSearchText(report.type, normalizedSearchQuery, `${report.id}-type`)}</strong><span>{formatDate(report.date)} · {renderSearchText(report.indication, normalizedSearchQuery, `${report.id}-indication`)}</span></div><ImageIcon size={17} aria-hidden="true" /></summary>
+                  <section className={`chart-note chart-accordion-content ${rowClass(report.evidenceIds)}`} style={evidenceStyle(reportEvidence)}>
+                    <ChartSection title="Findings" id={chartElementId("imaging", report.id, "findings")} className={isFocused("imaging", report.id, "findings") ? "search-focus" : ""}>{renderEvidenceSpans(report.findings, reportEvidence, selectedEvidenceId, normalizedSearchQuery)}</ChartSection>
+                    <ChartSection title="Impression" id={chartElementId("imaging", report.id, "impression")} className={isFocused("imaging", report.id, "impression") ? "search-focus" : ""}><ol>{report.impression.map((line) => <li key={line}>{renderSearchText(line, normalizedSearchQuery, `${report.id}-impression-${line}`)}</li>)}</ol></ChartSection>
+                  </section>
+                </details>
               );
             })}
           </div>
         ) : null}
         {activeTab === "specialist-notes" ? (
-          <div className="chart-stack">
+          <div className="chart-accordion-list">
             {chart.specialistNotes.map((note) => {
               const noteEvidence = evidenceForIds(note.evidenceIds);
               return (
-                <section key={note.id} id={chartElementId("specialist-notes", note.id, "note")} className={`chart-note ${rowClass(note.evidenceIds)}`} style={evidenceStyle(noteEvidence)}>
-                  <div className="chart-note-header"><strong>{note.title}</strong><span>{note.specialty} - {note.provider} - {formatDate(note.date)}</span></div>
-                  <p>{renderEvidenceSpans(note.note, noteEvidence, selectedEvidenceId)}</p>
-                  <ol>{note.assessment.map((line) => <li key={line}>{line}</li>)}</ol>
-                </section>
+                <details key={note.id} className={`chart-accordion ${focusedSearchResult?.parentId === note.id ? "search-focus" : ""}`} open={openSpecialistIds.has(note.id)} onToggle={(event) => setAccordionOpen("specialist-notes", note.id, event.currentTarget.open)}>
+                  <summary className="chart-accordion-summary"><div><strong>{renderSearchText(note.title, normalizedSearchQuery, `${note.id}-title`)}</strong><span>{note.specialty} · {note.provider} · {formatDate(note.date)}</span></div><FileText size={17} aria-hidden="true" /></summary>
+                  <section id={chartElementId("specialist-notes", note.id, "note")} className={`chart-note chart-accordion-content ${rowClass(note.evidenceIds)} ${isFocused("specialist-notes", note.id, "note") ? "search-focus" : ""}`} style={evidenceStyle(noteEvidence)}>
+                    <ChartSection title="Consult Note">{renderEvidenceSpans(note.note, noteEvidence, selectedEvidenceId, normalizedSearchQuery)}</ChartSection>
+                    <ChartSection title="Assessment" id={chartElementId("specialist-notes", note.id, "assessment")} className={isFocused("specialist-notes", note.id, "assessment") ? "search-focus" : ""}><ol>{note.assessment.map((line) => <li key={line}>{renderSearchText(line, normalizedSearchQuery, `${note.id}-assessment-${line}`)}</li>)}</ol></ChartSection>
+                  </section>
+                </details>
               );
             })}
           </div>
         ) : null}
         {activeTab === "claims" ? (
-          <ChartTable headers={["DOS", "Provider", "Payer", "CPT / Type", "ICD-10 Codes", "Eligibility", "Support"]}>
+          <div className="chart-accordion-list claim-list">
             {chart.claims.map((claim) => {
               const claimEvidence = evidence.filter((item) => item.chartAnchor?.tab === "claims" && item.chartAnchor.itemId === claim.id);
               return (
-                <tr key={claim.id} id={chartElementId("claims", claim.id)} className={rowClass(claimEvidence.map((item) => item.id))} style={evidenceStyle(claimEvidence)}>
-                  <td>{formatDate(claim.dateOfService)}</td>
-                  <td>{claim.provider}</td>
-                  <td>{claim.payer}</td>
-                  <td>{claim.cptCode} / {claim.encounterType}</td>
-                  <td>{claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "No diagnosis on claim"}</td>
-                  <td>{claim.providerTypeEligible ? "Eligible provider" : "Provider issue"}; {claim.faceToFace ? "Face-to-face" : "Non-face-to-face"}; {claim.providerSignatureValid ? "Signed" : "Signature issue"}</td>
-                  <td>{renderEvidenceSpans(claim.supportSummary ?? "Claim support and eligibility reviewed.", claimEvidence, selectedEvidenceId)}</td>
-                </tr>
+                <details key={claim.id} id={chartElementId("claims", claim.id)} className={`chart-accordion ${rowClass(claimEvidence.map((item) => item.id))} ${focusedSearchResult?.parentId === claim.id ? "search-focus" : ""}`} style={evidenceStyle(claimEvidence)} open={openClaimIds.has(claim.id)} onToggle={(event) => setAccordionOpen("claims", claim.id, event.currentTarget.open)}>
+                  <summary className="chart-accordion-summary claim-summary">
+                    <div><strong>{formatDate(claim.dateOfService)} · {claim.provider ?? "Rendering provider"}</strong><span>{claim.payer ?? "Payer not listed"} · {claim.cptCode ?? "CPT pending"} · {claim.encounterType ?? "Encounter type pending"}</span></div>
+                    <StatusChip tone={claim.riskEligible ? "good" : "warn"}>{claim.riskEligible ? "Risk eligible" : "Eligibility review"}</StatusChip>
+                  </summary>
+                  <div className="chart-accordion-content claim-detail-card">
+                    <div className="claim-detail-grid"><div><span>Diagnosis codes</span><strong>{claim.icd10Codes.length ? renderSearchText(claim.icd10Codes.join(", "), normalizedSearchQuery, `${claim.id}-codes`) : "No diagnosis on claim"}</strong></div><div><span>Provider</span><strong>{claim.provider ?? "Not listed"}</strong></div><div><span>CPT / visit type</span><strong>{claim.cptCode ?? "Pending"} · {claim.encounterType ?? "Not listed"}</strong></div></div>
+                    <div className="claim-eligibility-grid"><EligibilityChip label="Risk eligible source" ok={claim.riskEligible && claim.cptSourceEligible} /><EligibilityChip label="Eligible provider" ok={claim.providerTypeEligible} /><EligibilityChip label="Face-to-face" ok={claim.faceToFace} /><EligibilityChip label="Valid signature" ok={claim.providerSignatureValid} /></div>
+                    <ChartSection title="Claim Support" id={chartElementId("claims", claim.id, "support")} className={isFocused("claims", claim.id, "support") ? "search-focus" : ""}>{renderEvidenceSpans(claim.supportSummary ?? "Claim support and eligibility reviewed.", claimEvidence, selectedEvidenceId, normalizedSearchQuery)}</ChartSection>
+                  </div>
+                </details>
               );
             })}
-          </ChartTable>
+          </div>
         ) : null}
       </article>
     </div>
@@ -823,7 +1085,25 @@ function ChartTable({ headers, children }: { headers: string[]; children: ReactN
   );
 }
 
-function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], selectedEvidenceId?: string) {
+function renderSearchText(text: string, normalizedQuery: string, keyPrefix: string): ReactNode {
+  if (!normalizedQuery) return text;
+
+  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(`(${escapedQuery})`, "gi");
+  const pieces = text.split(matcher);
+
+  return pieces.map((piece, index) =>
+    piece.toLocaleLowerCase() === normalizedQuery ? (
+      <mark key={`${keyPrefix}-match-${index}`} className="chart-search-highlight">
+        {piece}
+      </mark>
+    ) : (
+      <Fragment key={`${keyPrefix}-text-${index}`}>{piece}</Fragment>
+    )
+  );
+}
+
+function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], selectedEvidenceId?: string, normalizedSearchQuery = "") {
   const spans = evidence
     .map((item) => {
       const exactText = item.exactText ?? item.text;
@@ -838,7 +1118,9 @@ function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], s
   spans.forEach((span) => {
     if (span.start < cursor) return;
     const token = tokenForEvidence(span.item);
-    if (span.start > cursor) pieces.push(sectionText.slice(cursor, span.start));
+    if (span.start > cursor) {
+      pieces.push(renderSearchText(sectionText.slice(cursor, span.start), normalizedSearchQuery, `${span.item.id}-before`));
+    }
     pieces.push(
       <mark
         id={`span-${span.item.id}`}
@@ -846,13 +1128,15 @@ function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], s
         className={`evidence-span ${selectedEvidenceId === span.item.id ? "selected" : ""}`}
         style={{ color: token.color, background: token.bg, borderColor: token.border }}
       >
-        {sectionText.slice(span.start, span.end)}
+        {renderSearchText(sectionText.slice(span.start, span.end), normalizedSearchQuery, `${span.item.id}-evidence`)}
       </mark>
     );
     cursor = span.end;
   });
-  if (cursor < sectionText.length) pieces.push(sectionText.slice(cursor));
-  return pieces.length ? pieces : sectionText;
+  if (cursor < sectionText.length) {
+    pieces.push(renderSearchText(sectionText.slice(cursor), normalizedSearchQuery, "section-tail"));
+  }
+  return pieces.length ? pieces : renderSearchText(sectionText, normalizedSearchQuery, "section");
 }
 
 function ConditionGroup({
