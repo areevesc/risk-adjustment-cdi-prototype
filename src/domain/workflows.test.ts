@@ -319,16 +319,16 @@ describe("prototype workflow rules", () => {
     expect(chart.specialistNotes.length).toBeGreaterThan(0);
     expect(chart.claims[0]).toMatchObject({ dateOfService: expect.any(String), provider: expect.any(String), payer: expect.any(String), cptCode: expect.any(String), encounterType: expect.any(String) });
     expect(chart.claims[0].icd10Codes).toEqual(["E11.65", "I10", "I50.33"]);
-    const labEvidence = data.evidence.find((item) => item.id === "ev-rev-100-d")!;
+    const labEvidence = data.evidence.find((item) => item.id === "ev-rev-100-e")!;
     const anchoredLabResult = chart.labs.flatMap((panel) => panel.results).find((result) => result.evidenceIds.includes(labEvidence.id))!;
     expect(targetForEvidence(chart, labEvidence.id, labEvidence)).toBe(`chart-labs-${anchoredLabResult.id}`);
-    expect(data.evidence.find((item) => item.id === "ev-rev-100-d")?.chartAnchor).toMatchObject({ tab: "labs" });
+    expect(data.evidence.find((item) => item.id === "ev-rev-100-e")?.chartAnchor).toMatchObject({ tab: "labs" });
     expect(data.evidence.find((item) => item.id === "ev-rev-100-a")).toMatchObject({
       sourceType: "planSentence",
       evidenceStrength: "assessmentWithPlan",
       meatType: expect.arrayContaining(["Assessment", "Treatment"])
     });
-    expect(data.evidence.find((item) => item.id === "ev-rev-100-d")).toMatchObject({
+    expect(data.evidence.find((item) => item.id === "ev-rev-100-e")).toMatchObject({
       sourceType: "labResultRow",
       evidenceStrength: "labIndicatorOnly",
       currentYearSupport: false
@@ -342,7 +342,7 @@ describe("prototype workflow rules", () => {
     const chfEvidence = getActiveConditionEvidence(data, relatedEvidence, "cond-100-c");
 
     expect(diabetesEvidence.map((evidence) => evidence.id)).toEqual(["ev-rev-100-a", "ev-rev-100-e"]);
-    expect(chfEvidence.map((evidence) => evidence.id)).toEqual(expect.arrayContaining(["ev-rev-100-b", "ev-rev-100-f"]));
+    expect(chfEvidence.map((evidence) => evidence.id)).toEqual(expect.arrayContaining(["ev-rev-100-f", "ev-rev-100-mor"]));
     expect(chfEvidence.map((evidence) => evidence.id)).not.toContain("ev-rev-100-a");
     expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-a", "next")?.id).toBe("ev-rev-100-e");
     expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-e", "next")?.id).toBe("ev-rev-100-a");
@@ -368,10 +368,10 @@ describe("prototype workflow rules", () => {
     expect(getRuleResult(duplicate, review, data, settings).disabledActions.some((item) => item.action === "Add to Claim")).toBe(false);
   });
 
-  it("groups same-HCC candidates by patient and calendar year across reviews", () => {
+  it("keeps officially distinct heart-failure HCCs in separate patient-year groups", () => {
     const data = cloneSeed();
-    const group = getPatientCalendarYearHccGroup(data, "pat-111", 2026, "HCC 222");
-    expect(group.map((condition) => condition.id).sort()).toEqual(["cond-111-a", "cond-111-b"]);
+    expect(getPatientCalendarYearHccGroup(data, "pat-111", 2026, "HCC 226").map((condition) => condition.id)).toEqual(["cond-111-a"]);
+    expect(getPatientCalendarYearHccGroup(data, "pat-111", 2026, "HCC 224").map((condition) => condition.id)).toEqual(["cond-111-b"]);
   });
 
   it("rule-resolves unresolved same-HCC conditions after the validation threshold", () => {
@@ -407,62 +407,60 @@ describe("prototype workflow rules", () => {
     expect(getUnresolvedConditions(data, review).map((condition) => condition.id)).toContain("cond-100-e");
   });
 
-  it("returns structured warning results for delete safety support across same-patient records", () => {
+  it("locks a lower heart-failure HCC after a human validates the higher HCC", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-111")!;
     const condition = data.conditions.find((item) => item.id === "cond-111-a")!;
     const result = getRuleResult(condition, review, data, settings);
-    expect(result.disabledActions.some((item) => item.action === "Delete")).toBe(false);
-    expect(result.warnings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ severity: "warning", message: "Possible current-year supporting evidence was identified. Review before deleting.", evidenceIds: expect.arrayContaining(["ev-rev-111-support-a"]) })
-      ])
-    );
+    expect(result.disabledActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "Validate", ruleId: "hierarchy-trumping-suppression" }),
+      expect.objectContaining({ action: "Delete", ruleId: "hierarchy-trumping-suppression" })
+    ]));
+    expect(result.disabledActions[0]?.reason).toContain("HCC226");
+    expect(result.disabledActions[0]?.reason).toContain("HCC224");
+    expect(getUnresolvedConditions(data, review).map((item) => item.id)).not.toContain(condition.id);
   });
 
-  it("allows delete when no current-year same-patient support exists", () => {
+  it("does not allow risk dispositions on a quality-only hypertension condition", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const condition = data.conditions.find((item) => item.id === "cond-100-b")!;
-    expect(getRuleResult(condition, review, data, settings).disabledActions.some((item) => item.action === "Delete")).toBe(false);
+    expect(condition.program).toBe("quality");
+    expect(getUnresolvedConditions(data, review).map((item) => item.id)).not.toContain(condition.id);
     const next = setDisposition(data, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Delete", true, settings);
-    expect(next.conditions.find((item) => item.id === "cond-100-b")?.disposition?.action).toBe("Delete");
+    expect(next.conditions.find((item) => item.id === "cond-100-b")?.disposition).toBeUndefined();
   });
 
-  it("allows a CDI/Coder to delete after disagreeing with AI-identified support", () => {
+  it("does not let a CDI/Coder override an official hierarchy lock", () => {
     const data = openReview(cloneSeed(), "rev-111", user(seedData, "u-coder-2"));
     const next = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-coder-2"), "Delete", false, settings, undefined, "Reviewed possible support; delete remains appropriate.");
-    expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition).toMatchObject({
-      action: "Delete",
-      agreedWithRecommendation: false,
-      comments: "Reviewed possible support; delete remains appropriate."
-    });
+    expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition).toBeUndefined();
   });
 
-  it("does not require a manager override when delete safety support is advisory", () => {
+  it("does not let a manager bypass a hierarchy lock through a normal disposition", () => {
     const data = openReview(cloneSeed(), "rev-111", user(seedData, "u-manager-1"));
     const next = setDisposition(data, "rev-111", "cond-111-a", user(data, "u-manager-1"), "Delete", true, settings);
-
-    expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition?.action).toBe("Delete");
+    expect(next.conditions.find((item) => item.id === "cond-111-a")?.disposition).toBeUndefined();
   });
 
-  it("warns but does not block delete when curated conflicting evidence exists", () => {
+  it("does not invent conflicting evidence when no diagnosis-scoped evidence exists", () => {
     const data = openReview(cloneSeed(), "rev-112", user(seedData, "u-coder-3"));
     const review = data.reviews.find((item) => item.id === "rev-112")!;
     const condition = data.conditions.find((item) => item.id === "cond-112-a")!;
     const result = getRuleResult(condition, review, data, settings);
-    expect(result.warnings[0]?.message).toContain("Conflicting or ambiguous");
+    expect(condition.evidenceIds).toEqual([]);
+    expect(result.warnings).toEqual([]);
     expect(result.disabledActions.some((item) => item.action === "Delete")).toBe(false);
     const next = setDisposition(data, "rev-112", "cond-112-a", user(data, "u-coder-3"), "Delete", true, settings);
     expect(next.conditions.find((item) => item.id === "cond-112-a")?.disposition?.action).toBe("Delete");
   });
 
-  it("preserves presented category while current disposition summary changes", () => {
+  it("preserves a quality condition as context without changing disposition summaries", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Validate", false, settings);
     const review = next.reviews.find((item) => item.id === "rev-100")!;
     expect(getPresentedOpportunitySummary(next, review).potentialDelete.count).toBe(1);
-    expect(getDispositionSummary(next, review).Validated.count).toBe(1);
+    expect(getDispositionSummary(next, review).Validated.count).toBe(0);
   });
 
   it("uses configurable prototype year for prospective routing", () => {
@@ -529,34 +527,29 @@ describe("prototype workflow rules", () => {
     expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Yes", ruleId: "current-year-hcc-captured" })]));
   });
 
-  it("excludes explicitly acute-only conditions from prospective recapture", () => {
+  it("keeps acute bronchitis as non-HCC clinical context", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-114")!;
     const condition = data.conditions.find((item) => item.id === "cond-114-a")!;
     const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
     const result = getRuleResult(condition, review, data, settings);
 
-    expect(recommendation?.action).toBe("No");
-    expect(recommendation?.rationale).toContain("acute-only");
-    expect(result).toMatchObject({
-      ruleId: "acute-only-recapture-exclusion",
-      recommendedAction: "No",
-      supportingEvidenceIds: expect.arrayContaining(["ev-rev-114-acute-2025"])
-    });
-    expect(result.disabledActions.some((item) => item.ruleId === "acute-only-recapture-exclusion")).toBe(false);
-    expect(result.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining("advisory"), evidenceIds: expect.arrayContaining(["ev-rev-114-acute-2025"]) })]));
+    expect(condition.program).toBe("clinical-context");
+    expect(condition.hcc).toBe("");
+    expect(recommendation).toBeUndefined();
+    expect(result.recommendedAction).toBeUndefined();
   });
 
-  it("allows direct Yes selection for acute-only recapture when the reviewer disagrees", () => {
+  it("does not allow prospective risk actions on acute bronchitis", () => {
     const data = openReview(cloneSeed(), "rev-114", user(seedData, "u-coder-1"));
     const selected = setDisposition(data, "rev-114", "cond-114-a", user(data, "u-coder-1"), "Yes", false, settings);
     const allowed = setDisposition(data, "rev-114", "cond-114-a", user(data, "u-coder-1"), "No", true, settings);
 
-    expect(selected.conditions.find((item) => item.id === "cond-114-a")?.disposition).toMatchObject({ action: "Yes", agreedWithRecommendation: false });
-    expect(allowed.conditions.find((item) => item.id === "cond-114-a")?.disposition?.action).toBe("No");
+    expect(selected.conditions.find((item) => item.id === "cond-114-a")?.disposition).toBeUndefined();
+    expect(allowed.conditions.find((item) => item.id === "cond-114-a")?.disposition).toBeUndefined();
   });
 
-  it("allows acute recapture review only when synthetic later indicators are explicit", () => {
+  it("does not turn clinical indicators into an HCC for acute bronchitis", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-114")!;
     const condition = data.conditions.find((item) => item.id === "cond-114-a")!;
@@ -567,8 +560,8 @@ describe("prototype workflow rules", () => {
     const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
     const result = getRuleResult(condition, review, data, settings);
 
-    expect(recommendation?.action).toBe("Yes");
-    expect(result.disabledActions.some((item) => item.ruleId === "acute-only-recapture-exclusion")).toBe(false);
+    expect(recommendation).toBeUndefined();
+    expect(result.recommendedAction).toBeUndefined();
   });
 
   it("suppresses lower-code direct capture when hierarchy replacement is present", () => {
@@ -578,15 +571,15 @@ describe("prototype workflow rules", () => {
     const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
     const result = getRuleResult(condition, review, data, settings);
     const blocked = setDisposition(data, "rev-116", "cond-116-a", user(data, "u-coder-3"), "Add to Claim", false, settings);
-    const changed = setDisposition(data, "rev-116", "cond-116-a", user(data, "u-coder-3"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
+    const changed = setDisposition(data, "rev-116", "cond-116-a", user(data, "u-coder-3"), "Change", true, settings, undefined, "Use higher hierarchy", "E11.22");
 
-    expect(recommendation).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+    expect(recommendation).toMatchObject({ action: "Change", replacementCode: "E11.22" });
     expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Add to Claim", ruleId: "hierarchy-trumping-suppression" })]));
     expect(blocked.conditions.find((item) => item.id === "cond-116-a")?.disposition).toBeUndefined();
-    expect(changed.conditions.find((item) => item.id === "cond-116-a")?.disposition).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+    expect(changed.conditions.find((item) => item.id === "cond-116-a")?.disposition).toBeUndefined();
   });
 
-  it("warns without hard-disabling direct capture when a replacement code is only recommended", () => {
+  it("does not apply hierarchy from an AI recommendation or obsolete specificity flag", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const condition = data.conditions.find((item) => item.id === "cond-100-f")!;
@@ -594,9 +587,9 @@ describe("prototype workflow rules", () => {
     const result = getRuleResult(condition, review, data, settings);
     const selected = setDisposition(data, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Yes", false, settings);
 
-    expect(recommendation).toMatchObject({ action: "Change", replacementCode: "E11.311" });
+    expect(recommendation).toMatchObject({ action: "Yes" });
     expect(result.disabledActions.some((item) => item.action === "Yes")).toBe(false);
-    expect(result.warnings).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining("Change is recommended") })]));
+    expect(result.warnings).toEqual([]);
     expect(selected.conditions.find((item) => item.id === "cond-100-f")?.disposition?.action).toBe("Yes");
   });
 
@@ -612,7 +605,7 @@ describe("prototype workflow rules", () => {
     expect(allowed.conditions.find((item) => item.id === "cond-100-e")?.disposition?.action).toBe("Add to Claim");
   });
 
-  it("recommends deletion rather than capture for quality-exclusion context", () => {
+  it("keeps screening context outside risk actions", () => {
     const data = openReview(cloneSeed(), "rev-115", user(seedData, "u-coder-2"));
     const review = data.reviews.find((item) => item.id === "rev-115")!;
     const condition = data.conditions.find((item) => item.id === "cond-115-a")!;
@@ -621,11 +614,12 @@ describe("prototype workflow rules", () => {
     const blocked = setDisposition(data, "rev-115", "cond-115-a", user(data, "u-coder-2"), "Validate", false, settings);
     const deleted = setDisposition(data, "rev-115", "cond-115-a", user(data, "u-coder-2"), "Delete", true, settings);
 
-    expect(recommendation?.action).toBe("Delete");
-    expect(result.ruleId).toBe("quality-exclusion-suppression");
-    expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Validate", ruleId: "quality-exclusion-suppression" })]));
+    expect(condition.program).toBe("quality");
+    expect(condition.hcc).toBe("");
+    expect(recommendation).toBeUndefined();
+    expect(result.disabledActions).toEqual([]);
     expect(blocked.conditions.find((item) => item.id === "cond-115-a")?.disposition).toBeUndefined();
-    expect(deleted.conditions.find((item) => item.id === "cond-115-a")?.disposition?.action).toBe("Delete");
+    expect(deleted.conditions.find((item) => item.id === "cond-115-a")?.disposition).toBeUndefined();
   });
 });
 
@@ -634,13 +628,14 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const summary = getRafSummary(data, review);
-    expect(summary.demographicRaf).toBeCloseTo(0.421);
-    expect(summary.unresolvedPotentialRaf).toBeCloseTo(0.121 + 0.318 + 0.309);
-    expect(summary.potentialAdditionRaf).toBeCloseTo(0.318 + 0.309);
-    expect(summary.potentialDeletionRaf).toBeCloseTo(0.121);
-    expect(summary.prospectiveRecaptureRaf).toBeCloseTo(0.323);
-    expect(summary.prospectiveSuspectRaf).toBeCloseTo(0.318);
-    expect(summary.projectedRaf).toBeCloseTo(0.421);
+    expect(summary.demographicRaf).toBeCloseTo(0.465);
+    expect(summary.validatedCapturedRaf).toBeCloseTo(0.638);
+    expect(summary.unresolvedPotentialRaf).toBeCloseTo(0);
+    expect(summary.potentialAdditionRaf).toBeCloseTo(0);
+    expect(summary.potentialDeletionRaf).toBeCloseTo(0);
+    expect(summary.prospectiveRecaptureRaf).toBeCloseTo(0.472);
+    expect(summary.prospectiveSuspectRaf).toBeCloseTo(0);
+    expect(summary.projectedRaf).toBeCloseTo(1.103);
   });
 
   it("deduplicates captured RAF by patient, calendar year, and HCC", () => {
@@ -649,8 +644,8 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     data = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const summary = getRafSummary(data, review);
-    expect(summary.validatedCapturedRaf).toBeCloseTo(0.318);
-    expect(summary.projectedRaf).toBeCloseTo(0.421 + 0.318);
+    expect(summary.validatedCapturedRaf).toBeCloseTo(0.638);
+    expect(summary.projectedRaf).toBeCloseTo(1.103);
   });
 
   it("calculates population RAF totals and averages for manager reporting", () => {
@@ -665,7 +660,10 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(summary.totals.openRaf).toBeGreaterThan(0);
     expect(summary.totals.prospectiveRaf).toBeGreaterThan(0);
     expect(summary.totals.deletionRaf).toBeGreaterThanOrEqual(0);
-    expect(summary.totals.projectedRaf).toBeCloseTo(summary.totals.demographicRaf + summary.totals.capturedRaf - summary.totals.deletionRaf);
+    expect(summary.totals.projectedRaf).toBeCloseTo(
+      Array.from(new Map(data.reviews.map((review) => [`${review.patientId}-${review.calendarYear}`, review])).values())
+        .reduce((sum, review) => sum + getRafSummary(data, review).projectedRaf, 0)
+    );
     expect(summary.averages.demographicRaf).toBeCloseTo(summary.totals.demographicRaf / summary.patientCount);
     expect(summary.averages.projectedRaf).toBeCloseTo(summary.totals.projectedRaf / summary.patientCount);
   });
@@ -782,7 +780,7 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(exports.find((record) => record.id === "generated-addition")?.rows[0]).toMatchObject({ reviewId: "rev-100", icd10: "E11.40" });
   });
 
-  it("does not create export records or captured RAF from recommendations alone", () => {
+  it("does not create export records or alter the current-claim score from recommendations alone", () => {
     const data = cloneSeed();
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     const recommendedAddition = data.conditions.find((item) => item.id === "cond-100-d")!;
@@ -792,7 +790,7 @@ describe("RAF, audit, assignment, stats, and exports", () => {
 
     expect(recommendation?.action).toBe("Add to Claim");
     expect(exports.find((record) => record.id === "generated-addition")?.rows.some((row) => row.reviewId === "rev-100" && row.icd10 === "E11.40")).toBe(false);
-    expect(rafSummary.validatedCapturedRaf).toBeCloseTo(0);
+    expect(rafSummary.validatedCapturedRaf).toBeCloseTo(0.638);
   });
 
   it("creates and advances scheduling outreach when a prospective action has no same-year appointment", () => {
@@ -827,24 +825,24 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const rev115 = data.reviews.find((item) => item.id === "rev-115")!;
     const rev116 = data.reviews.find((item) => item.id === "rev-116")!;
     const rev107 = data.reviews.find((item) => item.id === "rev-107")!;
-    expect(getReviewScenarioTags(data, rev100)).toEqual(expect.arrayContaining(["HIE", "MOR", "Payer Data", "Registry", "Specialist Note"]));
+    expect(getReviewScenarioTags(data, rev100)).toEqual(expect.arrayContaining(["HIE", "MOR", "Registry", "Specialist Note"]));
     expect(getReviewScenarioTags(data, rev100)).toContain("Duplicate HCC addition");
     expect(getReviewScenarioTags(data, rev103)).toContain("Ineligible CPT");
     expect(getReviewScenarioTags(data, rev110)).toContain("Same-HCC threshold");
     expect(getReviewScenarioTags(data, rev111)).toContain("Delete safety");
     expect(getReviewScenarioTags(data, rev113)).toContain("Three-year lookback");
     expect(getReviewScenarioTags(data, rev114)).toEqual(expect.arrayContaining(["Acute condition", "Acute-only recapture"]));
-    expect(getReviewScenarioTags(data, rev115)).toContain("Quality exclusion");
+    expect(getReviewScenarioTags(data, rev115)).toContain("Quality / non-HCC");
     expect(getReviewScenarioTags(data, rev116)).toContain("Trumping");
     expect(getReviewScenarioTags(data, rev107)).toContain("Scheduling outreach");
   });
 
-  it("does not count prospective recapture RAF until selected by a user", () => {
+  it("does not count prospective Yes as a current claim capture", () => {
     let data = openReview(cloneSeed(), "rev-113", user(seedData, "u-coder-4"));
     const review = data.reviews.find((item) => item.id === "rev-113")!;
     expect(getRafSummary(data, review).validatedCapturedRaf).toBeCloseTo(0);
     data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
-    expect(getRafSummary(data, review).validatedCapturedRaf).toBeCloseTo(0.214);
+    expect(getRafSummary(data, review).validatedCapturedRaf).toBeCloseTo(0);
   });
 
   it("records recommendation agreement only after the reviewer acts", () => {

@@ -1897,6 +1897,10 @@ tr.chart-row.has-evidence td {
   background: var(--prospective);
 }
 
+.condition-group-quality .condition-group-dot {
+  background: #667085;
+}
+
 .condition-card,
 .audit-condition,
 .export-card {
@@ -2166,11 +2170,23 @@ tr.chart-row.has-evidence td {
 }
 
 .disabled-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
   color: #8a5a00;
   background: #fff5dd;
   border: 1px solid #f2c46d;
   border-radius: 7px;
+}
+
+.empty-inline {
+  padding: 12px;
+  color: #667085;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 7px;
+  font-weight: 700;
 }
 
 .rule-message-list {

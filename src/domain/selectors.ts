@@ -22,6 +22,15 @@ import {
   getVisibleReviews,
   isAssignedToReview
 } from "./auth";
+import {
+  getConditionHccs,
+  getConditionHierarchySuppression,
+  getConditionMarginalScore,
+  getOpportunityMarginalScore,
+  getPatientYearRiskScores,
+  isRiskAdjustmentCondition
+} from "./conditionRisk";
+import type { CmsV28Hcc } from "./cmsV28";
 
 export function byId<T extends { id: string }>(items: T[]) {
   return new Map(items.map((item) => [item.id, item]));
@@ -66,11 +75,19 @@ export function getPatientCalendarYearConditions(data: SeedData, patientId: stri
 }
 
 export function getPatientCalendarYearHccGroup(data: SeedData, patientId: string, calendarYear: number, hcc: string) {
-  return getPatientCalendarYearConditions(data, patientId, calendarYear).filter((condition) => condition.hcc === hcc);
+  const patient = data.patients.find((item) => item.id === patientId);
+  const requested = parseHccs(hcc);
+  return getPatientCalendarYearConditions(data, patientId, calendarYear).filter((condition) =>
+    getConditionHccs(condition, patient).some((conditionHcc) => requested.has(conditionHcc))
+  );
 }
 
 export function getSameHccCandidates(data: SeedData, review: PatientReview, condition: Condition) {
-  return getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, condition.hcc);
+  const patient = data.patients.find((item) => item.id === review.patientId);
+  const hccs = new Set(getConditionHccs(condition, patient));
+  return getPatientCalendarYearConditions(data, review.patientId, review.calendarYear).filter((candidate) =>
+    getConditionHccs(candidate, patient).some((hcc) => hccs.has(hcc))
+  );
 }
 
 export function getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
@@ -86,7 +103,14 @@ function isDeterministicRuleResolved(condition: Condition) {
 }
 
 export function getUnresolvedConditions(data: SeedData, review: PatientReview) {
-  return reviewConditions(data, review).filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition));
+  return reviewConditions(data, review).filter(
+    (condition) =>
+      isRiskAdjustmentCondition(condition) &&
+      condition.actionable &&
+      !condition.disposition &&
+      !isDeterministicRuleResolved(condition) &&
+      !getConditionHierarchySuppression(condition, review, data).fullySuppressed
+  );
 }
 
 export function getPresentedOpportunitySummary(data: SeedData, review: PatientReview) {
@@ -100,7 +124,7 @@ export function getPresentedOpportunitySummary(data: SeedData, review: PatientRe
   return conditions.reduce((summary, condition) => {
     const category = condition.originalCategory ?? condition.category;
     summary[category].count += 1;
-    summary[category].raf += condition.raf;
+    summary[category].raf += getConditionMarginalScore(data, review, condition);
     return summary;
   }, initial);
 }
@@ -127,7 +151,7 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
   reviewConditions(data, review).forEach((condition) => {
     const label = getDispositionSummaryLabel(condition);
     initial[label].count += 1;
-    initial[label].raf += condition.raf;
+    initial[label].raf += getConditionMarginalScore(data, review, condition);
   });
   return initial;
 }
@@ -168,77 +192,80 @@ export function getDownstreamTasksForCondition(data: SeedData, conditionId: stri
 }
 
 export function getRafSummary(data: SeedData, review: PatientReview) {
-  const patient = data.patients.find((item) => item.id === review.patientId);
   const conditions = reviewConditions(data, review);
-  const patientYearConditions = patient ? getPatientCalendarYearConditions(data, patient.id, review.calendarYear) : conditions;
-  const selectedCapturedActions = new Set(["Validate", "Add to Claim", "Yes", "Change"]);
-  const demographicRaf = patient?.demographicRaf ?? 0;
-  // Synthetic only: completed capture actions are counted once as current captured RAF.
-  const capturedByHcc = new Map<string, number>();
-  patientYearConditions
-    .filter(
-      (condition) =>
-        (condition.disposition && selectedCapturedActions.has(condition.disposition.action)) ||
-        (isDeterministicRuleResolved(condition) && condition.ruleOutcome?.action && selectedCapturedActions.has(condition.ruleOutcome.action))
-    )
-    .forEach((condition) => {
-      capturedByHcc.set(condition.hcc, Math.max(capturedByHcc.get(condition.hcc) ?? 0, condition.raf));
-    });
-  const validatedCapturedRaf = Array.from(capturedByHcc.values()).reduce((sum, raf) => sum + raf, 0);
-  // Synthetic only: unresolved potential excludes prospective recapture/suspect so open RAF and prospective RAF do not overlap.
+  const scores = getPatientYearRiskScores(data, review);
+  const demographicRaf = scores?.demographic.total ?? 0;
+  const projectedRaf = scores?.projected.total ?? demographicRaf;
+  const validatedCapturedRaf = roundRaf(Math.max(0, projectedRaf - demographicRaf));
   const unresolvedPotentialRaf = conditions
     .filter(
       (condition) =>
-        condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category)
+        isOpenRiskOpportunity(condition, review, data) && ["potentialDelete", "potentialAddition"].includes(condition.originalCategory ?? condition.category)
     )
-    .reduce((sum, condition) => sum + condition.raf, 0);
-  // Synthetic only: potential additions are open, uncaptured opportunities and are not counted in current captured RAF.
+    .reduce((sum, condition) => sum + getOpportunityMarginalScore(data, review, condition), 0);
   const potentialAdditionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && (condition.originalCategory ?? condition.category) === "potentialAddition")
-    .reduce((sum, condition) => sum + condition.raf, 0);
-  // Synthetic only: potential deletions are displayed separately as possible negative adjustment, not double-subtracted from projection.
+    .filter((condition) => isOpenRiskOpportunity(condition, review, data) && (condition.originalCategory ?? condition.category) === "potentialAddition")
+    .reduce((sum, condition) => sum + getOpportunityMarginalScore(data, review, condition), 0);
   const potentialDeletionRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && (condition.originalCategory ?? condition.category) === "potentialDelete")
-    .reduce((sum, condition) => sum + condition.raf, 0);
-  // Synthetic only: recapture and suspect are separate prospective buckets and are excluded from unresolved potential RAF.
+    .filter((condition) => isOpenRiskOpportunity(condition, review, data) && (condition.originalCategory ?? condition.category) === "potentialDelete")
+    .reduce((sum, condition) => sum + getOpportunityMarginalScore(data, review, condition), 0);
   const prospectiveRecaptureRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && condition.subtype === "recapture")
-    .reduce((sum, condition) => sum + condition.raf, 0);
+    .filter((condition) => isOpenRiskOpportunity(condition, review, data) && condition.subtype === "recapture")
+    .reduce((sum, condition) => sum + getOpportunityMarginalScore(data, review, condition), 0);
   const prospectiveSuspectRaf = conditions
-    .filter((condition) => condition.actionable && !condition.disposition && !isDeterministicRuleResolved(condition) && condition.subtype === "suspect")
-    .reduce((sum, condition) => sum + condition.raf, 0);
-  const selectedDeletionRaf = conditions.filter((condition) => condition.disposition?.action === "Delete").reduce((sum, condition) => sum + condition.raf, 0);
-  // Synthetic only: projected RAF after selected dispositions includes demographic RAF plus selected captures and subtracts selected deletions.
-  const projectedRaf = demographicRaf + validatedCapturedRaf - selectedDeletionRaf;
+    .filter((condition) => isOpenRiskOpportunity(condition, review, data) && condition.subtype === "suspect")
+    .reduce((sum, condition) => sum + getOpportunityMarginalScore(data, review, condition), 0);
+  const selectedDeletionRaf = roundRaf(Math.max(0, (scores?.projectedWithoutDeletes.total ?? projectedRaf) - projectedRaf));
 
   return {
     demographicRaf,
     validatedCapturedRaf,
-    unresolvedPotentialRaf,
-    potentialAdditionRaf,
-    potentialDeletionRaf,
-    prospectiveRecaptureRaf,
-    prospectiveSuspectRaf,
+    unresolvedPotentialRaf: roundRaf(unresolvedPotentialRaf),
+    potentialAdditionRaf: roundRaf(potentialAdditionRaf),
+    potentialDeletionRaf: roundRaf(potentialDeletionRaf),
+    prospectiveRecaptureRaf: roundRaf(prospectiveRecaptureRaf),
+    prospectiveSuspectRaf: roundRaf(prospectiveSuspectRaf),
     selectedDeletionRaf,
     projectedRaf,
     // Backward-compatible aliases for older UI text.
-    openRaf: unresolvedPotentialRaf,
+    openRaf: roundRaf(unresolvedPotentialRaf),
     closedRaf: validatedCapturedRaf,
     deletionRaf: selectedDeletionRaf,
-    prospectiveRaf: prospectiveRecaptureRaf + prospectiveSuspectRaf,
+    prospectiveRaf: roundRaf(prospectiveRecaptureRaf + prospectiveSuspectRaf),
     totalRaf: projectedRaf
   };
 }
 
+function isOpenRiskOpportunity(condition: Condition, review: PatientReview, data: SeedData) {
+  return (
+    isRiskAdjustmentCondition(condition) &&
+    condition.actionable &&
+    !condition.disposition &&
+    !isDeterministicRuleResolved(condition) &&
+    !getConditionHierarchySuppression(condition, review, data).fullySuppressed
+  );
+}
+
+function roundRaf(value: number) {
+  return Math.round((value + Number.EPSILON) * 1000) / 1000;
+}
+
+function parseHccs(value: string) {
+  const hccs = new Set<CmsV28Hcc>();
+  for (const match of value.matchAll(/HCC\s*(\d+)/gi)) hccs.add(`HCC${match[1]}` as CmsV28Hcc);
+  return hccs;
+}
+
 export function getPopulationRafSummary(data: SeedData, reviews: PatientReview[] = data.reviews) {
   const patientIds = new Set(reviews.map((review) => review.patientId));
-  const demographicRaf = data.patients.filter((patient) => patientIds.has(patient.id)).reduce((sum, patient) => sum + patient.demographicRaf, 0);
-  const reviewSummaries = reviews.map((review) => getRafSummary(data, review));
+  const uniquePatientYears = new Map(reviews.map((review) => [`${review.patientId}-${review.calendarYear}`, review]));
+  const reviewSummaries = Array.from(uniquePatientYears.values()).map((review) => getRafSummary(data, review));
+  const demographicRaf = reviewSummaries.reduce((sum, summary) => sum + summary.demographicRaf, 0);
   const capturedRaf = reviewSummaries.reduce((sum, summary) => sum + summary.validatedCapturedRaf, 0);
   const openRaf = reviewSummaries.reduce((sum, summary) => sum + summary.unresolvedPotentialRaf, 0);
   const prospectiveRaf = reviewSummaries.reduce((sum, summary) => sum + summary.prospectiveRaf, 0);
   const deletionRaf = reviewSummaries.reduce((sum, summary) => sum + summary.selectedDeletionRaf, 0);
-  const projectedRaf = demographicRaf + capturedRaf - deletionRaf;
+  const projectedRaf = reviewSummaries.reduce((sum, summary) => sum + summary.projectedRaf, 0);
   const patientCount = patientIds.size;
 
   function average(value: number) {
@@ -410,7 +437,10 @@ export function getReviewScenarioTags(data: SeedData, review: PatientReview) {
   const outreachStatus = getOutreachStatusForReview(data, review);
   if (outreachStatus.status !== "Scheduled" && outreachStatus.status !== "Not Needed") tags.add("Scheduling outreach");
   const hccGroups = new Map<string, Condition[]>();
-  conditions.forEach((condition) => hccGroups.set(condition.hcc, [...(hccGroups.get(condition.hcc) ?? []), condition]));
+  const patient = data.patients.find((item) => item.id === review.patientId);
+  conditions.forEach((condition) =>
+    getConditionHccs(condition, patient).forEach((hcc) => hccGroups.set(hcc, [...(hccGroups.get(hcc) ?? []), condition]))
+  );
   if (Array.from(hccGroups.values()).some((group) => group.filter((condition) => condition.workflow === "codesOnClaim").length >= 3)) tags.add("Same-HCC threshold");
   if (Array.from(hccGroups.values()).some((group) => group.filter((condition) => condition.workflow === "codesNotOnClaim").length >= 2)) tags.add("Duplicate HCC addition");
 
@@ -418,9 +448,9 @@ export function getReviewScenarioTags(data: SeedData, review: PatientReview) {
     if (condition.claimStatus === "Registry") tags.add("Registry");
     if (condition.acuteCondition) tags.add("Acute condition");
     if (condition.persistence === "acute" && condition.subtype === "recapture") tags.add("Acute-only recapture");
-    if (condition.trumpedByCode) tags.add("Trumping");
+    if (getConditionHierarchySuppression(condition, review, data).suppressedHccs.length > 0) tags.add("Trumping");
     if (condition.sdohCode) tags.add("SDoH");
-    if (condition.qualityExclusionCode) tags.add("Quality exclusion");
+    if (!isRiskAdjustmentCondition(condition)) tags.add("Quality / non-HCC");
     if (condition.supportingEvidenceIds?.length || condition.conflictingEvidenceIds?.length) tags.add("Delete safety");
     if (condition.subtype === "recapture" && hasThreeYearLookbackEvidence(data, review, condition)) tags.add("Three-year lookback");
   });

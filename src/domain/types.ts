@@ -103,6 +103,12 @@ export interface Patient {
   dob: string;
   memberId: string;
   payerId: string;
+  riskProfile: {
+    sex: "F" | "M";
+    segment: "COMMUNITY_NA";
+    originallyDisabled: false;
+  };
+  /** Derived 2026 COMMUNITY_NA demographic factor retained for summary compatibility. */
   demographicRaf: number;
 }
 
@@ -439,7 +445,10 @@ export interface Condition {
   recommendationSource?: RecommendationSource;
   icd10: string;
   description: string;
+  program?: "risk-adjustment" | "quality" | "clinical-context";
+  /** Legacy display field. Runtime HCC logic is derived from the 2026 V28 mapping. */
   hcc: string;
+  /** Legacy display field. Runtime risk scores are computed holistically from the 2026 V28 model. */
   raf: number;
   claimStatus: "On claim" | "Not on claim" | "Historical" | "Registry";
   sourceDate: string;

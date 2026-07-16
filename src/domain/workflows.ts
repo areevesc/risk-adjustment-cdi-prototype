@@ -35,6 +35,7 @@ import {
 } from "./auth";
 import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions, getUpcomingAppointmentsForReview } from "./selectors";
 import { appendGeneratedChartForAssignee, GENERATED_CHART_CONTENT_REVISION } from "./generatedCharts";
+import { getConditionHierarchySuppression, isRiskAdjustmentCondition } from "./conditionRisk";
 
 function stamp() {
   return new Date().toISOString();
@@ -314,7 +315,7 @@ export function setDisposition(
 ): SeedData {
   const review = data.reviews.find((item) => item.id === reviewId);
   const conditionBefore = data.conditions.find((item) => item.id === conditionId);
-  if (!review || !conditionBefore || !canSetConditionDisposition(review, user)) return data;
+  if (!review || !conditionBefore || !isRiskAdjustmentCondition(conditionBefore) || !isActionAllowedForWorkflow(conditionBefore, action) || !canSetConditionDisposition(review, user)) return data;
   const ruleResult = getRuleResult(conditionBefore, review, data, settings);
   if (ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
@@ -366,13 +367,47 @@ export function setDisposition(
     next = createDownstreamTask(next, reviewId, conditionId, "Manager Exception", user, comments);
   }
 
-  return addHistory(next, {
+  next = addHistory(next, {
     reviewId,
     conditionId,
     userId: user.id,
     event: "Action selected",
     detail: reason ? `${action} - ${reason}` : action
   });
+  return ["Validate", "Add to Claim", "Change"].includes(action)
+    ? addHierarchyLockHistory(data, next, review, user)
+    : next;
+}
+
+function isActionAllowedForWorkflow(condition: Condition, action: RecommendationAction) {
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"].includes(action);
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"].includes(action);
+  return ["Yes", "No", "Change"].includes(action);
+}
+
+function addHierarchyLockHistory(before: SeedData, after: SeedData, review: PatientReview, user: User) {
+  const patientYearReviewIds = new Set(
+    after.reviews
+      .filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear)
+      .map((item) => item.id)
+  );
+  return after.conditions
+    .filter((condition) => patientYearReviewIds.has(condition.reviewId))
+    .reduce((next, condition) => {
+      const wasSuppressed = getConditionHierarchySuppression(condition, review, before).fullySuppressed;
+      const suppression = getConditionHierarchySuppression(condition, review, next);
+      if (wasSuppressed || !suppression.fullySuppressed) return next;
+      const detail = suppression.suppressedHccs
+        .map(({ lower, higher, capturedCondition }) => `${lower} on ${condition.icd10} locked because ${higher} was captured through ${capturedCondition.icd10}.`)
+        .join(" ");
+      return addHistory(next, {
+        reviewId: condition.reviewId,
+        conditionId: condition.id,
+        userId: user.id,
+        event: "Hierarchy lock applied",
+        detail
+      });
+    }, after);
 }
 
 function shouldCreateSchedulingOutreach(
@@ -433,7 +468,6 @@ function disableDuplicateHccAdditions(data: SeedData, reviewId: string, hcc: str
   getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, hcc)
     .filter(
       (condition) =>
-        condition.hcc === hcc &&
         condition.workflow === "codesNotOnClaim" &&
         condition.id !== selectedConditionId &&
         !condition.disposition &&

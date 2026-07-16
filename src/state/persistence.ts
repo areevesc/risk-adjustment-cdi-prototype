@@ -1,6 +1,7 @@
 import type { AppSettings, Condition, PatientReview, SeedData } from "../domain/types";
+import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "../domain/cmsV28";
 
-export const CURRENT_CONTENT_REVISION = 3;
+export const CURRENT_CONTENT_REVISION = 4;
 
 export interface PersistedState {
   contentRevision: number;
@@ -43,12 +44,19 @@ export function refreshSeedClinicalBundles(persisted: SeedData, seed: SeedData):
   ];
   const conditions = [
     ...seed.conditions.map((condition) => overlayFields<Condition, keyof Condition>(condition, persistedConditionById.get(condition.id), conditionWorkflowFields)),
-    ...persisted.conditions.filter((condition) => !seedReviewIds.has(condition.reviewId))
+    ...persisted.conditions.filter((condition) => !seedReviewIds.has(condition.reviewId)).map(normalizePersistedCondition)
   ];
 
   return {
     ...persisted,
-    patients: [...seed.patients, ...persisted.patients.filter((patient) => !seedPatientIds.has(patient.id))],
+    patients: [...seed.patients, ...persisted.patients.filter((patient) => !seedPatientIds.has(patient.id)).map((patient) => {
+      const sex = patient.riskProfile?.sex ?? inferSyntheticSex(patient.name);
+      return {
+        ...patient,
+        riskProfile: { sex, segment: "COMMUNITY_NA" as const, originallyDisabled: false as const },
+        demographicRaf: scoreCmsV28CommunityNa({ dob: patient.dob, sex, diagnosisCodes: [] }).demographicFactor
+      };
+    })],
     reviews,
     documents: replaceSeedReviewRows(persisted.documents, seed.documents, seedReviewIds),
     evidence: replaceSeedReviewRows(persisted.evidence, seed.evidence, seedReviewIds),
@@ -57,6 +65,26 @@ export function refreshSeedClinicalBundles(persisted: SeedData, seed: SeedData):
     conditions,
     appointments: [...seed.appointments, ...persisted.appointments.filter((appointment) => !seedPatientIds.has(appointment.patientId))]
   };
+}
+
+function normalizePersistedCondition(condition: Condition): Condition {
+  const diagnosis = getCmsV28Diagnosis(condition.icd10);
+  return {
+    ...condition,
+    description: diagnosis?.description ?? condition.description,
+    program: diagnosis?.program ?? "clinical-context",
+    hcc: getCmsV28DisplayHccs(condition.icd10),
+    raf: getCmsV28StandaloneFactor(condition.icd10),
+    trumpedByCode: undefined,
+    qualityExclusionCode: undefined,
+    trustedCodeMetadata: undefined,
+    actionable: diagnosis?.program === "risk-adjustment" ? condition.actionable : false
+  };
+}
+
+function inferSyntheticSex(name: string): "F" | "M" {
+  const firstName = name.trim().split(/\s+/)[0]?.toLowerCase();
+  return ["curtis", "frank", "milton", "robert", "thomas", "henry", "george", "victor", "arthur", "calvin"].includes(firstName) ? "M" : "F";
 }
 
 export function storedContentRevision(value: unknown): number {

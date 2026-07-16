@@ -51,6 +51,13 @@ import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
 import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, RecommendationBox, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
 import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
+import {
+  compareConditionsByHierarchy,
+  getConditionHierarchySuppression,
+  getConditionMarginalScore,
+  isRiskAdjustmentCondition
+} from "../../domain/conditionRisk";
+import { CMS_V28_MODEL } from "../../domain/cmsV28";
 
 const disagreeReasons: DisagreeReason[] = ["Not Enough MEAT", "Condition Resolved", "Conflicting Evidence", "Other"];
 const documentationIssues: DocumentationIssue[] = [
@@ -154,6 +161,8 @@ export function ReviewPage() {
   const outreachStatus = getOutreachStatusForReview(data, activeReview);
   const displayAppointment = outreachStatus.appointment ?? appointment;
   const conditions = reviewConditions(data, activeReview);
+  const riskConditions = conditions.filter(isRiskAdjustmentCondition).sort((left, right) => compareConditionsByHierarchy(left, right, patient));
+  const nonRiskConditions = conditions.filter((condition) => !isRiskAdjustmentCondition(condition));
   const relatedReviewIds = new Set(
     data.reviews
       .filter((item) => item.patientId === patient.id && item.calendarYear >= activeReview.calendarYear - 3 && item.calendarYear <= activeReview.calendarYear)
@@ -398,7 +407,9 @@ export function ReviewPage() {
             ) : null}
           </>
         ) : null}
-        <div className="raf-note">Synthetic prototype values — not an authoritative CMS RAF calculation.</div>
+        <div className="raf-note">
+          2026 CMS-HCC V28 - {CMS_V28_MODEL.segmentLabel} assumption. Raw synthetic model score only; not a payment, normalization, or coding-intensity calculation.
+        </div>
         {displayAppointment ? (
           <StatusChip tone="good">Next visit: {formatDate(displayAppointment.date)} - {displayAppointment.type}</StatusChip>
         ) : (
@@ -467,7 +478,7 @@ export function ReviewPage() {
           <div className="condition-groups">
             <ConditionGroup
               title="Codes On Claim"
-              conditions={conditions.filter((condition) => condition.workflow === "codesOnClaim")}
+              conditions={riskConditions.filter((condition) => condition.workflow === "codesOnClaim")}
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
@@ -483,7 +494,7 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="Codes Not On Claim - Potential Additions"
-              conditions={conditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
+              conditions={riskConditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
@@ -499,7 +510,23 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="CDI Prospective Review"
-              conditions={conditions.filter((condition) => condition.workflow === "prospective")}
+              conditions={riskConditions.filter((condition) => condition.workflow === "prospective")}
+              review={review}
+              editable={editable}
+              canUseProspectiveActions={canUseProspectiveActions}
+              readOnlyTitle={readOnlyTitle}
+              warningIds={completionWarnings}
+              jumpToEvidence={jumpToEvidence}
+              activeConditionId={activeConditionId}
+              setActiveConditionId={setActiveConditionId}
+              onDisagree={setDisagreeCondition}
+              onChange={setChangeCondition}
+              onFlag={setFlagCondition}
+              onDeleteSafety={setDeleteSafetyCondition}
+            />
+            <ConditionGroup
+              title="Quality / Non-HCC"
+              conditions={nonRiskConditions}
               review={review}
               editable={editable}
               canUseProspectiveActions={canUseProspectiveActions}
@@ -1250,6 +1277,9 @@ function ConditionGroup({
 }
 
 function getConditionGroupPresentation(title: string) {
+  if (title.includes("Quality")) {
+    return { tone: "quality", subtitle: "Clinical and quality context shown separately; these diagnoses do not contribute an HCC or RAF action." };
+  }
   if (title.includes("not on Claim")) {
     return { tone: "addition", subtitle: "MEAT documentation suggests HCCs that may need capture." };
   }
@@ -1296,7 +1326,10 @@ function ConditionCard({
   const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
   const downstreamTasks = getDownstreamTasksForCondition(data, condition.id);
   const claim = getClaimForReview(data, review.id);
-  const showActionControls = !condition.disposition || review.status === "Rework Required";
+  const riskAdjustment = isRiskAdjustmentCondition(condition);
+  const hierarchy = getConditionHierarchySuppression(condition, review, data);
+  const marginalRaf = getConditionMarginalScore(data, review, condition);
+  const showActionControls = riskAdjustment && !hierarchy.fullySuppressed && (!condition.disposition || review.status === "Rework Required");
 
   function act(action: RecommendationAction) {
     if (action === "Delete" && hasDeleteSafetyWarning(ruleResult)) {
@@ -1322,7 +1355,9 @@ function ConditionCard({
 
   const token = condition.subtype ? subtypeTokens[condition.subtype] : categoryTokens[condition.category];
   const marker =
-    condition.subtype === "recapture"
+    !riskAdjustment
+      ? "Q"
+      : condition.subtype === "recapture"
       ? "R"
       : condition.subtype === "suspect"
         ? "S"
@@ -1331,7 +1366,7 @@ function ConditionCard({
           : condition.category === "potentialAddition"
             ? "A"
             : "V";
-  const evidenceSummary = evidence[0]?.summary ?? recommendation?.rationale ?? "No focused evidence summary available in this synthetic review.";
+  const evidenceSummary = evidence[0]?.summary ?? "No evidence found.";
 
   return (
     <article className={`condition-card condition-${condition.category} ${condition.workflow === "prospective" ? "prospective-condition" : ""} ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
@@ -1343,8 +1378,8 @@ function ConditionCard({
             <strong>{condition.description}</strong>
           </div>
           <div className="condition-pill-row">
-            <span>{condition.hcc}</span>
-            <span>RAF {formatRaf(condition.raf)}</span>
+            {riskAdjustment ? <span>{condition.hcc}</span> : <span>No payment HCC</span>}
+            {riskAdjustment ? <span>Marginal RAF {formatRaf(marginalRaf)}</span> : null}
             <span>{condition.claimStatus}</span>
             <span>Source {formatDate(condition.sourceDate)}</span>
           </div>
@@ -1352,7 +1387,13 @@ function ConditionCard({
         </div>
         <CategoryBadge category={condition.category} subtype={condition.subtype} />
       </div>
-      <RecommendationBox recommendation={recommendation} settings={settings} />
+      {riskAdjustment ? <RecommendationBox recommendation={recommendation} settings={settings} /> : null}
+      {hierarchy.fullySuppressed ? (
+        <div className="disabled-reason">
+          <LockKeyhole size={15} />
+          {hierarchy.suppressedHccs.map(({ lower, higher }) => `${lower} locked by captured ${higher}`).join("; ")}
+        </div>
+      ) : null}
       {condition.workflow === "prospective" ? (
         <div className="prospective-rationale">
           <ul>
@@ -1366,13 +1407,13 @@ function ConditionCard({
           </div>
         </div>
       ) : null}
-      <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} />
-      <div className="source-eligibility-row compact">
+      {riskAdjustment ? <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} /> : null}
+      {riskAdjustment ? <div className="source-eligibility-row compact">
         <EligibilityChip label="Eligible CPT / encounter type" ok={claim?.cptSourceEligible !== false} />
         <EligibilityChip label="Acceptable provider type" ok={claim?.providerTypeEligible !== false} />
         <EligibilityChip label="Face-to-face visit" ok={claim?.faceToFace !== false} />
         <EligibilityChip label="Valid provider signature" ok={claim?.providerSignatureValid !== false} />
-      </div>
+      </div> : null}
       <div className="condition-history">
         <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
         <span>Recommendation: {recommendation?.action ?? condition.originalRecommendation ?? "None"} ({recommendation?.source ?? condition.recommendationSource ?? "rules"})</span>
@@ -1395,6 +1436,7 @@ function ConditionCard({
             {item.reviewerExplanation ? <small>{item.reviewerExplanation}</small> : null}
           </button>
         ))}
+        {!evidence.length ? <div className="empty-inline">No evidence found.</div> : null}
       </div>
       {condition.documentationIssues.length ? (
         <div className="issue-list">
