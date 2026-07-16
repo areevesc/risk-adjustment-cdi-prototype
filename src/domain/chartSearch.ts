@@ -309,13 +309,6 @@ export function buildChartSearchResults(chart: ClinicalChart, query: string): Ch
 
   chart.claims.forEach((claim) => {
     const sourceLabel = `${formatDate(claim.dateOfService)} · ${claim.provider ?? "Unknown provider"}`;
-    const eligibility = [
-      claim.riskEligible ? "Risk eligible" : "Risk ineligible",
-      claim.cptSourceEligible ? "CPT source eligible" : "CPT source ineligible",
-      claim.providerTypeEligible ? "Provider type eligible" : "Provider type ineligible",
-      claim.faceToFace ? "Face-to-face" : "Non-face-to-face",
-      claim.providerSignatureValid ? "Signature valid" : "Signature invalid"
-    ].join(" · ");
     const codeSummary = claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "No diagnosis codes";
 
     add({
@@ -331,15 +324,11 @@ export function buildChartSearchResults(chart: ClinicalChart, query: string): Ch
         claim.cptCode,
         claim.encounterType,
         claim.payer,
-        ...claim.icd10Codes,
-        claim.supportSummary,
-        eligibility
+        ...claim.icd10Codes
       ],
       previewValues: [
-        claim.supportSummary,
         `${claim.cptCode ?? "No CPT"} · ${claim.encounterType ?? "Unknown encounter type"} · ICD-10 ${codeSummary}`,
-        `${sourceLabel} · ${claim.payer ?? "Unknown payer"}`,
-        eligibility
+        `${sourceLabel} · ${claim.payer ?? "Unknown payer"}`
       ]
     });
   });

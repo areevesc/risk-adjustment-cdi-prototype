@@ -20,7 +20,7 @@ function visibleChartText(chart: ClinicalChart, evidence: EvidencePassage) {
     return result ? `${result.component} ${result.value} ${result.unit}`.trim() : undefined;
   }
   if (evidence.chartAnchor?.tab === "claims") {
-    return chart.claims.find((claim) => claim.id === evidence.chartAnchor?.itemId)?.supportSummary;
+    return chart.claims.find((claim) => claim.id === evidence.chartAnchor?.itemId)?.icd10Codes.join(", ");
   }
   if (evidence.chartAnchor?.tab === "problem-list") {
     const item = chart.problems.find((problem) => problem.evidenceIds.includes(evidence.id));
@@ -90,7 +90,7 @@ describe("seeded clinical content", () => {
   });
 
   it("keeps every owned chart-backed quote in its rendered chart source", () => {
-    const failures = demoSeedData.evidence.filter((evidence) => evidence.conditionIds.length > 0).flatMap((evidence) => {
+    const failures = demoSeedData.evidence.filter((evidence) => evidence.conditionIds.length > 0 && evidence.sourceType !== "morPayerRegistryHie").flatMap((evidence) => {
       const chart = demoSeedData.charts.find((item) => item.reviewId === evidence.reviewId);
       const sourceText = chart ? visibleChartText(chart, evidence) : undefined;
       return sourceText?.includes(evidence.exactText ?? evidence.text)
@@ -123,7 +123,6 @@ describe("seeded clinical content", () => {
     const eGfr = labRows.find((item) => item.component === "Estimated GFR")!;
     const riskCreatinine = labRows.find((item) => item.id.startsWith("chart-rev-109-lab-cond-109-a") && item.component === "Creatinine")!;
     const cmpCreatinine = labRows.find((item) => item.id === "chart-rev-109-lab-cr")!;
-    const bmiLab = labRows.find((item) => item.component === "BMI")!;
     const currentVital = chart.vitals.find((item) => item.id === "chart-rev-109-vital-current")!;
 
     expect(Number(eGfr.value)).toBeGreaterThanOrEqual(15);
@@ -135,20 +134,26 @@ describe("seeded clinical content", () => {
     const calculatedBmi = Math.round(((703 * currentVital.weight) / currentVital.height ** 2) * 10) / 10;
     expect(currentVital.bmi).toBe(calculatedBmi);
     expect(currentVital.bmi).toBeGreaterThanOrEqual(40);
-    expect(bmiLab.value).toBe(String(currentVital.bmi));
+    expect(labRows.some((item) => item.component === "BMI")).toBe(false);
     expect(obesityPlan.detail).toContain(`BMI is ${currentVital.bmi}`);
 
+    const obesityCondition = demoSeedData.conditions.find((item) => item.id === "cond-109-b")!;
+    const obesityEvidence = demoSeedData.evidence.filter((item) => obesityCondition.evidenceIds.includes(item.id));
+    expect(obesityEvidence).toEqual(expect.arrayContaining([expect.objectContaining({ sourceType: "vitalRow", evidenceStrength: "clinicalIndicatorOnly", chartAnchor: expect.objectContaining({ tab: "vitals" }) })]));
+    expect(obesityEvidence.some((item) => item.chartAnchor?.tab === "labs" || item.chartAnchor?.tab === "claims")).toBe(false);
+    expect(chart.claims.find((claim) => claim.id === "claim-rev-109")?.icd10Codes).toEqual(["N18.4"]);
+    expect(chart.claims.some((claim) => claim.icd10Codes.includes("E66.01"))).toBe(false);
+
     const ckdEvidence = new Set(demoSeedData.conditions.find((item) => item.id === "cond-109-a")!.evidenceIds);
-    const obesityEvidence = new Set(demoSeedData.conditions.find((item) => item.id === "cond-109-b")!.evidenceIds);
-    expect([...ckdEvidence].filter((id) => obesityEvidence.has(id))).toEqual([]);
+    const obesityEvidenceIds = new Set(obesityCondition.evidenceIds);
+    expect([...ckdEvidence].filter((id) => obesityEvidenceIds.has(id))).toEqual([]);
   });
 
   it("preserves conflicting obesity as a potential-delete scenario and keeps creatinine panels coherent", () => {
     const conflictingChart = demoSeedData.charts.find((item) => item.reviewId === "rev-112")!;
     const currentVital = conflictingChart.vitals.find((item) => item.id === "chart-rev-112-vital-current")!;
-    const bmiLab = conflictingChart.labs.flatMap((panel) => panel.results).find((item) => item.component === "BMI")!;
     expect(currentVital.bmi).toBe(31.4);
-    expect(bmiLab.value).toBe("31.4");
+    expect(conflictingChart.labs.flatMap((panel) => panel.results).some((item) => item.component === "BMI")).toBe(false);
     expect(currentVital.bmi).toBeLessThan(40);
     expect(conflictingChart.encounters[0].assessmentPlan).toEqual([]);
 

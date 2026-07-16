@@ -318,7 +318,7 @@ describe("prototype workflow rules", () => {
     expect(chart.imaging.length).toBeGreaterThan(0);
     expect(chart.specialistNotes.length).toBeGreaterThan(0);
     expect(chart.claims[0]).toMatchObject({ dateOfService: expect.any(String), provider: expect.any(String), payer: expect.any(String), cptCode: expect.any(String), encounterType: expect.any(String) });
-    expect(chart.claims[0].icd10Codes).toEqual(["E11.65", "I10"]);
+    expect(chart.claims[0].icd10Codes).toEqual(["E11.65", "I10", "I50.33"]);
     const labEvidence = data.evidence.find((item) => item.id === "ev-rev-100-d")!;
     const anchoredLabResult = chart.labs.flatMap((panel) => panel.results).find((result) => result.evidenceIds.includes(labEvidence.id))!;
     expect(targetForEvidence(chart, labEvidence.id, labEvidence)).toBe(`chart-labs-${anchoredLabResult.id}`);

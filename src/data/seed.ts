@@ -1360,20 +1360,36 @@ export const conditions: Condition[] = [
     })
 ];
 
-export const claims: Claim[] = reviews.map((review) => ({
-  id: `claim-${review.id}`,
-  reviewId: review.id,
-  dateOfService: `${review.calendarYear}-04-12`,
-  riskEligible: true,
-  cptSourceEligible: review.id !== "rev-103",
-  providerTypeEligible: review.id !== "rev-106",
-  faceToFace: review.id !== "rev-107",
-  providerSignatureValid: review.id !== "rev-108",
-  icd10Codes: review.conditionIds
-    .slice(0, 2)
-    .map((id) => conditions.find((condition) => condition.id === id)?.icd10)
-    .filter((code): code is string => Boolean(code))
-}));
+export const claims: Claim[] = reviews.flatMap((review) => {
+  const reviewConditions = conditions.filter((condition) => condition.reviewId === review.id);
+  const currentCodes = reviewConditions.filter((condition) => condition.claimStatus === "On claim").map((condition) => condition.icd10);
+  const historicalCodes = reviewConditions.filter((condition) => condition.claimStatus === "Historical").map((condition) => condition.icd10);
+  const currentClaim: Claim = {
+    id: `claim-${review.id}`,
+    reviewId: review.id,
+    dateOfService: `${review.calendarYear}-04-12`,
+    riskEligible: true,
+    cptSourceEligible: review.id !== "rev-103",
+    providerTypeEligible: review.id !== "rev-106",
+    faceToFace: review.id !== "rev-107",
+    providerSignatureValid: review.id !== "rev-108",
+    icd10Codes: currentCodes
+  };
+  const historicalClaim: Claim | undefined = historicalCodes.length
+    ? {
+        id: `claim-${review.id}-historical`,
+        reviewId: review.id,
+        dateOfService: `${review.calendarYear - 1}-10-20`,
+        riskEligible: true,
+        cptSourceEligible: true,
+        providerTypeEligible: true,
+        faceToFace: true,
+        providerSignatureValid: true,
+        icd10Codes: historicalCodes
+      }
+    : undefined;
+  return historicalClaim ? [currentClaim, historicalClaim] : [currentClaim];
+});
 
 export const audits: Audit[] = [
   { id: "audit-105", reviewId: "rev-105", auditorId: "u-auditor-1", status: "In Progress" },
@@ -1463,6 +1479,11 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
       sections: [
         section(`sec-${review.id}-note-1`, "Chief complaint: chronic condition follow-up and medication reconciliation.", []),
         section(
+          `sec-${review.id}-note-vitals`,
+          `Vitals: BP 138/76, HR 72, BMI ${currentVitals.bmi}, O2 saturation 95%.`,
+          reviewEvidence.filter((item) => item.chartAnchor?.tab === "vitals").map((item) => item.id)
+        ),
+        section(
           `sec-${review.id}-note-2`,
           hpi,
           hpiEvidenceIds
@@ -1480,11 +1501,11 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
       id: `doc-${review.id}-lab`,
       reviewId: review.id,
       type: "Lab",
-      title: `${review.calendarYear} labs and vitals`,
+      title: `${review.calendarYear} laboratory results`,
       date: labDate,
       isCurrentYear: true,
       sections: [
-        section(`sec-${review.id}-lab-1`, `Vitals: BP 138/76, HR 72, BMI ${currentVitals.bmi}, O2 saturation 95%. Labs: ${labSummary || "CBC and CMP reviewed."}`, firstLabEvidenceIds),
+        section(`sec-${review.id}-lab-1`, `Laboratory results: ${labSummary || "CBC and CMP reviewed."}`, firstLabEvidenceIds),
         section(`sec-${review.id}-lab-2`, `Abnormal values requiring clinical interpretation: ${labSummary || "none flagged in this synthetic chart."}`, secondLabEvidenceIds)
       ]
     },
@@ -1528,25 +1549,19 @@ function enrichDocuments(seedDocuments: SourceDocument[]) {
   return [...generatedBase, ...preservedSpecialDocuments];
 }
 
-function enrichClaims(seedClaims: Claim[], seedEvidence: EvidencePassage[]): Claim[] {
+function enrichClaims(seedClaims: Claim[]): Claim[] {
   return seedClaims.map((claim) => {
     const review = reviews.find((item) => item.id === claim.reviewId);
     const provider = review ? providers.find((item) => item.id === review.providerId) : undefined;
     const patient = review ? patients.find((item) => item.id === review.patientId) : undefined;
     const payer = patient ? payers.find((item) => item.id === patient.payerId) : undefined;
-    const claimEvidenceText = seedEvidence
-      .filter((item) => item.reviewId === claim.reviewId && item.chartAnchor?.tab === "claims")
-      .map((item) => item.exactText ?? item.text)
-      .filter(Boolean);
+    const historical = claim.id.endsWith("-historical");
     return {
       ...claim,
       provider: provider?.name,
-      cptCode: claim.cptSourceEligible ? "99214" : "99490",
-      encounterType: claim.cptSourceEligible ? "Established patient office visit" : "Care management/non-face-to-face review",
-      payer: payer?.name,
-      supportSummary: claimEvidenceText.length
-        ? claimEvidenceText.join(" ")
-        : `${claim.dateOfService} claim from ${provider?.name ?? "rendering provider"}; ICD-10 codes: ${claim.icd10Codes.length ? claim.icd10Codes.join(", ") : "none listed"}.`
+      cptCode: historical ? "G0439" : claim.cptSourceEligible ? "99214" : "99490",
+      encounterType: historical ? "Annual wellness visit" : claim.cptSourceEligible ? "Established patient office visit" : "Care management/non-face-to-face review",
+      payer: payer?.name
     };
   });
 }
@@ -1576,30 +1591,59 @@ function chartAnchorForEvidence(evidence: EvidencePassage): NonNullable<Evidence
 function enrichEvidence(seedEvidence: EvidencePassage[]): EvidencePassage[] {
   const conditionMap = new Map(conditions.map((condition) => [condition.id, condition]));
   return seedEvidence.map((item) => {
-    const chartAnchor = item.chartAnchor ?? chartAnchorForEvidence(item);
+    const initialChartAnchor = item.chartAnchor ?? chartAnchorForEvidence(item);
     const evidenceConditions = item.conditionIds.map((id) => conditionMap.get(id)).filter(Boolean) as Condition[];
     const condition = evidenceConditions.find((candidate) => candidate.reviewId === item.reviewId) ?? evidenceConditions[0];
-    if (!condition) return { ...item, chartAnchor };
+    if (!condition) return { ...item, chartAnchor: initialChartAnchor };
 
-    const sourceType = item.sourceType ?? sourceTypeForEvidence({ ...item, chartAnchor });
-    const evidenceStrength = item.evidenceStrength ?? inferEvidenceStrength(condition, item.category, sourceType);
     const generatedClinicalEvidence = /-rev-\d+(?:-support)?-(a|b|c|d|e|f)$/.test(item.id);
-    const exactText = generatedClinicalEvidence ? clinicalExactTextForSource(condition, sourceType) : (item.exactText ?? clinicalExactTextForSource(condition, sourceType));
+    const profile = clinicalProfileForCondition(condition);
+    const chartAnchor = generatedClinicalEvidence && profile.currentVitals && initialChartAnchor.tab === "labs"
+      ? { tab: "vitals" as const, itemId: `chart-${item.reviewId}-vital-current` }
+      : initialChartAnchor;
+    const sourceDocumentType = documents.find((document) => document.id === item.documentId)?.type;
+    const documentSourceType = sourceDocumentType === "Specialist Note"
+      ? "specialistAssessment" as const
+      : ["MOR", "Payer Data", "Registry", "HIE"].includes(sourceDocumentType ?? "")
+        ? "morPayerRegistryHie" as const
+        : undefined;
+    const sourceType = chartAnchor.tab === "vitals"
+      ? "vitalRow"
+      : item.sourceType ?? documentSourceType ?? sourceTypeForEvidence({ ...item, chartAnchor });
+    if (sourceType === "claimLine" && condition.claimStatus !== "On claim" && condition.claimStatus !== "Historical") {
+      return { ...item, conditionIds: [], chartAnchor };
+    }
+    const claimAnchor = sourceType === "claimLine"
+      ? { tab: "claims" as const, itemId: condition.claimStatus === "Historical" ? `claim-${item.reviewId}-historical` : `claim-${item.reviewId}` }
+      : sourceType === "specialistAssessment"
+        ? { tab: "specialist-notes" as const, itemId: `chart-${item.reviewId}-specialist`, sectionId: "assessment" }
+        : chartAnchor;
+    const evidenceStrength = item.evidenceStrength ?? inferEvidenceStrength(condition, item.category, sourceType);
+    const exactText = sourceType === "claimLine"
+      ? condition.icd10
+      : generatedClinicalEvidence
+        ? clinicalExactTextForSource(condition, sourceType)
+        : (item.exactText ?? clinicalExactTextForSource(condition, sourceType));
     const sourceLocation = item.sourceLocation ?? sourceLocationFor(sourceType);
-    const documentSectionId = generatedClinicalEvidence
-      ? chartAnchor.tab === "encounters"
-        ? `sec-${item.reviewId}-note-${chartAnchor.sectionId === "assessmentPlan" ? "3" : "2"}`
-        : chartAnchor.tab === "labs"
+    const documentSectionId = sourceType === "claimLine"
+      ? `sec-${item.reviewId}-hist-1`
+      : generatedClinicalEvidence
+        ? claimAnchor.tab === "encounters"
+        ? `sec-${item.reviewId}-note-${claimAnchor.sectionId === "assessmentPlan" ? "3" : "2"}`
+        : claimAnchor.tab === "vitals"
+          ? `sec-${item.reviewId}-note-vitals`
+          : claimAnchor.tab === "labs"
           ? `sec-${item.reviewId}-lab-${item.id.endsWith("-e") ? "2" : "1"}`
-          : chartAnchor.tab === "claims"
+          : claimAnchor.tab === "claims"
             ? `sec-${item.reviewId}-hist-1`
             : item.sectionId ?? item.anchorId
-      : item.sectionId ?? item.anchorId;
+        : item.sectionId ?? item.anchorId;
     return {
       ...item,
+      documentId: sourceType === "claimLine" ? `doc-${item.reviewId}-history` : claimAnchor.tab === "vitals" ? `doc-${item.reviewId}-note` : item.documentId,
       anchorId: documentSectionId,
       sectionId: documentSectionId,
-      chartAnchor,
+      chartAnchor: claimAnchor,
       text: generatedClinicalEvidence ? exactText : item.text,
       exactText,
       sourceType,
@@ -1674,23 +1718,41 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
     chartAnchor: { tab: "encounters", itemId: `chart-${review.id}-encounter-current`, sectionId: primarySection }
   };
   const firstLab = profile.labResults[0];
-  const labText = firstLab ? `${firstLab.component} ${firstLab.value} ${firstLab.unit}`.trim() : profile.hpi;
-  const lab: EvidencePassage = {
-    id: `ev-${condition.id}-lab-1`,
-    reviewId: review.id,
-    documentId: `doc-${review.id}-lab`,
-    anchorId: `sec-${review.id}-lab-1`,
-    sectionId: `sec-${review.id}-lab-1`,
-    text: labText,
-    exactText: labText,
-    date: `${review.calendarYear}-03-05`,
-    category: condition.category,
-    subtype: condition.subtype,
-    conditionIds: [condition.id],
-    summary: "Condition-specific clinical measurement.",
-    sourceType: "labResultRow",
-    chartAnchor: { tab: "labs", itemId: `chart-${review.id}-panel-risk` }
-  };
+  const measurement: EvidencePassage | undefined = profile.currentVitals
+    ? {
+        id: `ev-${condition.id}-vital-1`,
+        reviewId: review.id,
+        documentId: `doc-${review.id}-note`,
+        anchorId: `sec-${review.id}-note-vitals`,
+        sectionId: `sec-${review.id}-note-vitals`,
+        text: clinicalExactTextForSource(condition, "vitalRow"),
+        exactText: clinicalExactTextForSource(condition, "vitalRow"),
+        date: `${review.calendarYear}-04-12`,
+        category: condition.category,
+        subtype: condition.subtype,
+        conditionIds: [condition.id],
+        summary: "Condition-specific vital measurement.",
+        sourceType: "vitalRow",
+        chartAnchor: { tab: "vitals", itemId: `chart-${review.id}-vital-current` }
+      }
+    : firstLab
+      ? {
+          id: `ev-${condition.id}-lab-1`,
+          reviewId: review.id,
+          documentId: `doc-${review.id}-lab`,
+          anchorId: `sec-${review.id}-lab-1`,
+          sectionId: `sec-${review.id}-lab-1`,
+          text: `${firstLab.component} ${firstLab.value} ${firstLab.unit}`.trim(),
+          exactText: `${firstLab.component} ${firstLab.value} ${firstLab.unit}`.trim(),
+          date: `${review.calendarYear}-03-05`,
+          category: condition.category,
+          subtype: condition.subtype,
+          conditionIds: [condition.id],
+          summary: "Condition-specific laboratory measurement.",
+          sourceType: "labResultRow",
+          chartAnchor: { tab: "labs", itemId: `chart-${review.id}-panel-risk` }
+        }
+      : undefined;
   const claimText = clinicalExactTextForSource(condition, "claimLine");
   const claim: EvidencePassage = {
     id: `ev-${condition.id}-claim`,
@@ -1706,9 +1768,10 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
     conditionIds: [condition.id],
     summary: "Claim-line context for the selected condition.",
     sourceType: "claimLine",
-    chartAnchor: { tab: "claims", itemId: `claim-${review.id}`, sectionId: "support" }
+    chartAnchor: { tab: "claims", itemId: condition.claimStatus === "Historical" ? `claim-${review.id}-historical` : `claim-${review.id}` }
   };
-  return [primary, lab, claim];
+  const claimIsPresent = condition.claimStatus === "On claim" || condition.claimStatus === "Historical";
+  return [primary, measurement, claimIsPresent ? claim : undefined].filter(Boolean) as EvidencePassage[];
 }
 
 function medicationForCondition(condition: Condition, providerName: string, evidenceIds: string[]) {
@@ -2126,7 +2189,7 @@ const retainedEvidence = evidence.filter(
 const canonicalEvidence = alignEvidenceOwners([...retainedEvidence, ...conditionScopedEvidence], conditions, generatedClinicalReviewIds);
 const enrichedEvidence = enrichEvidence(canonicalEvidence);
 const clinicalSeedConditions = alignConditionEvidence(conditions, enrichedEvidence);
-const enrichedClaims = enrichClaims(claims, enrichedEvidence);
+const enrichedClaims = enrichClaims(claims);
 
 const rawSeedData: SeedData = {
   users,

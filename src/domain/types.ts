@@ -363,7 +363,6 @@ export interface Claim {
   cptCode?: string;
   encounterType?: string;
   payer?: string;
-  supportSummary?: string;
   riskEligible: boolean;
   cptSourceEligible: boolean;
   providerTypeEligible: boolean;

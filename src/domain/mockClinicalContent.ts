@@ -342,10 +342,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
         ? "Prior records list morbid obesity; current measurements are 189 lb at 65 in (BMI 31.4)."
         : "Obesity appears in PMH and vitals show elevated BMI.",
       currentVitals: { weightPounds, heightInches: 65 },
-      labResults: [
-        { component: "BMI", value: bmi, unit: "kg/m2", referenceRange: "18.5-24.9", flag: "abnormal" },
-        { component: "HbA1c", value: "7.8", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" }
-      ],
+      labResults: [],
       medication: { name: "Semaglutide", dose: "0.5 mg", route: "SC", frequency: "weekly", prescriber: "" },
       imaging: {
         type: "Sleep Study",
@@ -534,8 +531,11 @@ export function clinicalExactTextForSource(condition: Condition, sourceType: Evi
       const result = profile.labResults[0];
       return result ? `${result.component} ${result.value} ${result.unit}`.trim() : profile.hpi;
     }
-    case "vitalRow":
-      return "BMI";
+    case "vitalRow": {
+      const vitals = profile.currentVitals;
+      const bmi = vitals ? Math.round(((703 * vitals.weightPounds) / vitals.heightInches ** 2) * 10) / 10 : undefined;
+      return bmi ? `BMI ${bmi}` : "BMI";
+    }
     case "imagingImpression":
       return profile.imaging.impression[0] ?? profile.imaging.findings;
     case "specialistAssessment":
@@ -545,7 +545,7 @@ export function clinicalExactTextForSource(condition: Condition, sourceType: Evi
     case "pmhItem":
       return profile.pmh;
     case "claimLine":
-      return condition.claimStatus === "On claim" ? `ICD-10 ${condition.icd10} submitted on claim` : `No ${condition.icd10} diagnosis submitted on claim`;
+      return condition.icd10;
     case "morPayerRegistryHie":
       return condition.subtype === "suspect"
         ? `${condition.description} appears in payer, registry, or HIE data`
@@ -588,7 +588,8 @@ export function reviewerExplanationForEvidence(condition: Condition, sourceType:
 export function inferEvidenceStrength(condition: Condition, category: Category, sourceType: EvidenceSourceType): EvidenceStrength {
   if (condition.conflictingEvidence) return "conflicting";
   if (condition.resolvedFlag) return "unsupported";
-  if (sourceType === "labResultRow" || sourceType === "vitalRow") return "labIndicatorOnly";
+  if (sourceType === "labResultRow") return "labIndicatorOnly";
+  if (sourceType === "vitalRow") return "clinicalIndicatorOnly";
   if (sourceType === "imagingImpression") return "imagingIndicatorOnly";
   if (sourceType === "hpiSentence") return condition.subtype === "suspect" ? "suspect" : "weakMentionOnly";
   if (sourceType === "problemListItem") return "problemListOnly";

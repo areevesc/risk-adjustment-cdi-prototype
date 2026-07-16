@@ -80,7 +80,7 @@ export interface GeneratedChartContext {
   contentRevision: number;
 }
 
-export const GENERATED_CHART_CONTENT_REVISION = 1;
+export const GENERATED_CHART_CONTENT_REVISION = 2;
 
 const generatedNames = [
   ["Alicia", "Moreno"],
@@ -493,11 +493,8 @@ export function buildGeneratedChart(
   const evidence = scenario.conditions.flatMap((scenarioCondition, conditionIndex): EvidencePassage[] => {
     const conditionId = conditionIds[conditionIndex];
     const prefix = `gen-ev-${idNumber}-${scenarioCondition.suffix}`;
-    const diagnosisOnCurrentClaim = conditionWorkflow(scenarioCondition.category) !== "codesNotOnClaim";
-    const currentClaimPhrase = diagnosisOnCurrentClaim
-      ? `claim listed ${scenarioCondition.icd10}`
-      : "claim submitted without this diagnosis";
-    return [
+    const workflow = conditionWorkflow(scenarioCondition.category);
+    const clinicalEvidence: EvidencePassage[] = [
       {
         id: `${prefix}-hpi`,
         reviewId,
@@ -539,24 +536,25 @@ export function buildGeneratedChart(
         conditionIds: [conditionId],
         ...generatedEvidenceMeta(scenarioCondition, "labResultRow"),
         chartAnchor: { tab: "labs", itemId: `chart-${reviewId}-lab-${scenarioCondition.suffix}-0` }
-      },
-      {
+      }
+    ];
+    if (workflow !== "codesNotOnClaim") {
+      clinicalEvidence.push({
         id: `${prefix}-claim`,
         reviewId,
         documentId: `gen-doc-${reviewId}-chart`,
         anchorId: `chart-${reviewId}-claims`,
-        text: scenarioCondition.category === "prospective"
-          ? `${priorDate} ${provider.name} annual wellness claim listed ${scenarioCondition.icd10}.`
-          : `${noteDate} ${provider.name} office visit ${currentClaimPhrase}.`,
+        text: scenarioCondition.icd10,
         date: scenarioCondition.category === "prospective" ? priorDate : noteDate,
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        exactText: scenarioCondition.category === "prospective" ? `claim listed ${scenarioCondition.icd10}` : currentClaimPhrase,
+        exactText: scenarioCondition.icd10,
         ...generatedEvidenceMeta(scenarioCondition, "claimLine"),
         chartAnchor: { tab: "claims", itemId: `gen-claim-${reviewId}-${scenarioCondition.suffix}` }
-      }
-    ];
+      });
+    }
+    return clinicalEvidence;
   });
   const evidenceByCondition = new Map(conditionIds.map((id) => [id, evidence.filter((item) => item.conditionIds.includes(id)).map((item) => item.id)]));
   const chartVitals = [
@@ -666,12 +664,12 @@ export function buildGeneratedChart(
       evidenceIds: []
     };
   });
-  const claims = scenario.conditions.map((scenarioCondition, conditionIndex): Claim => {
+  const claims = scenario.conditions.flatMap((scenarioCondition, conditionIndex): Claim[] => {
     const conditionId = conditionIds[conditionIndex];
     const workflow = conditionWorkflow(scenarioCondition.category);
+    if (workflow === "codesNotOnClaim") return [];
     const currentYearClaim = workflow !== "prospective";
-    const claimEvidenceText = evidence.find((item) => item.conditionIds.includes(conditionId) && item.id.endsWith("-claim"))?.text;
-    return {
+    return [{
       id: `gen-claim-${reviewId}-${scenarioCondition.suffix}`,
       reviewId,
       dateOfService: currentYearClaim ? noteDate : priorDate,
@@ -679,16 +677,13 @@ export function buildGeneratedChart(
       cptCode: currentYearClaim ? "99214" : "G0439",
       encounterType: currentYearClaim ? "Established patient office visit" : "Annual wellness visit / historical capture",
       payer: payer.name,
-      supportSummary: claimEvidenceText ?? (currentYearClaim
-        ? `${noteDate} office visit claim from ${provider.name}; ICD-10 codes: ${workflow === "codesNotOnClaim" ? "none for this condition" : scenarioCondition.icd10}.`
-        : `${priorDate} historical claim from ${provider.name}; ICD-10 codes: ${scenarioCondition.icd10}.`),
       riskEligible: true,
       cptSourceEligible: true,
       providerTypeEligible: true,
       faceToFace: true,
       providerSignatureValid: true,
-      icd10Codes: workflow === "codesNotOnClaim" ? [] : [scenarioCondition.icd10]
-    };
+      icd10Codes: [scenarioCondition.icd10]
+    }];
   });
   const chart: ClinicalChart = {
     reviewId,
@@ -742,7 +737,7 @@ export function buildGeneratedChart(
       sections: [
         section(`chart-${reviewId}-problem-list`, problems.map((item) => `${item.diagnosis} ${item.code}`).join("; ")),
         section(`chart-${reviewId}-meds`, medications.map((item) => `${item.name} ${item.dose} ${item.frequency}`).join("; ")),
-        section(`chart-${reviewId}-claims`, claims.map((item) => item.supportSummary ?? `${item.dateOfService} ${item.provider} ${item.cptCode}`).join("; "), evidence.filter((item) => item.id.endsWith("-claim")).map((item) => item.id))
+        section(`chart-${reviewId}-claims`, claims.map((item) => `${item.dateOfService} | ${item.provider ?? "Rendering provider"} | CPT ${item.cptCode ?? "not listed"} | ICD-10 ${item.icd10Codes.join(", ")}`).join("; "), evidence.filter((item) => item.id.endsWith("-claim")).map((item) => item.id))
       ]
     }
   ];
