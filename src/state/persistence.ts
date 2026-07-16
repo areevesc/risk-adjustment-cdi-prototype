@@ -1,6 +1,6 @@
 import type { AppSettings, Condition, PatientReview, SeedData } from "../domain/types";
 
-export const CURRENT_CONTENT_REVISION = 2;
+export const CURRENT_CONTENT_REVISION = 3;
 
 export interface PersistedState {
   contentRevision: number;

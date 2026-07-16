@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,6 +94,23 @@ afterEach(() => {
 });
 
 describe("ReviewPage evidence navigation", () => {
+  it("renders claim fields and only diagnosis codes actually present on Victor's claim", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ contentRevision: CURRENT_CONTENT_REVISION, currentUserId: "u-manager-1", settings, data: demoSeedData })
+    );
+    const user = userEvent.setup();
+    renderVictorReview();
+    expect(await screen.findByText("Victor Coleman")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /Claims/i }));
+    const currentClaim = document.getElementById("chart-claims-claim-rev-109")!;
+    expect(currentClaim).not.toBeNull();
+    expect(within(currentClaim).getByText("N18.4")).toBeInTheDocument();
+    expect(within(currentClaim).queryByText("E66.01")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claim Support")).not.toBeInTheDocument();
+  });
+
   it("migrates stale Pages content and cycles rendered evidence across chart tabs", async () => {
     localStorage.setItem(
       storageKey,
@@ -118,7 +135,7 @@ describe("ReviewPage evidence navigation", () => {
     const conditionEvidence = getActiveConditionEvidence(demoSeedData, reviewEvidence, conditionId);
     expect(conditionEvidence.length).toBeGreaterThan(1);
 
-    const conditionCode = screen.getByText("N18.4");
+    const conditionCode = screen.getAllByText("N18.4").find((element) => element.classList.contains("mono"))!;
     const conditionCard = conditionCode.closest("article");
     expect(conditionCard).not.toBeNull();
     await user.click(conditionCard!);

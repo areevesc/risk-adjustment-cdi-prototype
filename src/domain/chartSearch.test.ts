@@ -131,7 +131,6 @@ const chart: ClinicalChart = {
       cptCode: "99214",
       encounterType: "Office visit",
       payer: "Example Health Plan",
-      supportSummary: "Claim supports diabetes follow-up.",
       riskEligible: true,
       cptSourceEligible: true,
       providerTypeEligible: true,

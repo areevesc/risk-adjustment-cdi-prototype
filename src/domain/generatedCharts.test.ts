@@ -55,9 +55,13 @@ describe("seeded queue-refill chart generation", () => {
       expect(encounter.hpi).toContain(hpiEvidence!.exactText!);
       expect(planEvidence?.exactText).toBe(plan?.detail);
       expect(renderedLabRows).toContain(labEvidence?.exactText);
-      expect(claimEvidence?.text).toContain(claimEvidence?.exactText);
-      expect(claim?.supportSummary).toContain(claimEvidence?.exactText);
-      expect(claim?.icd10Codes.includes(condition.icd10)).toBe(condition.workflow !== "codesNotOnClaim");
+      if (condition.workflow === "codesNotOnClaim") {
+        expect(claimEvidence).toBeUndefined();
+        expect(bundle.claims.some((item) => item.icd10Codes.includes(condition.icd10))).toBe(false);
+      } else {
+        expect(claimEvidence?.exactText).toBe(condition.icd10);
+        expect(claim?.icd10Codes).toContain(condition.icd10);
+      }
       expect(condition.evidenceIds).toEqual(expect.arrayContaining(conditionEvidence.map((item) => item.id)));
 
       for (const evidence of conditionEvidence) {
