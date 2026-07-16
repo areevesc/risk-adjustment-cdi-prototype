@@ -21,6 +21,7 @@ import type {
   UpcomingAppointment
 } from "./types";
 import { evidenceStrengthLabel, meatTypesForSource, sourceLocationFor } from "./mockClinicalContent";
+import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "./cmsV28";
 
 interface GeneratedChartBundle {
   patient: Patient;
@@ -61,6 +62,7 @@ interface GeneratedClinicalFacts {
   scenarioKey: string;
   patientName: string;
   dob: string;
+  sex: "F" | "M";
   demographicRaf: number;
   hasVisit: boolean;
   visitDate: string;
@@ -83,14 +85,14 @@ export interface GeneratedChartContext {
 export const GENERATED_CHART_CONTENT_REVISION = 2;
 
 const generatedNames = [
-  ["Alicia", "Moreno"],
-  ["Curtis", "Lang"],
-  ["Janet", "Price"],
-  ["Elaine", "Wong"],
-  ["Frank", "Dawson"],
-  ["Rose", "Gaines"],
-  ["Milton", "Shaw"],
-  ["Selena", "Foster"]
+  ["Alicia", "Moreno", "F"],
+  ["Curtis", "Lang", "M"],
+  ["Janet", "Price", "F"],
+  ["Elaine", "Wong", "F"],
+  ["Frank", "Dawson", "M"],
+  ["Rose", "Gaines", "F"],
+  ["Milton", "Shaw", "M"],
+  ["Selena", "Foster", "F"]
 ] as const;
 
 const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: string[]; vitals: Omit<ChartVital, "id" | "date" | "evidenceIds"> }> = [
@@ -307,7 +309,7 @@ function buildGeneratedClinicalFacts(
   const contentRevision = context?.contentRevision ?? GENERATED_CHART_CONTENT_REVISION;
   const random = seededRandom(hashSeed(`${contentRevision}:${completedReviewId}:${generationCount}`));
   const scenario = pick(scenarios, random);
-  const [firstName, lastName] = pick(generatedNames, random);
+  const [firstName, lastName, sex] = pick(generatedNames, random);
   const assignedClinic = data.clinics.find((item) => item.defaultAssigneeId === assignedUserId);
   const clinic = assignedClinic ?? pick(data.clinics, random);
   const clinicProviders = data.providers.filter((item) => item.clinicId === clinic.id);
@@ -329,8 +331,12 @@ function buildGeneratedClinicalFacts(
   const orderedConditions = [...scenario.conditions].sort((left, right) => Number(left.category === "prospective") - Number(right.category === "prospective"));
   const conditions = orderedConditions.map((condition): GeneratedConditionFacts => {
     const { supportPhrases, planPhrases, ...base } = condition;
+    const diagnosis = getCmsV28Diagnosis(base.icd10);
     return {
       ...base,
+      description: diagnosis?.description ?? base.description,
+      hcc: getCmsV28DisplayHccs(base.icd10),
+      raf: getCmsV28StandaloneFactor(base.icd10),
       support: pick(supportPhrases, random),
       plan: pick(planPhrases, random),
       medication: { ...base.medication, evidenceIds: [] },
@@ -340,12 +346,14 @@ function buildGeneratedClinicalFacts(
     };
   });
 
+  const dob = `${1940 + integerBetween(0, 16, random)}-${String(integerBetween(1, 12, random)).padStart(2, "0")}-${String(integerBetween(3, 25, random)).padStart(2, "0")}`;
   return {
     ordinal,
     scenarioKey: scenario.key,
     patientName: `${firstName} ${lastName}`,
-    dob: `${1940 + integerBetween(0, 16, random)}-${String(integerBetween(1, 12, random)).padStart(2, "0")}-${String(integerBetween(3, 25, random)).padStart(2, "0")}`,
-    demographicRaf: Number((0.31 + integerBetween(0, 18, random) / 100).toFixed(3)),
+    dob,
+    sex,
+    demographicRaf: scoreCmsV28CommunityNa({ dob, sex, diagnosisCodes: [] }).demographicFactor,
     hasVisit: random() >= 0.25,
     visitDate: `${calendarYear}-08-${String(integerBetween(8, 24, random)).padStart(2, "0")}`,
     noteDate: `${calendarYear}-06-${String(noteDay).padStart(2, "0")}`,
@@ -474,6 +482,7 @@ export function buildGeneratedChart(
     dob: facts.dob,
     memberId: `${payer.id.slice(6, 8).toUpperCase()}-${820000 + facts.ordinal}`,
     payerId: payer.id,
+    riskProfile: { sex: facts.sex, segment: "COMMUNITY_NA", originallyDisabled: false },
     demographicRaf: facts.demographicRaf
   };
   const conditionIds = scenario.conditions.map((condition) => `gen-cond-${idNumber}-${condition.suffix}`);
@@ -636,7 +645,7 @@ export function buildGeneratedChart(
       code: scenarioCondition.icd10,
       status: scenarioCondition.problemStatus ?? "Active",
       dateAdded: `${calendarYear - 2}-02-${String(10 + conditionIndex).padStart(2, "0")}`,
-      isHcc: true,
+      isHcc: getCmsV28Diagnosis(scenarioCondition.icd10)?.program === "risk-adjustment",
       evidenceIds: []
     };
   });
@@ -745,6 +754,7 @@ export function buildGeneratedChart(
     const conditionId = conditionIds[conditionIndex];
     const workflow = conditionWorkflow(scenarioCondition.category);
     const conditionEvidenceIds = evidenceByCondition.get(conditionId) ?? [];
+    const diagnosis = getCmsV28Diagnosis(scenarioCondition.icd10);
     return {
       id: conditionId,
       reviewId,
@@ -752,9 +762,10 @@ export function buildGeneratedChart(
       category: scenarioCondition.category,
       subtype: scenarioCondition.subtype,
       icd10: scenarioCondition.icd10,
-      description: scenarioCondition.description,
-      hcc: scenarioCondition.hcc,
-      raf: scenarioCondition.raf,
+      description: diagnosis?.description ?? scenarioCondition.description,
+      program: diagnosis?.program ?? "clinical-context",
+      hcc: getCmsV28DisplayHccs(scenarioCondition.icd10),
+      raf: getCmsV28StandaloneFactor(scenarioCondition.icd10),
       claimStatus: scenarioCondition.claimStatus,
       sourceDate: workflow === "prospective" ? priorDate : noteDate,
       evidenceIds: conditionEvidenceIds,

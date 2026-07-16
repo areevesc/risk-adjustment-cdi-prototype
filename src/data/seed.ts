@@ -28,6 +28,7 @@ import {
   sourceTypeForEvidence,
   sourceLocationFor
 } from "../domain/mockClinicalContent";
+import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "../domain/cmsV28";
 
 const now = "2026-06-24T09:00:00.000Z";
 
@@ -70,24 +71,37 @@ export const payers: PayerPlan[] = [
   { id: "payer-nova", name: "Nova Senior Choice", asmProfile: "NOVA-ASM-DEMO" }
 ];
 
+function seededPatient(id: string, name: string, dob: string, memberId: string, payerId: string, sex: "F" | "M"): Patient {
+  const demographicRaf = scoreCmsV28CommunityNa({ dob, sex, diagnosisCodes: [] }).demographicFactor;
+  return {
+    id,
+    name,
+    dob,
+    memberId,
+    payerId,
+    riskProfile: { sex, segment: "COMMUNITY_NA", originallyDisabled: false },
+    demographicRaf
+  };
+}
+
 export const patients: Patient[] = [
-  { id: "pat-100", name: "Evelyn Hart", dob: "1947-02-11", memberId: "SM-884102", payerId: "payer-summit", demographicRaf: 0.421 },
-  { id: "pat-101", name: "Robert Nunez", dob: "1951-08-23", memberId: "HB-440198", payerId: "payer-harbor", demographicRaf: 0.337 },
-  { id: "pat-102", name: "Patricia Bell", dob: "1942-05-04", memberId: "CC-120456", payerId: "payer-civic", demographicRaf: 0.512 },
-  { id: "pat-103", name: "Thomas Okafor", dob: "1955-10-19", memberId: "NV-772903", payerId: "payer-nova", demographicRaf: 0.293 },
-  { id: "pat-104", name: "Maria Jensen", dob: "1949-04-08", memberId: "SM-117302", payerId: "payer-summit", demographicRaf: 0.466 },
-  { id: "pat-105", name: "Henry Wallace", dob: "1944-12-31", memberId: "HB-204481", payerId: "payer-harbor", demographicRaf: 0.389 },
-  { id: "pat-106", name: "Linda Park", dob: "1950-01-15", memberId: "CC-902311", payerId: "payer-civic", demographicRaf: 0.356 },
-  { id: "pat-107", name: "George Miller", dob: "1946-07-22", memberId: "NV-600742", payerId: "payer-nova", demographicRaf: 0.601 },
-  { id: "pat-108", name: "Angela Rossi", dob: "1953-09-12", memberId: "SM-390114", payerId: "payer-summit", demographicRaf: 0.318 },
-  { id: "pat-109", name: "Victor Coleman", dob: "1941-11-02", memberId: "HB-772140", payerId: "payer-harbor", demographicRaf: 0.557 },
-  { id: "pat-110", name: "Denise Brooks", dob: "1948-03-18", memberId: "SM-550110", payerId: "payer-summit", demographicRaf: 0.402 },
-  { id: "pat-111", name: "Marlene Cole", dob: "1952-06-09", memberId: "HB-771111", payerId: "payer-harbor", demographicRaf: 0.371 },
-  { id: "pat-112", name: "Arthur Lane", dob: "1945-09-27", memberId: "CC-661112", payerId: "payer-civic", demographicRaf: 0.488 },
-  { id: "pat-113", name: "Helen Carver", dob: "1950-12-02", memberId: "NV-801113", payerId: "payer-nova", demographicRaf: 0.344 },
-  { id: "pat-114", name: "Irene Moss", dob: "1949-01-30", memberId: "SM-661114", payerId: "payer-summit", demographicRaf: 0.376 },
-  { id: "pat-115", name: "Calvin Price", dob: "1954-04-16", memberId: "HB-551115", payerId: "payer-harbor", demographicRaf: 0.329 },
-  { id: "pat-116", name: "Nora Fields", dob: "1946-10-05", memberId: "CC-771116", payerId: "payer-civic", demographicRaf: 0.417 }
+  seededPatient("pat-100", "Evelyn Hart", "1947-02-11", "SM-884102", "payer-summit", "F"),
+  seededPatient("pat-101", "Robert Nunez", "1951-08-23", "HB-440198", "payer-harbor", "M"),
+  seededPatient("pat-102", "Patricia Bell", "1942-05-04", "CC-120456", "payer-civic", "F"),
+  seededPatient("pat-103", "Thomas Okafor", "1955-10-19", "NV-772903", "payer-nova", "M"),
+  seededPatient("pat-104", "Maria Jensen", "1949-04-08", "SM-117302", "payer-summit", "F"),
+  seededPatient("pat-105", "Henry Wallace", "1944-12-31", "HB-204481", "payer-harbor", "M"),
+  seededPatient("pat-106", "Linda Park", "1950-01-15", "CC-902311", "payer-civic", "F"),
+  seededPatient("pat-107", "George Miller", "1946-07-22", "NV-600742", "payer-nova", "M"),
+  seededPatient("pat-108", "Angela Rossi", "1953-09-12", "SM-390114", "payer-summit", "F"),
+  seededPatient("pat-109", "Victor Coleman", "1941-11-02", "HB-772140", "payer-harbor", "M"),
+  seededPatient("pat-110", "Denise Brooks", "1948-03-18", "SM-550110", "payer-summit", "F"),
+  seededPatient("pat-111", "Marlene Cole", "1952-06-09", "HB-771111", "payer-harbor", "F"),
+  seededPatient("pat-112", "Arthur Lane", "1945-09-27", "CC-661112", "payer-civic", "M"),
+  seededPatient("pat-113", "Helen Carver", "1950-12-02", "NV-801113", "payer-nova", "F"),
+  seededPatient("pat-114", "Irene Moss", "1949-01-30", "SM-661114", "payer-summit", "F"),
+  seededPatient("pat-115", "Calvin Price", "1954-04-16", "HB-551115", "payer-harbor", "M"),
+  seededPatient("pat-116", "Nora Fields", "1946-10-05", "CC-771116", "payer-civic", "F")
 ];
 
 export const appointments: UpcomingAppointment[] = [
@@ -397,7 +411,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           faceToFace: true,
           providerSignatureValid: true,
           sections: [
-            section(`sec-${review.id}-mor-1`, "MOR lists prior HCC 222 recapture and payer data lists a diabetes suspect opportunity.", [
+            section(`sec-${review.id}-mor-1`, "MOR lists prior HCC 224 recapture and payer data lists a diabetes suspect opportunity.", [
               `ev-${review.id}-mor`,
               `ev-${review.id}-payer`
             ])
@@ -539,7 +553,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           providerTypeEligible: true,
           faceToFace: true,
           providerSignatureValid: true,
-          sections: [section(`sec-${review.id}-quality`, "Payer quality file lists Z55.0 for social context reporting; no HCC diagnosis is attached to this item.", [`ev-${review.id}-quality`])]
+          sections: [section(`sec-${review.id}-quality`, "Payer quality file lists Z13.89 as a screening encounter; no payment HCC is attached to this item.", [`ev-${review.id}-quality`])]
         }
       ]
     : []),
@@ -558,7 +572,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           faceToFace: true,
           providerSignatureValid: true,
           sections: [
-            section(`sec-${review.id}-hierarchy`, "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.", [
+            section(`sec-${review.id}-hierarchy`, "Current documentation supports E11.22 (HCC 37); the E11.65 opportunity (HCC 38) remains visible but is lower in the official hierarchy.", [
               `ev-${review.id}-hierarchy-lower`,
               `ev-${review.id}-hierarchy-higher`
             ])
@@ -658,13 +672,13 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-mor`,
           anchorId: `sec-${review.id}-mor-1`,
           sectionId: `sec-${review.id}-mor-1`,
-          text: "MOR lists prior HCC 222 recapture.",
-          exactText: "MOR lists prior HCC 222 recapture",
+          text: "MOR lists prior HCC 224 recapture.",
+          exactText: "MOR lists prior HCC 224 recapture",
           date: `${review.calendarYear}-01-18`,
           category: "prospective" as const,
           subtype: "recapture" as const,
           conditionIds: ["cond-100-c"],
-          summary: "MOR recapture example for prior HCC 222."
+          summary: "MOR recapture example for prior HCC 224."
         },
         {
           id: `ev-${review.id}-payer`,
@@ -807,8 +821,8 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-quality`,
           anchorId: `sec-${review.id}-quality`,
           sectionId: `sec-${review.id}-quality`,
-          text: "Payer quality file lists Z55.0 for social context reporting with no HCC diagnosis attached.",
-          exactText: "Z55.0 for social context reporting",
+          text: "Payer quality file lists Z13.89 as an encounter for screening for another disorder, with no payment HCC attached.",
+          exactText: "Z13.89",
           date: "2026-04-18",
           category: "potentialDelete" as const,
           conditionIds: ["cond-115-a"],
@@ -824,12 +838,12 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-hierarchy`,
           anchorId: `sec-${review.id}-hierarchy`,
           sectionId: `sec-${review.id}-hierarchy`,
-          text: "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.",
-          exactText: "lower opportunity remains visible",
+          text: "Current documentation supports E11.22 (HCC 37); the E11.65 opportunity (HCC 38) remains visible but is lower in the official hierarchy.",
+          exactText: "E11.65 opportunity (HCC 38) remains visible",
           date: "2026-04-22",
           category: "potentialAddition" as const,
           conditionIds: ["cond-116-a"],
-          summary: "Lower diabetes eye complication opportunity kept visible."
+          summary: "Lower HCC 38 opportunity remains visible for hierarchy review."
         },
         {
           id: `ev-${review.id}-hierarchy-higher`,
@@ -837,16 +851,70 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-hierarchy`,
           anchorId: `sec-${review.id}-hierarchy`,
           sectionId: `sec-${review.id}-hierarchy`,
-          text: "Specialist documentation supports E11.311 as the more specific diabetes eye complication code while the lower opportunity remains visible.",
-          exactText: "E11.311 as the more specific diabetes eye complication code",
+          text: "Current documentation supports E11.22 (HCC 37); the E11.65 opportunity (HCC 38) remains visible but is lower in the official hierarchy.",
+          exactText: "E11.22 (HCC 37)",
           date: "2026-04-22",
           category: "validated" as const,
           conditionIds: ["cond-116-b"],
-          summary: "Higher-specificity diabetes eye complication evidence."
+          summary: "Higher HCC 37 diabetes complication evidence."
         }
       ]
     : [])
 ]);
+
+const correctedDiagnosisEvidence: EvidencePassage[] = [
+  {
+    id: "ev-cond-100-b-vital",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-note",
+    anchorId: "sec-rev-100-note-vitals",
+    sectionId: "sec-rev-100-note-vitals",
+    text: "Office blood pressure is 128/78 mmHg.",
+    exactText: "BP 138/76",
+    date: "2026-04-12",
+    category: "potentialDelete",
+    conditionIds: ["cond-100-b"],
+    summary: "Blood-pressure measurement is a clinical indicator; control does not rule out treated hypertension.",
+    sourceType: "vitalRow",
+    evidenceStrength: "clinicalIndicatorOnly",
+    currentYearSupport: false,
+    chartAnchor: { tab: "vitals", itemId: "chart-rev-100-vital-current" }
+  },
+  {
+    id: "ev-cond-100-b-med",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-meds",
+    anchorId: "sec-rev-100-medications",
+    sectionId: "sec-rev-100-medications",
+    text: "Lisinopril 20 mg by mouth daily for hypertension is active on the reconciled medication list.",
+    exactText: "Lisinopril 20 mg",
+    date: "2026-04-12",
+    category: "potentialDelete",
+    conditionIds: ["cond-100-b"],
+    summary: "Active antihypertensive therapy supports the documented diagnosis.",
+    sourceType: "medicationRow",
+    evidenceStrength: "treatmentEvidence",
+    currentYearSupport: true,
+    chartAnchor: { tab: "medications", itemId: "chart-rev-100-med-cond-100-b" }
+  },
+  {
+    id: "ev-cond-100-b-plan",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-note",
+    anchorId: "sec-rev-100-note-3",
+    sectionId: "sec-rev-100-note-3",
+    text: "Essential hypertension is controlled today; continue lisinopril 20 mg daily and home blood-pressure monitoring.",
+    exactText: "Blood pressure 128/78 in office. Continue lisinopril",
+    date: "2026-04-12",
+    category: "potentialDelete",
+    conditionIds: ["cond-100-b"],
+    summary: "Current assessment and treatment plan supports essential hypertension.",
+    sourceType: "planSentence",
+    evidenceStrength: "assessmentWithPlan",
+    currentYearSupport: true,
+    chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
+  }
+];
 
 const disposed = (action: "Validate" | "Add to Claim" | "Yes" | "Delete", userId = "u-coder-2") => ({
   action,
@@ -891,14 +959,14 @@ export const conditions: Condition[] = [
     raf: 0.121,
     claimStatus: "On claim",
     sourceDate: "2026-04-12",
-    evidenceIds: ["ev-rev-100-e"],
+    evidenceIds: ["ev-cond-100-b-vital", "ev-cond-100-b-med", "ev-cond-100-b-plan"],
     actionable: true,
     currentYear: true,
-    hasSufficientMeat: false,
-    hasOtherSupportingEvidence: false,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
     hadPriorCapture: true,
     hasCurrentYearCapture: true,
-    hasClinicalIndicators: false,
+    hasClinicalIndicators: true,
     documentationIssues: []
   },
   {
@@ -940,7 +1008,7 @@ export const conditions: Condition[] = [
     raf: 0.318,
     claimStatus: "Not on claim",
     sourceDate: "2026-04-12",
-    evidenceIds: ["ev-rev-100-d"],
+    evidenceIds: [],
     actionable: true,
     currentYear: true,
     hasSufficientMeat: true,
@@ -961,7 +1029,7 @@ export const conditions: Condition[] = [
     raf: 0.309,
     claimStatus: "Not on claim",
     sourceDate: "2026-03-05",
-    evidenceIds: ["ev-rev-100-f"],
+    evidenceIds: [],
     actionable: true,
     currentYear: true,
     hasSufficientMeat: false,
@@ -990,7 +1058,7 @@ export const conditions: Condition[] = [
     raf: 0.318,
     claimStatus: "Registry",
     sourceDate: "2026-02-14",
-    evidenceIds: ["ev-rev-100-c", "ev-rev-100-f"],
+    evidenceIds: [],
     actionable: true,
     currentYear: true,
     hasSufficientMeat: false,
@@ -998,14 +1066,6 @@ export const conditions: Condition[] = [
     hadPriorCapture: false,
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
-    trumpedByCode: "E11.311",
-    seededRecommendation: {
-      action: "Change",
-      confidence: "Medium",
-      source: "seeded",
-      replacementCode: "E11.311",
-      rationale: "Specialist evidence suggests a more specific diabetes eye complication code."
-    },
     documentationIssues: []
   },
   {
@@ -1013,8 +1073,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-110",
     workflow: "codesOnClaim",
     category: "validated",
-    icd10: "N18.4",
-    description: "Chronic kidney disease, stage 4",
+    icd10: "E11.22",
+    description: "Type 2 diabetes mellitus with diabetic chronic kidney disease",
     hcc: "HCC 328",
     raf: 0.289,
     claimStatus: "On claim",
@@ -1034,8 +1094,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-110",
     workflow: "codesOnClaim",
     category: "validated",
-    icd10: "E11.22",
-    description: "Type 2 DM with diabetic chronic kidney disease",
+    icd10: "E11.40",
+    description: "Type 2 diabetes mellitus with diabetic neuropathy, unspecified",
     hcc: "HCC 328",
     raf: 0.299,
     claimStatus: "On claim",
@@ -1055,8 +1115,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-110",
     workflow: "codesOnClaim",
     category: "validated",
-    icd10: "N18.32",
-    description: "Chronic kidney disease, stage 3b",
+    icd10: "E11.42",
+    description: "Type 2 diabetes mellitus with diabetic polyneuropathy",
     hcc: "HCC 328",
     raf: 0.244,
     claimStatus: "On claim",
@@ -1076,8 +1136,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-110",
     workflow: "codesOnClaim",
     category: "potentialDelete",
-    icd10: "N18.9",
-    description: "Chronic kidney disease, unspecified",
+    icd10: "E11.51",
+    description: "Type 2 diabetes mellitus with diabetic peripheral angiopathy without gangrene",
     hcc: "HCC 328",
     raf: 0.186,
     claimStatus: "On claim",
@@ -1235,8 +1295,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-116",
     workflow: "codesNotOnClaim",
     category: "potentialAddition",
-    icd10: "E11.51",
-    description: "Type 2 DM with diabetic peripheral angiopathy",
+    icd10: "E11.65",
+    description: "Type 2 diabetes mellitus with hyperglycemia",
     hcc: "HCC 37",
     raf: 0.318,
     claimStatus: "Not on claim",
@@ -1249,7 +1309,6 @@ export const conditions: Condition[] = [
     hadPriorCapture: false,
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
-    trumpedByCode: "E11.311",
     documentationIssues: []
   },
   {
@@ -1257,8 +1316,8 @@ export const conditions: Condition[] = [
     reviewId: "rev-116",
     workflow: "codesOnClaim",
     category: "validated",
-    icd10: "E11.311",
-    description: "Type 2 DM with unspecified diabetic retinopathy with macular edema",
+    icd10: "E11.22",
+    description: "Type 2 diabetes mellitus with diabetic chronic kidney disease",
     hcc: "HCC 37",
     raf: 0.318,
     claimStatus: "On claim",
@@ -1535,7 +1594,14 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
       sections: [
         section(`sec-${review.id}-problem`, "Problem list: diabetes with complication, chronic kidney disease, heart failure history, hypertension, hyperlipidemia, and depression screening where applicable.", []),
         section(`sec-${review.id}-pmh`, "Past medical history: Medicare Advantage member with chronic disease management, specialist involvement, and prior chronic diagnoses.", []),
-        section(`sec-${review.id}-medications`, "Medications: metformin, lisinopril, atorvastatin, carvedilol, furosemide, inhalers, and condition-specific therapy were reconciled during the visit.", []),
+        section(
+          `sec-${review.id}-medications`,
+          `Medications: metformin, lisinopril, atorvastatin, carvedilol, furosemide, inhalers, and condition-specific therapy were reconciled during the visit. ${reviewEvidence
+            .filter((item) => item.chartAnchor?.tab === "medications")
+            .map((item) => item.exactText ?? item.text)
+            .join(" ")}`.trim(),
+          reviewEvidence.filter((item) => item.chartAnchor?.tab === "medications").map((item) => item.id)
+        ),
         section(`sec-${review.id}-imaging`, "Imaging / specialist notes: echo, renal ultrasound, chest imaging, nephrology, cardiology, pulmonology, and behavioral health snippets appear when relevant.", [])
       ]
     }
@@ -1547,6 +1613,17 @@ function enrichDocuments(seedDocuments: SourceDocument[]) {
   const preservedSpecialDocuments = seedDocuments.filter((document) => !baseDocumentIds.has(document.id));
   const generatedBase = reviews.flatMap(richDocumentsFor);
   return [...generatedBase, ...preservedSpecialDocuments];
+}
+
+function alignDocumentEvidence(seedDocuments: SourceDocument[], seedEvidence: EvidencePassage[]) {
+  const evidenceIds = new Set(seedEvidence.map((item) => item.id));
+  return seedDocuments.map((document) => ({
+    ...document,
+    sections: document.sections.map((section) => ({
+      ...section,
+      evidenceIds: section.evidenceIds.filter((id) => evidenceIds.has(id))
+    }))
+  }));
 }
 
 function enrichClaims(seedClaims: Claim[]): Claim[] {
@@ -1588,8 +1665,8 @@ function chartAnchorForEvidence(evidence: EvidencePassage): NonNullable<Evidence
   return { tab: "encounters", itemId: `chart-${evidence.reviewId}-encounter-current`, sectionId: "hpi" };
 }
 
-function enrichEvidence(seedEvidence: EvidencePassage[]): EvidencePassage[] {
-  const conditionMap = new Map(conditions.map((condition) => [condition.id, condition]));
+function enrichEvidence(seedEvidence: EvidencePassage[], conditionSource: Condition[] = conditions): EvidencePassage[] {
+  const conditionMap = new Map(conditionSource.map((condition) => [condition.id, condition]));
   return seedEvidence.map((item) => {
     const initialChartAnchor = item.chartAnchor ?? chartAnchorForEvidence(item);
     const evidenceConditions = item.conditionIds.map((id) => conditionMap.get(id)).filter(Boolean) as Condition[];
@@ -1691,6 +1768,72 @@ function alignConditionEvidence(seedConditions: Condition[], seedEvidence: Evide
     ...condition,
     evidenceIds: seedEvidence.filter((item) => item.conditionIds.includes(condition.id)).map((item) => item.id)
   }));
+}
+
+function scopeEvidenceToDiagnoses(seedEvidence: EvidencePassage[], seedConditions: Condition[]) {
+  const conditionMap = new Map(seedConditions.map((condition) => [condition.id, condition]));
+  return seedEvidence
+    .map((item) => ({
+      ...item,
+      conditionIds: item.conditionIds.filter((conditionId) => {
+        const condition = conditionMap.get(conditionId);
+        return condition ? evidenceIsRelevantToDiagnosis(item, condition) : false;
+      })
+    }))
+    .filter((item) => item.conditionIds.length > 0);
+}
+
+function evidenceIsRelevantToDiagnosis(evidenceItem: EvidencePassage, condition: Condition) {
+  const text = `${evidenceItem.text} ${evidenceItem.exactText ?? ""} ${evidenceItem.summary}`.toLowerCase();
+  const code = condition.icd10.toLowerCase();
+  if (text.includes(code)) return true;
+  const hccs = getCmsV28DisplayHccs(condition.icd10).toLowerCase().split(" + ").filter(Boolean);
+  if (["claimLine", "morPayerRegistryHie"].includes(evidenceItem.sourceType ?? "") && hccs.some((hcc) => text.includes(hcc))) return true;
+
+  switch (condition.icd10) {
+    case "I10":
+      return includesAny(text, ["hypertension", "blood pressure", "bp ", "lisinopril", "antihypertensive"]);
+    case "E11.22":
+      return includesAny(text, ["diabetic kidney", "diabetes with chronic kidney", "diabetes with kidney"]);
+    case "E11.311":
+      return includesAny(text, ["diabetic retinopathy", "macular edema", "retinal", "ophthalmology"]);
+    case "E11.40":
+    case "E11.42":
+      return includesAny(text, ["diabetic neuropathy", "polyneuropathy", "monofilament", "burning and numbness", "gabapentin"]);
+    case "E11.51":
+      return includesAny(text, ["diabetic peripheral angiopathy", "peripheral angiopathy", "ankle-brachial", "abi ", "vascular assessment"]);
+    case "E11.621":
+      return text.includes("diabet") && includesAny(text, ["foot ulcer", "plantar ulcer", "wound care"]);
+    case "E11.65":
+      return includesAny(text, ["hyperglycemia", "a1c", "hba1c", "glucose log", "fasting readings"]);
+    case "E66.01":
+      return includesAny(text, ["morbid obesity", "severe obesity", "bmi 4", "weight-management", "weight management"]);
+    case "F33.1":
+      return includesAny(text, ["major depressive", "recurrent depression", "phq-9", "sertraline", "low mood"]);
+    case "I50.32":
+      return includesAny(text, ["chronic diastolic heart failure", "hfpef", "heart failure remains stable"]);
+    case "I50.33":
+      return includesAny(text, ["acute on chronic", "acute-on-chronic", "decompensated heart failure", "volume overload"]);
+    case "J20.9":
+      return includesAny(text, ["acute bronchitis", "productive cough", "bronchitic"]);
+    case "J44.89":
+    case "J44.9":
+      return includesAny(text, ["copd", "chronic obstructive", "emphysema", "spirometry", "maintenance inhaler"]);
+    case "N18.32":
+      return includesAny(text, ["stage 3b", "egfr 3", "egfr of 3"]);
+    case "N18.4":
+      return includesAny(text, ["stage 4", "egfr 2", "egfr of 2"]);
+    case "N18.9":
+      return includesAny(text, ["chronic kidney disease", "ckd", "renal function"]);
+    case "Z13.89":
+      return includesAny(text, ["z13.89", "screening encounter", "screening for another disorder"]);
+    default:
+      return false;
+  }
+}
+
+function includesAny(text: string, values: string[]) {
+  return values.some((value) => text.includes(value));
 }
 
 function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] {
@@ -2037,7 +2180,7 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
         code: condition.icd10,
         status: condition.resolvedFlag ? "Resolved" : condition.persistence === "chronic" || condition.workflow !== "prospective" ? "Active" : "Chronic",
         dateAdded: `${review.calendarYear - 2}-02-14`,
-        isHcc: !condition.sdohCode && !condition.qualityExclusionCode,
+        isHcc: getCmsV28Diagnosis(condition.icd10)?.program === "risk-adjustment",
         evidenceIds: conditionEvidenceIds(condition)
       })),
       encounters,
@@ -2179,16 +2322,32 @@ function simplifySeedUsers(data: SeedData): SeedData {
   };
 }
 
+function canonicalizeCondition(condition: Condition): Condition {
+  const diagnosis = getCmsV28Diagnosis(condition.icd10);
+  return {
+    ...condition,
+    description: diagnosis?.description ?? condition.description,
+    program: diagnosis?.program ?? "clinical-context",
+    hcc: getCmsV28DisplayHccs(condition.icd10),
+    raf: getCmsV28StandaloneFactor(condition.icd10),
+    trumpedByCode: undefined,
+    qualityExclusionCode: undefined,
+    trustedCodeMetadata: undefined,
+    actionable: diagnosis?.program === "risk-adjustment" ? condition.actionable : false
+  };
+}
+
+const canonicalConditions = conditions.map(canonicalizeCondition);
 const generatedClinicalReviewIds = new Set(reviews.filter((review) => !explicitConditionReviewIds.has(review.id)).map((review) => review.id));
-const conditionScopedEvidence = conditions
+const conditionScopedEvidence = canonicalConditions
   .filter((condition) => generatedClinicalReviewIds.has(condition.reviewId))
   .flatMap(generatedEvidenceForCondition);
 const retainedEvidence = evidence.filter(
   (item) => !(generatedClinicalReviewIds.has(item.reviewId) && /^ev-rev-\d+-(a|b|c|d|e|f)$/.test(item.id))
 );
-const canonicalEvidence = alignEvidenceOwners([...retainedEvidence, ...conditionScopedEvidence], conditions, generatedClinicalReviewIds);
-const enrichedEvidence = enrichEvidence(canonicalEvidence);
-const clinicalSeedConditions = alignConditionEvidence(conditions, enrichedEvidence);
+const canonicalEvidence = alignEvidenceOwners([...retainedEvidence, ...correctedDiagnosisEvidence, ...conditionScopedEvidence], canonicalConditions, generatedClinicalReviewIds);
+const enrichedEvidence = scopeEvidenceToDiagnoses(enrichEvidence(canonicalEvidence, canonicalConditions), canonicalConditions);
+const clinicalSeedConditions = alignConditionEvidence(canonicalConditions, enrichedEvidence);
 const enrichedClaims = enrichClaims(claims);
 
 const rawSeedData: SeedData = {
@@ -2199,7 +2358,7 @@ const rawSeedData: SeedData = {
   payers,
   patients,
   reviews,
-  documents: enrichDocuments(documents),
+  documents: alignDocumentEvidence(enrichDocuments(documents), enrichedEvidence),
   evidence: enrichedEvidence,
   claims: enrichedClaims,
   charts: buildClinicalCharts(reviews, enrichedEvidence, enrichedClaims),

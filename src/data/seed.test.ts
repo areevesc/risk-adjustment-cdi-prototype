@@ -35,7 +35,7 @@ function visibleChartText(chart: ClinicalChart, evidence: EvidencePassage) {
   }
   if (evidence.chartAnchor?.tab === "vitals") {
     const item = chart.vitals.find((vital) => vital.evidenceIds.includes(evidence.id));
-    return item ? `BMI ${item.bmi}` : undefined;
+    return item ? `BP ${item.systolic}/${item.diastolic}; BMI ${item.bmi}` : undefined;
   }
   if (evidence.chartAnchor?.tab === "imaging") {
     const item = chart.imaging.find((report) => report.evidenceIds.includes(evidence.id));
@@ -63,6 +63,14 @@ describe("seeded clinical content", () => {
         expect(conditionById.get(conditionId)?.evidenceIds, `${evidence.id} -> ${conditionId}`).toContain(evidence.id);
       }
     }
+  });
+
+  it("keeps every document evidence reference resolvable", () => {
+    const evidenceIds = new Set(demoSeedData.evidence.map((item) => item.id));
+    const dangling = demoSeedData.documents.flatMap((document) =>
+      document.sections.flatMap((section) => section.evidenceIds.filter((id) => !evidenceIds.has(id)).map((id) => `${document.id}:${section.id}:${id}`))
+    );
+    expect(dangling).toEqual([]);
   });
 
   it("uses provider-style language in assessment and plan content", () => {
@@ -112,6 +120,23 @@ describe("seeded clinical content", () => {
       expect(chart, `${evidence.id} chart`).toBeDefined();
       expect(visibleChartText(chart!, evidence), `${evidence.id} chart source`).toContain(evidence.exactText);
     }
+  });
+
+  it("keeps hypertension evidence diagnosis-specific and leaves unsupported conditions empty", () => {
+    const hypertension = demoSeedData.conditions.find((item) => item.id === "cond-100-b")!;
+    const evidence = demoSeedData.evidence.filter((item) => hypertension.evidenceIds.includes(item.id));
+    const combinedText = evidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase();
+
+    expect(hypertension).toMatchObject({ program: "quality", hcc: "", raf: 0, actionable: false });
+    expect(evidence.map((item) => item.sourceType)).toEqual(expect.arrayContaining(["vitalRow", "medicationRow", "planSentence"]));
+    expect(combinedText).toContain("blood pressure");
+    expect(combinedText).toContain("lisinopril");
+    expect(combinedText).not.toMatch(/a1c|hba1c|diabetes|bronchitis/);
+    expect(evidence.some((item) => item.sourceType === "imagingImpression")).toBe(false);
+
+    expect(demoSeedData.conditions.find((item) => item.id === "cond-100-d")?.evidenceIds).toEqual([]);
+    const angiopathyEvidence = demoSeedData.evidence.filter((item) => item.conditionIds.includes("cond-100-f"));
+    expect(angiopathyEvidence.map((item) => item.text).join(" ").toLowerCase()).not.toMatch(/retina|macular|ophthalm/);
   });
 
   it("uses coherent stage 4 CKD and severe-obesity facts throughout Victor Coleman's chart", () => {

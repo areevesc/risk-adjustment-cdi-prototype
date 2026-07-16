@@ -140,6 +140,62 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
       ]
     };
   }
+  if (condition.icd10 === "E11.51") {
+    return {
+      hpi: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
+      plan: "Diabetic peripheral angiopathy without gangrene remains active. Continue statin and antiplatelet therapy, reinforce foot protection, obtain ankle-brachial indices, and follow vascular medicine.",
+      weakMention: "Diabetic peripheral angiopathy appears in the vascular problem list.",
+      labResults: [],
+      medication: { name: "Aspirin", dose: "81 mg", route: "PO", frequency: "daily", prescriber: "" },
+      imaging: {
+        type: "Lower-extremity arterial duplex",
+        indication: "Diabetic peripheral angiopathy assessment",
+        findings: "Reduced distal arterial flow without occlusion; ankle-brachial indices are abnormal bilaterally.",
+        impression: ["Peripheral arterial disease without gangrene."]
+      },
+      specialist: {
+        specialty: "Vascular Medicine",
+        provider: "Rina Shah, MD",
+        title: "Vascular follow-up",
+        note: "Diabetic peripheral angiopathy without gangrene reviewed with abnormal pedal pulses and ABI results.",
+        assessment: ["Diabetic peripheral angiopathy without gangrene", "Continue vascular risk reduction"]
+      },
+      pmh: "Type 2 diabetes with peripheral angiopathy without gangrene.",
+      ros: ["Vascular: exertional calf discomfort without rest pain.", "Skin: no ulcer or gangrene."],
+      exam: [
+        { system: "Vascular", text: "Dorsalis pedis pulses diminished bilaterally; feet remain warm." },
+        { system: "Skin", text: "No gangrene or active ulcer." }
+      ]
+    };
+  }
+  if (condition.icd10 === "E11.621") {
+    return {
+      hpi: "Patient has an active plantar foot ulcer managed by wound care. Drainage and off-loading adherence were reviewed; no fever is reported.",
+      plan: "Type 2 diabetes with foot ulcer remains active. Continue wound dressings and off-loading, optimize glycemic control, and return to podiatry and wound care within one week.",
+      weakMention: "Diabetic foot ulcer appears in the wound-care problem list.",
+      labResults: [{ component: "HbA1c", value: "8.2", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" }],
+      medication: { name: "Collagen wound dressing", dose: "Apply to ulcer", route: "Topical", frequency: "daily", prescriber: "" },
+      imaging: {
+        type: "Foot radiograph",
+        indication: "Active diabetic plantar ulcer",
+        findings: "Soft-tissue ulcer is present without radiographic osteomyelitis.",
+        impression: ["Plantar soft-tissue ulcer; no acute osseous destruction."]
+      },
+      specialist: {
+        specialty: "Podiatry",
+        provider: "Mira Santos, DPM",
+        title: "Wound-care follow-up",
+        note: "Active diabetic plantar ulcer was measured, dressed, and off-loaded.",
+        assessment: ["Type 2 diabetes with foot ulcer", "Continue weekly wound care"]
+      },
+      pmh: "Type 2 diabetes with recurrent foot ulcer.",
+      ros: ["Skin: active plantar ulcer with limited drainage.", "Constitutional: no fever."],
+      exam: [
+        { system: "Skin", text: "Plantar ulcer with clean base; no spreading cellulitis." },
+        { system: "Neurologic", text: "Protective sensation is reduced." }
+      ]
+    };
+  }
   if (diabetesText && !text.includes("macular") && !text.includes("retinopathy") && !text.includes("eye")) {
     return {
       hpi: "Home glucose logs remain above goal with several fasting readings in the 160-190 mg/dL range. Patient reports taking metformin consistently but occasionally misses evening insulin.",
@@ -372,7 +428,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
       hpi: "Blood pressure readings were reviewed. Patient reports taking lisinopril but does not bring a home log.",
       plan: "Blood pressure 128/78 in office. Continue lisinopril, reinforce low-sodium diet, and ask patient to bring home BP readings to next visit.",
       weakMention: "Essential hypertension appears on the active problem list.",
-      labResults: [{ component: "Blood Pressure", value: "128/78", unit: "mmHg", referenceRange: "<130/80", flag: "normal" }],
+      labResults: [],
       medication: { name: "Lisinopril", dose: "20 mg", route: "PO", frequency: "daily", prescriber: "" },
       pmh: "Essential hypertension."
     };

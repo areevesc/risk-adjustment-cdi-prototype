@@ -165,7 +165,7 @@ describe("ReviewPage evidence navigation", () => {
     expect(conditionCard).toHaveClass("active-condition");
   });
 
-  it("opens the sibling chart when a same-HCC evidence action targets another review", async () => {
+  it("shows an official hierarchy lock without attaching unrelated sibling evidence", async () => {
     localStorage.setItem(
       storageKey,
       JSON.stringify({
@@ -176,7 +176,6 @@ describe("ReviewPage evidence navigation", () => {
       })
     );
 
-    const user = userEvent.setup();
     render(
       <AppStateProvider>
         <MemoryRouter initialEntries={["/review/rev-111"]}>
@@ -187,12 +186,8 @@ describe("ReviewPage evidence navigation", () => {
       </AppStateProvider>
     );
 
-    expect(await screen.findByText("Chronic diastolic heart failure")).toBeInTheDocument();
-    const crossReviewEvidence = await screen.findByRole("button", { name: /current-year MEAT support for Acute-on-chronic diastolic heart failure/i });
-    await user.click(crossReviewEvidence);
-
-    expect(await screen.findByText("I50.33")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Evidence 1 of 1"));
-    expect(screen.getByText(/Exertional dyspnea and intermittent ankle edema remain stable/).closest("mark")).not.toBeNull();
+    expect(await screen.findByText("Chronic diastolic (congestive) heart failure")).toBeInTheDocument();
+    expect(await screen.findByText(/HCC226 locked by captured HCC224/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Assessment with plan - Assessment and Plan treatment sentence/i })).not.toBeInTheDocument();
   });
 });

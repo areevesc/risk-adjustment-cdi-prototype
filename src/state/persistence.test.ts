@@ -160,4 +160,30 @@ describe("persisted clinical-content migration", () => {
     expect(migratePersistedState(migrated)).toEqual(migrated);
     expect(migrated.data.reviews.filter((item) => item.id === persistedReview.id)).toHaveLength(1);
   });
+
+  it("migrates revision 3 generated rows to V28 metadata and COMMUNITY_NA demographics", () => {
+    const legacy = appendGeneratedChartForAssignee(structuredClone(demoSeedData), "u-coder-1", 2026);
+    const generatedPatient = legacy.patients.find((item) => item.id.startsWith("gen-pat-"))!;
+    const generatedCondition = legacy.conditions.find((item) => item.id.startsWith("gen-cond-") && item.icd10 === "E11.22")!;
+    (generatedPatient as Partial<typeof generatedPatient>).riskProfile = undefined;
+    generatedPatient.demographicRaf = 99;
+    generatedCondition.description = "Stale generated description";
+    generatedCondition.hcc = "HCC 328";
+    generatedCondition.raf = 99;
+    generatedCondition.trumpedByCode = "STALE";
+
+    const migrated = migratePersistedState({ contentRevision: 3, currentUserId: "u-coder-1", settings, data: legacy });
+    const patient = migrated.data.patients.find((item) => item.id === generatedPatient.id)!;
+    const condition = migrated.data.conditions.find((item) => item.id === generatedCondition.id)!;
+
+    expect(patient.riskProfile).toMatchObject({ segment: "COMMUNITY_NA", originallyDisabled: false });
+    expect(patient.demographicRaf).not.toBe(99);
+    expect(condition).toMatchObject({
+      description: "Type 2 diabetes mellitus with diabetic chronic kidney disease",
+      program: "risk-adjustment",
+      hcc: "HCC 37",
+      raf: 0.166,
+      trumpedByCode: undefined
+    });
+  });
 });

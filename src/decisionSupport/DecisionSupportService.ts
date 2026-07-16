@@ -1,4 +1,6 @@
 import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
+import { getConditionHccs, getConditionHierarchySuppression, isRiskAdjustmentCondition } from "../domain/conditionRisk";
+import type { CmsV28Hcc } from "../domain/cmsV28";
 
 export interface DecisionSupportService {
   getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined;
@@ -181,6 +183,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
   }
 
   private getBaseRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
+    if (!isRiskAdjustmentCondition(condition)) return undefined;
     if (condition.seededRecommendation) return condition.seededRecommendation;
     const claim = data.claims.find((item) => item.reviewId === review.id);
     const riskEligibleSource =
@@ -214,12 +217,10 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     if (hierarchy.applies) {
       return {
         action: "Change",
-        confidence: hierarchy.capturedReplacement ? "High" : "Medium",
+        confidence: "High",
         source: "rules",
-        replacementCode: condition.trumpedByCode,
-        rationale: hierarchy.capturedReplacement
-          ? `${condition.trumpedByCode} is already represented for this patient/calendar year. Direct lower-code capture is suppressed; keep the diagnosis visible and use the replacement context if action is needed.`
-          : `Prototype hierarchy maps this lower opportunity to ${condition.trumpedByCode}. Direct capture is suppressed so the higher or more specific code can be reviewed instead.`
+        replacementCode: hierarchy.replacementCode,
+        rationale: hierarchy.reason
       };
     }
 
@@ -230,16 +231,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
         confidence: "High",
         source: "rules",
         rationale: contextualExclusion.reason
-      };
-    }
-
-    if (condition.trumpedByCode) {
-      return {
-        action: "Change",
-        confidence: "Medium",
-        source: "rules",
-        replacementCode: condition.trumpedByCode,
-        rationale: "Synthetic trumping logic found a more specific or dominant code for the same condition family."
       };
     }
 
@@ -357,7 +348,12 @@ function clampThreshold(value: number | undefined) {
 
 function getSamePatientYearHccConditions(data: SeedData, review: PatientReview, hcc: string) {
   const patientYearReviewIds = new Set(data.reviews.filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear).map((item) => item.id));
-  return data.conditions.filter((condition) => patientYearReviewIds.has(condition.reviewId) && condition.hcc === hcc);
+  const patient = data.patients.find((item) => item.id === review.patientId);
+  const requested = new Set<CmsV28Hcc>();
+  for (const match of hcc.matchAll(/HCC\s*(\d+)/gi)) requested.add(`HCC${match[1]}` as CmsV28Hcc);
+  return data.conditions.filter(
+    (condition) => patientYearReviewIds.has(condition.reviewId) && getConditionHccs(condition, patient).some((conditionHcc) => requested.has(conditionHcc))
+  );
 }
 
 function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {
@@ -375,40 +371,35 @@ function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {
 }
 
 function evaluateHierarchySuppression(condition: Condition, review: PatientReview, data: SeedData) {
-  const disabledActions = getDirectCaptureActionsForWorkflow(condition);
-  if (!condition.trumpedByCode || disabledActions.length === 0) {
-    return { applies: false, disabledActions: [] as RecommendationAction[], evidenceIds: [] as string[], reason: "", warning: "", capturedReplacement: false };
-  }
-  const replacement = getReplacementCondition(condition, review, data);
-  const capturedReplacement = Boolean(
-    replacement &&
-      (replacement.hasCurrentYearCapture ||
-        replacement.disposition?.action === "Validate" ||
-        replacement.disposition?.action === "Add to Claim" ||
-        replacement.disposition?.action === "Yes")
-  );
-  if (!capturedReplacement) {
+  const disabledActions = getAllActionsForWorkflow(condition);
+  const state = getConditionHierarchySuppression(condition, review, data);
+  if (!state.fullySuppressed || disabledActions.length === 0) {
     return {
       applies: false,
       disabledActions: [] as RecommendationAction[],
-      evidenceIds: [...condition.evidenceIds, ...(replacement?.evidenceIds ?? [])],
+      evidenceIds: state.suppressedHccs.flatMap(({ capturedCondition }) => capturedCondition.evidenceIds),
       reason: "",
-      warning: `Change is recommended because prototype specificity logic suggests ${condition.trumpedByCode}, but direct capture is not hard-disabled unless that code is already captured or the displayed ICD-10 is definitively invalid.`,
-      capturedReplacement
+      warning: state.suppressedHccs.length
+        ? `${state.suppressedHccs.map(({ lower, higher }) => `${lower} is suppressed by ${higher}`).join("; ")}. This multi-HCC diagnosis remains actionable because at least one mapped HCC is still active.`
+        : "",
+      replacementCode: undefined
     };
   }
+  const suppression = state.suppressedHccs[0];
+  const disposition = suppression.capturedCondition.disposition!;
+  const user = data.users.find((candidate) => candidate.id === disposition.userId);
   return {
     applies: true,
     disabledActions,
-    evidenceIds: [...condition.evidenceIds, ...(replacement?.evidenceIds ?? [])],
-    reason: `Direct capture is unavailable because ${condition.trumpedByCode} is already captured or validated for this patient/calendar year.`,
+    evidenceIds: [...condition.evidenceIds, ...suppression.capturedCondition.evidenceIds],
+    reason: `${suppression.lower} remains visible but direct capture is locked because ${suppression.higher} was captured through ${suppression.capturedCondition.icd10} by ${user?.name ?? "a CDI/coder"} using ${disposition.action} on ${disposition.decidedAt}.`,
     warning: "",
-    capturedReplacement
+    replacementCode: suppression.capturedCondition.icd10
   };
 }
 
 function evaluateContextualExclusion(condition: Condition) {
-  if (!condition.sdohCode && !condition.qualityExclusionCode) {
+  if (!condition.sdohCode) {
     return {
       applies: false,
       ruleId: "condition-action-rules",
@@ -419,8 +410,8 @@ function evaluateContextualExclusion(condition: Condition) {
       hardRestriction: false
     };
   }
-  const ruleId = condition.qualityExclusionCode ? "quality-exclusion-suppression" : "sdoh-context-suppression";
-  const label = condition.qualityExclusionCode ? "quality-exclusion" : "SDoH";
+  const ruleId = "sdoh-context-suppression";
+  const label = "SDoH";
   const recommendedAction: RecommendationAction = condition.workflow === "codesOnClaim" ? "Delete" : condition.workflow === "prospective" ? "No" : "Disagree";
   const hardRestriction = condition.trustedCodeMetadata === true;
   return {
@@ -443,17 +434,11 @@ function getCaptureActionsForWorkflow(condition: Condition): RecommendationActio
   return [];
 }
 
-function getDirectCaptureActionsForWorkflow(condition: Condition): RecommendationAction[] {
-  if (condition.workflow === "codesOnClaim") return ["Validate"];
-  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim"];
-  if (condition.workflow === "prospective") return ["Yes"];
+function getAllActionsForWorkflow(condition: Condition): RecommendationAction[] {
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"];
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"];
+  if (condition.workflow === "prospective") return ["Yes", "No", "Change"];
   return [];
-}
-
-function getReplacementCondition(condition: Condition, review: PatientReview, data: SeedData) {
-  if (!condition.trumpedByCode) return undefined;
-  const patientYearReviewIds = new Set(data.reviews.filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear).map((item) => item.id));
-  return data.conditions.find((item) => patientYearReviewIds.has(item.reviewId) && item.icd10 === condition.trumpedByCode);
 }
 
 function evaluateThreeYearLookbackRecapture(condition: Condition, review: PatientReview, data: SeedData) {
@@ -470,7 +455,14 @@ function evaluateThreeYearLookbackRecapture(condition: Condition, review: Patien
   if (condition.hasCurrentYearCapture) {
     condition.evidenceIds.filter((id) => isCurrentYearEvidence(id, review, data)).forEach((id) => currentCaptureEvidenceIds.add(id));
   }
-  const hasCurrentYearCapture = condition.hasCurrentYearCapture || currentCaptureEvidenceIds.size > 0;
+  const hasHumanCurrentYearCapture = getSamePatientYearHccConditions(data, review, condition.hcc).some(
+    (item) =>
+      item.id !== condition.id &&
+      item.currentYear &&
+      item.disposition !== undefined &&
+      ["Validate", "Add to Claim", "Change"].includes(item.disposition.action)
+  );
+  const hasCurrentYearCapture = condition.hasCurrentYearCapture || hasHumanCurrentYearCapture || currentCaptureEvidenceIds.size > 0;
   const lookbackEvidence = getLookbackEvidence(condition, review, data);
   return {
     qualifies: lookbackEvidence.length > 0 && !hasCurrentYearCapture,
@@ -503,7 +495,7 @@ function getLookbackEvidence(condition: Condition, review: PatientReview, data: 
 }
 
 function getCurrentYearCaptureEvidenceIds(condition: Condition, review: PatientReview, data: SeedData) {
-  const captureActions = new Set(["Validate", "Add to Claim", "Yes", "Change"]);
+  const captureActions = new Set(["Validate", "Add to Claim", "Change"]);
   const evidenceIds = new Set<string>();
   getSamePatientYearHccConditions(data, review, condition.hcc)
     .filter((item) => item.id !== condition.id && item.currentYear)
