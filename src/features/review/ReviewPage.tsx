@@ -1,6 +1,6 @@
-import { Fragment, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -98,6 +98,7 @@ export function ReviewPage() {
   const { reviewId } = useParams();
   const { data, currentUser, settings, actions } = useAppState();
   const navigate = useNavigate();
+  const location = useLocation();
   const review = data.reviews.find((item) => item.id === reviewId);
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("encounters");
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | undefined>();
@@ -111,6 +112,19 @@ export function ReviewPage() {
   const [nextPatientMessage, setNextPatientMessage] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [deleteSafetyCondition, setDeleteSafetyCondition] = useState<Condition | null>(null);
+
+  useEffect(() => {
+    const requestedEvidenceId = (location.state as { evidenceId?: string } | null)?.evidenceId;
+    const requestedEvidence = requestedEvidenceId
+      ? data.evidence.find((evidence) => evidence.id === requestedEvidenceId && evidence.reviewId === reviewId)
+      : undefined;
+    const requestedConditionId = requestedEvidence?.conditionIds.find((conditionId) =>
+      data.conditions.some((condition) => condition.id === conditionId && condition.reviewId === reviewId)
+    );
+    setActiveChartTab(requestedEvidence?.chartAnchor?.tab ?? "encounters");
+    setSelectedEvidenceId(requestedEvidence?.id);
+    setActiveConditionId(requestedConditionId);
+  }, [reviewId]);
 
   const maps = useMemo(
     () => ({
@@ -147,7 +161,8 @@ export function ReviewPage() {
   );
   const documents = data.documents.filter((document) => relatedReviewIds.has(document.reviewId));
   const relatedEvidence = data.evidence.filter((item) => relatedReviewIds.has(item.reviewId));
-  const activeEvidence = getActiveConditionEvidence(data, relatedEvidence, activeConditionId);
+  const navigableEvidence = relatedEvidence.filter((item) => item.reviewId === activeReview.id && item.conditionIds.length > 0);
+  const activeEvidence = getActiveConditionEvidence(data, navigableEvidence, activeConditionId);
   const chart = data.charts.find((item) => item.reviewId === activeReview.id);
   const editable = canEditReview(activeReview, currentUser);
   const presentedSummary = getPresentedOpportunitySummary(data, activeReview);
@@ -159,18 +174,18 @@ export function ReviewPage() {
   const canRelease = canReleaseReviewLock(activeReview, currentUser);
   const canUseProspectiveActions = isPrototypeCurrentYear(activeReview, settings);
   const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while being edited by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
+  const selectedEvidenceIndex = selectedEvidenceId ? activeEvidence.findIndex((item) => item.id === selectedEvidenceId) : -1;
 
   function jumpToEvidence(evidence: EvidencePassage) {
-    if (evidence.conditionIds.length) setActiveConditionId(evidence.conditionIds[0]);
+    if (evidence.reviewId !== activeReview.id) {
+      navigate(`/review/${evidence.reviewId}`, { state: { evidenceId: evidence.id } });
+      return;
+    }
+    if (evidence.conditionIds.length) {
+      setActiveConditionId((current) => (current && evidence.conditionIds.includes(current) ? current : evidence.conditionIds[0]));
+    }
     setSelectedEvidenceId(evidence.id);
     if (evidence.chartAnchor) setActiveChartTab(evidence.chartAnchor.tab);
-    window.setTimeout(() => {
-      const target = evidence.chartAnchor
-        ? document.getElementById(chartElementId(evidence.chartAnchor.tab, evidence.chartAnchor.itemId, evidence.chartAnchor.sectionId)) ??
-          document.getElementById(`span-${evidence.id}`)
-        : document.getElementById(`span-${evidence.id}`) ?? document.getElementById(evidence.anchorId);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 30);
   }
 
   function stepEvidence(direction: "prev" | "next") {
@@ -181,6 +196,7 @@ export function ReviewPage() {
   function clearReviewLocalState() {
     setActiveChartTab("encounters");
     setSelectedEvidenceId(undefined);
+    setActiveConditionId(undefined);
     setCompletionWarnings([]);
     setNextPatientMessage("");
   }
@@ -416,11 +432,16 @@ export function ReviewPage() {
           title="Patient Chart & Evidence"
           actions={
             <div className="header-actions">
-              <Button variant="secondary" onClick={() => stepEvidence("prev")}>
+              <span role="status" aria-live="polite" aria-atomic="true">
+                <StatusChip tone={activeEvidence.length ? "info" : undefined}>
+                  Evidence {selectedEvidenceIndex >= 0 ? selectedEvidenceIndex + 1 : 0} of {activeEvidence.length}
+                </StatusChip>
+              </span>
+              <Button variant="secondary" disabled={activeEvidence.length === 0} onClick={() => stepEvidence("prev")}>
                 <ArrowLeft size={15} />
                 Previous Evidence
               </Button>
-              <Button variant="secondary" onClick={() => stepEvidence("next")}>
+              <Button variant="secondary" disabled={activeEvidence.length === 0} onClick={() => stepEvidence("next")}>
                 Next Evidence
                 <ArrowRight size={15} />
               </Button>
@@ -593,6 +614,29 @@ function withExpandedItem(current: Set<string>, itemId: string, open: boolean) {
   return next;
 }
 
+function scrollToRenderedTarget(root: HTMLElement, resolveTarget: () => HTMLElement | null) {
+  let observer: MutationObserver | undefined;
+  let timeoutId: number | undefined;
+
+  const cleanup = () => {
+    observer?.disconnect();
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  };
+  const scrollIfReady = () => {
+    const target = resolveTarget();
+    if (!target || target.closest("details:not([open])")) return false;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    cleanup();
+    return true;
+  };
+
+  if (scrollIfReady()) return cleanup;
+  observer = new MutationObserver(scrollIfReady);
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
+  timeoutId = window.setTimeout(cleanup, 500);
+  return cleanup;
+}
+
 function accordionParentForEvidence(chart: ClinicalChart, evidenceId: string, passage?: EvidencePassage) {
   const tab = passage?.chartAnchor?.tab;
   if (tab === "encounters") {
@@ -672,6 +716,7 @@ function ChartViewer({
   activeConditionId?: string;
   setActiveTab: (tab: ChartTab) => void;
 }) {
+  const chartViewerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [focusedSearchResult, setFocusedSearchResult] = useState<ChartSearchResult | null>(null);
   const [openEncounterIds, setOpenEncounterIds] = useState<Set<string>>(() => new Set());
@@ -726,15 +771,20 @@ function ChartViewer({
   useEffect(() => {
     if (!selectedEvidenceId) return;
     const passage = evidenceMap.get(selectedEvidenceId);
-    if (!passage?.chartAnchor) return;
-    const parentId = accordionParentForEvidence(chart, selectedEvidenceId, passage);
-    if (parentId) setAccordionOpen(passage.chartAnchor.tab, parentId, true);
+    const root = chartViewerRef.current;
+    if (!passage || !root) return;
+    if (passage.chartAnchor) {
+      const parentId = accordionParentForEvidence(chart, selectedEvidenceId, passage);
+      if (parentId) setAccordionOpen(passage.chartAnchor.tab, parentId, true);
+    }
     const targetId = targetForEvidence(chart, selectedEvidenceId, passage);
-    window.setTimeout(() => {
-      const target = document.getElementById(`span-${selectedEvidenceId}`) ?? (targetId ? document.getElementById(targetId) : null);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
-  }, [chart, evidenceMap, selectedEvidenceId]);
+    return scrollToRenderedTarget(root, () => {
+      const target = document.getElementById(`span-${selectedEvidenceId}`) ??
+        (targetId ? document.getElementById(targetId) : null) ??
+        document.getElementById(passage.anchorId);
+      return target instanceof HTMLElement && root.contains(target) ? target : null;
+    });
+  }, [activeTab, chart, evidenceMap, selectedEvidenceId]);
 
   const isFocused = (tab: ChartTab, itemId: string, sectionId?: string) =>
     focusedSearchResult?.tab === tab &&
@@ -756,7 +806,7 @@ function ChartViewer({
   }
 
   return (
-    <div className="chart-viewer">
+    <div ref={chartViewerRef} className="chart-viewer">
       <section className="chart-search-card" aria-label="Chart search">
         <div className="chart-search-copy">
           <span>Chart Search</span>

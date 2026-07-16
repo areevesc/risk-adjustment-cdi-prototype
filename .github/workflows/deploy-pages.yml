@@ -36,6 +36,9 @@ jobs:
         env:
           GITHUB_PAGES: "true"
 
+      - name: Write deployment version manifest
+        run: node scripts/write-build-info.mjs
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

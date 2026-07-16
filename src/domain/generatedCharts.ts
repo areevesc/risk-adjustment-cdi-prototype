@@ -42,14 +42,45 @@ interface ScenarioCondition {
   category: Category;
   subtype?: "recapture" | "suspect";
   claimStatus: Condition["claimStatus"];
-  support: string;
-  plan: string;
+  supportPhrases: readonly string[];
+  planPhrases: readonly string[];
   problemStatus?: ChartProblem["status"];
   medication: ChartMedication;
   labResults: ChartLabPanel["results"];
   imaging: Omit<ChartImagingReport, "id" | "date" | "evidenceIds">;
   specialist: Omit<ChartSpecialistNote, "id" | "date" | "evidenceIds">;
 }
+
+interface GeneratedConditionFacts extends Omit<ScenarioCondition, "supportPhrases" | "planPhrases"> {
+  support: string;
+  plan: string;
+}
+
+interface GeneratedClinicalFacts {
+  ordinal: number;
+  scenarioKey: string;
+  patientName: string;
+  dob: string;
+  demographicRaf: number;
+  hasVisit: boolean;
+  visitDate: string;
+  noteDate: string;
+  labDate: string;
+  priorDate: string;
+  pmh: string[];
+  vitals: Omit<ChartVital, "id" | "date" | "evidenceIds">;
+  conditions: GeneratedConditionFacts[];
+  clinic: SeedData["clinics"][number];
+  provider: SeedData["providers"][number];
+  payer: SeedData["payers"][number];
+}
+
+export interface GeneratedChartContext {
+  completedReviewId: string;
+  contentRevision: number;
+}
+
+export const GENERATED_CHART_CONTENT_REVISION = 1;
 
 const generatedNames = [
   ["Alicia", "Moreno"],
@@ -76,9 +107,17 @@ const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: stri
         raf: 0.299,
         category: "potentialAddition",
         claimStatus: "Not on claim",
-        support: "Home glucose readings are mostly 150-190 mg/dL with two missed evening insulin doses last week. Renal labs were reviewed and patient denies dysuria, flank pain, or NSAID use.",
-        plan: "Continue renal-dose medication review, repeat microalbumin in 3 months, reinforce sick-day guidance, and monitor diabetic kidney disease.",
-        medication: { id: "", name: "Metformin ER", dose: "500 mg", frequency: "daily", route: "PO", prescriber: "", evidenceIds: [] },
+        supportPhrases: [
+          "Home glucose readings are mostly 150-190 mg/dL with two missed evening insulin doses last week. Renal labs were reviewed and patient denies dysuria, flank pain, or NSAID use.",
+          "Glucose logs remain above goal, usually 145-185 mg/dL. The patient missed several evening insulin doses, and the recent renal panel and urine albumin results were reviewed.",
+          "The patient reports fasting glucose values in the 150s with occasional evening readings near 190. Medication adherence and kidney function trends were discussed."
+        ],
+        planPhrases: [
+          "Continue renal-dose medication review, repeat urine microalbumin in 3 months, reinforce sick-day guidance, and monitor diabetic kidney disease.",
+          "Continue the current diabetes regimen with renal dosing, repeat A1c and urine albumin in 3 months, and avoid NSAIDs.",
+          "Reinforce insulin adherence, continue renal-protective therapy, and repeat A1c, creatinine, and urine albumin before the next visit."
+        ],
+        medication: { id: "", name: "Insulin glargine", dose: "18 units", frequency: "nightly", route: "Subcutaneous", prescriber: "", evidenceIds: [] },
         labResults: [
           { id: "", component: "HbA1c", value: "8.4", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal", evidenceIds: [] },
           { id: "", component: "Estimated GFR", value: "41", unit: "mL/min", referenceRange: ">60", flag: "abnormal", evidenceIds: [] },
@@ -107,8 +146,16 @@ const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: stri
         category: "prospective",
         subtype: "recapture",
         claimStatus: "Historical",
-        support: "Patient reports mild dyspnea with stairs and intermittent ankle edema that improves when furosemide is taken consistently. No chest pain or syncope today.",
-        plan: "HFpEF history noted from cardiology records. Current primary care visit documents edema history and medication reconciliation, but no current diagnosis-specific heart failure assessment or diuretic adjustment was completed today.",
+        supportPhrases: [
+          "Patient reports mild dyspnea with stairs and intermittent ankle edema that improves when furosemide is taken consistently. No chest pain or syncope today.",
+          "Ankle swelling occurs late in the day and improves with elevation and regular furosemide use. The patient denies chest pressure, orthopnea, or syncope.",
+          "The patient notes shortness of breath on stairs but no symptoms at rest. Weight has been stable and lower-extremity edema remains intermittent."
+        ],
+        planPhrases: [
+          "HFpEF remains listed in outside cardiology records. Request the current cardiology note and reconcile the diagnosis and medication list at follow-up.",
+          "Outside cardiology records list HFpEF. No condition-specific medication change was made today; updated cardiology records were requested.",
+          "History of HFpEF is noted in prior cardiology records. Confirm interval status when the updated specialist note is received."
+        ],
         medication: { id: "", name: "Furosemide", dose: "40 mg", frequency: "daily", route: "PO", prescriber: "", evidenceIds: [] },
         labResults: [{ id: "", component: "BNP", value: "412", unit: "pg/mL", referenceRange: "<100", flag: "abnormal", evidenceIds: [] }],
         imaging: {
@@ -122,7 +169,7 @@ const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: stri
           provider: "Caleb Morris, MD",
           title: "Cardiology interval note",
           note: "Chronic diastolic heart failure is stable with intermittent edema responsive to diuretic titration.",
-          assessment: ["HFpEF, chronic", "Continue carvedilol and furosemide"]
+          assessment: ["HFpEF, chronic", "Continue the current heart-failure regimen"]
         }
       }
     ]
@@ -141,8 +188,16 @@ const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: stri
         category: "prospective",
         subtype: "recapture",
         claimStatus: "Historical",
-        support: "Patient reports exertional dyspnea and uses albuterol several times weekly. No fever, hemoptysis, or increased sputum today; maintenance inhaler use was reviewed.",
-        plan: "COPD is listed in outside pulmonary records. Primary care medication list includes maintenance inhaler therapy, but active COPD severity and treatment plan should be confirmed during the upcoming visit.",
+        supportPhrases: [
+          "Patient reports exertional dyspnea and uses albuterol several times weekly. No fever, hemoptysis, or increased sputum today; maintenance inhaler use was reviewed.",
+          "Breathing is comfortable at rest, but the patient becomes winded walking uphill and uses the rescue inhaler three times most weeks. There has been no recent change in sputum.",
+          "The patient continues to have intermittent wheezing with activity. Daily inhaler technique and rescue-inhaler frequency were reviewed."
+        ],
+        planPhrases: [
+          "COPD remains listed in outside pulmonary records. Request the recent spirometry report and pulmonology note before the next chronic-care visit.",
+          "Maintenance inhalers remain on the medication list. Updated pulmonary records were requested for interval diagnosis and treatment history.",
+          "Prior pulmonary notes list COPD. Reconcile current inhaler use and pulmonary status when the updated specialist note is received."
+        ],
         medication: { id: "", name: "Tiotropium-olodaterol", dose: "2 inhalations", frequency: "daily", route: "Inhaled", prescriber: "", evidenceIds: [] },
         labResults: [{ id: "", component: "CO2", value: "31", unit: "mmol/L", referenceRange: "22-30", flag: "abnormal", evidenceIds: [] }],
         imaging: {
@@ -167,8 +222,16 @@ const scenarios: Array<{ key: string; conditions: ScenarioCondition[]; pmh: stri
         raf: 0.291,
         category: "potentialAddition",
         claimStatus: "Not on claim",
-        support: "Patient reports low mood, reduced motivation, poor sleep, and social withdrawal over the last two months. PHQ-9 score is 15 and she denies active suicidal ideation.",
-        plan: "Continue SSRI titration, safety plan reviewed, and follow up with integrated behavioral health in 4 weeks.",
+        supportPhrases: [
+          "Patient reports low mood, reduced motivation, poor sleep, and social withdrawal over the last two months. PHQ-9 score is 15 and the patient denies active suicidal ideation.",
+          "Mood and motivation remain low, with fragmented sleep and less interest in usual activities. PHQ-9 is 15; the patient denies suicidal intent or plan.",
+          "The patient describes persistent sadness, reduced energy, and difficulty sleeping. Safety questions were reviewed and there is no active suicidal ideation."
+        ],
+        planPhrases: [
+          "Continue SSRI titration, review the safety plan, and follow up with integrated behavioral health in 4 weeks.",
+          "Increase sertraline as discussed, continue counseling, and return in 4 weeks for symptom and medication review.",
+          "Continue sertraline and behavioral-health follow-up. The patient will use the reviewed crisis resources for any worsening safety concerns."
+        ],
         medication: { id: "", name: "Sertraline", dose: "100 mg", frequency: "daily", route: "PO", prescriber: "", evidenceIds: [] },
         labResults: [{ id: "", component: "TSH", value: "2.8", unit: "uIU/mL", referenceRange: "0.45-4.50", flag: "normal", evidenceIds: [] }],
         imaging: {
@@ -193,8 +256,108 @@ function section(id: string, text: string, evidenceIds: string[] = []) {
   return { id, text, evidenceIds };
 }
 
-function nextGeneratedIndex(data: SeedData) {
+function generatedReviewCount(data: SeedData) {
   return data.reviews.filter((review) => review.id.startsWith("gen-rev-")).length;
+}
+
+function nextGeneratedOrdinal(data: SeedData) {
+  return data.reviews.reduce((highest, review) => {
+    const match = /^gen-rev-(\d+)$/.exec(review.id);
+    return match ? Math.max(highest, Number(match[1])) : highest;
+  }, 0) + 1;
+}
+
+function hashSeed(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededRandom(seed: number) {
+  let state = seed || 0x6d2b79f5;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pick<T>(items: readonly T[], random: () => number): T {
+  return items[Math.floor(random() * items.length)];
+}
+
+function integerBetween(minimum: number, maximum: number, random: () => number) {
+  return minimum + Math.floor(random() * (maximum - minimum + 1));
+}
+
+function buildGeneratedClinicalFacts(
+  data: SeedData,
+  assignedUserId: string,
+  calendarYear: number,
+  context?: Partial<GeneratedChartContext>
+): GeneratedClinicalFacts {
+  const generationCount = generatedReviewCount(data);
+  const ordinal = nextGeneratedOrdinal(data);
+  const completedReviewId = context?.completedReviewId ?? `direct-generation-${generationCount}`;
+  const contentRevision = context?.contentRevision ?? GENERATED_CHART_CONTENT_REVISION;
+  const random = seededRandom(hashSeed(`${contentRevision}:${completedReviewId}:${generationCount}`));
+  const scenario = pick(scenarios, random);
+  const [firstName, lastName] = pick(generatedNames, random);
+  const assignedClinic = data.clinics.find((item) => item.defaultAssigneeId === assignedUserId);
+  const clinic = assignedClinic ?? pick(data.clinics, random);
+  const clinicProviders = data.providers.filter((item) => item.clinicId === clinic.id);
+  const provider = pick(clinicProviders.length > 0 ? clinicProviders : data.providers, random);
+  const payer = pick(data.payers, random);
+  const height = scenario.vitals.height;
+  const weight = scenario.vitals.weight + integerBetween(-6, 6, random);
+  const vitals = {
+    ...scenario.vitals,
+    systolic: scenario.vitals.systolic + integerBetween(-8, 8, random),
+    diastolic: scenario.vitals.diastolic + integerBetween(-4, 4, random),
+    heartRate: scenario.vitals.heartRate + integerBetween(-6, 6, random),
+    temperature: Number((scenario.vitals.temperature + integerBetween(-3, 3, random) / 10).toFixed(1)),
+    weight,
+    bmi: Number(((weight * 703) / (height * height)).toFixed(1)),
+    oxygenSaturation: scenario.vitals.oxygenSaturation + integerBetween(-1, 1, random)
+  };
+  const noteDay = integerBetween(11, 22, random);
+  const orderedConditions = [...scenario.conditions].sort((left, right) => Number(left.category === "prospective") - Number(right.category === "prospective"));
+  const conditions = orderedConditions.map((condition): GeneratedConditionFacts => {
+    const { supportPhrases, planPhrases, ...base } = condition;
+    return {
+      ...base,
+      support: pick(supportPhrases, random),
+      plan: pick(planPhrases, random),
+      medication: { ...base.medication, evidenceIds: [] },
+      labResults: base.labResults.map((result) => ({ ...result, evidenceIds: [] })),
+      imaging: { ...base.imaging, impression: [...base.imaging.impression] },
+      specialist: { ...base.specialist, assessment: [...base.specialist.assessment] }
+    };
+  });
+
+  return {
+    ordinal,
+    scenarioKey: scenario.key,
+    patientName: `${firstName} ${lastName}`,
+    dob: `${1940 + integerBetween(0, 16, random)}-${String(integerBetween(1, 12, random)).padStart(2, "0")}-${String(integerBetween(3, 25, random)).padStart(2, "0")}`,
+    demographicRaf: Number((0.31 + integerBetween(0, 18, random) / 100).toFixed(3)),
+    hasVisit: random() >= 0.25,
+    visitDate: `${calendarYear}-08-${String(integerBetween(8, 24, random)).padStart(2, "0")}`,
+    noteDate: `${calendarYear}-06-${String(noteDay).padStart(2, "0")}`,
+    labDate: `${calendarYear}-06-${String(noteDay - integerBetween(2, 7, random)).padStart(2, "0")}`,
+    priorDate: `${calendarYear - 1}-${String(integerBetween(8, 11, random)).padStart(2, "0")}-${String(integerBetween(10, 24, random)).padStart(2, "0")}`,
+    pmh: [...scenario.pmh],
+    vitals,
+    conditions,
+    clinic,
+    provider,
+    payer
+  };
 }
 
 function vital(id: string, date: string, base: Omit<ChartVital, "id" | "date" | "evidenceIds">, evidenceIds: string[]): ChartVital {
@@ -262,7 +425,10 @@ function generatedEvidenceStrength(category: Category, subtype: ScenarioConditio
   return "weakMentionOnly";
 }
 
-function generatedEvidenceMeta(scenarioCondition: ScenarioCondition, sourceType: EvidenceSourceType) {
+function generatedEvidenceMeta(
+  scenarioCondition: Pick<ScenarioCondition, "category" | "subtype" | "description">,
+  sourceType: EvidenceSourceType
+) {
   const evidenceStrength = generatedEvidenceStrength(scenarioCondition.category, scenarioCondition.subtype, sourceType);
   const sourceLocation = sourceLocationFor(sourceType);
   return {
@@ -289,30 +455,28 @@ function generatedEvidenceMeta(scenarioCondition: ScenarioCondition, sourceType:
   };
 }
 
-export function buildGeneratedChart(data: SeedData, assignedUserId: string, calendarYear: number): GeneratedChartBundle {
-  const index = nextGeneratedIndex(data);
-  const scenario = scenarios[index % scenarios.length];
-  const [first, last] = generatedNames[index % generatedNames.length];
-  const clinic = data.clinics.find((item) => item.defaultAssigneeId === assignedUserId) ?? data.clinics[index % data.clinics.length];
-  const provider = data.providers.find((item) => item.clinicId === clinic.id) ?? data.providers[index % data.providers.length];
-  const payer = data.payers[index % data.payers.length];
-  const patientId = `gen-pat-${String(index + 1).padStart(3, "0")}`;
-  const reviewId = `gen-rev-${String(index + 1).padStart(3, "0")}`;
-  const hasVisit = index % 4 !== 3;
-  const visitDate = `${calendarYear}-08-${String(8 + (index % 12)).padStart(2, "0")}`;
-  const noteDate = `${calendarYear}-06-18`;
-  const labDate = `${calendarYear}-06-10`;
-  const priorDate = `${calendarYear - 1}-10-20`;
-  const patientName = `${first} ${last}`;
+export function buildGeneratedChart(
+  data: SeedData,
+  assignedUserId: string,
+  calendarYear: number,
+  context?: Partial<GeneratedChartContext>
+): GeneratedChartBundle {
+  const facts = buildGeneratedClinicalFacts(data, assignedUserId, calendarYear, context);
+  const index = facts.ordinal - 1;
+  const idNumber = String(facts.ordinal).padStart(3, "0");
+  const scenario = { key: facts.scenarioKey, conditions: facts.conditions, pmh: facts.pmh, vitals: facts.vitals };
+  const { clinic, provider, payer, hasVisit, visitDate, noteDate, labDate, priorDate, patientName } = facts;
+  const patientId = `gen-pat-${idNumber}`;
+  const reviewId = `gen-rev-${idNumber}`;
   const patient: Patient = {
     id: patientId,
     name: patientName,
-    dob: `${1942 + (index % 12)}-${String((index % 9) + 1).padStart(2, "0")}-14`,
-    memberId: `${payer.id.slice(6, 8).toUpperCase()}-${820000 + index}`,
+    dob: facts.dob,
+    memberId: `${payer.id.slice(6, 8).toUpperCase()}-${820000 + facts.ordinal}`,
     payerId: payer.id,
-    demographicRaf: Number((0.33 + (index % 5) * 0.041).toFixed(3))
+    demographicRaf: facts.demographicRaf
   };
-  const conditionIds = scenario.conditions.map((condition) => `gen-cond-${String(index + 1).padStart(3, "0")}-${condition.suffix}`);
+  const conditionIds = scenario.conditions.map((condition) => `gen-cond-${idNumber}-${condition.suffix}`);
   const review: PatientReview = {
     id: reviewId,
     patientId,
@@ -323,12 +487,16 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
     status: "Available",
     queue: "CDI/Coder Queue",
     assignedUserId,
-    appointmentId: hasVisit ? `gen-appt-${String(index + 1).padStart(3, "0")}` : undefined,
+    appointmentId: hasVisit ? `gen-appt-${idNumber}` : undefined,
     conditionIds
   };
   const evidence = scenario.conditions.flatMap((scenarioCondition, conditionIndex): EvidencePassage[] => {
     const conditionId = conditionIds[conditionIndex];
-    const prefix = `gen-ev-${String(index + 1).padStart(3, "0")}-${scenarioCondition.suffix}`;
+    const prefix = `gen-ev-${idNumber}-${scenarioCondition.suffix}`;
+    const diagnosisOnCurrentClaim = conditionWorkflow(scenarioCondition.category) !== "codesNotOnClaim";
+    const currentClaimPhrase = diagnosisOnCurrentClaim
+      ? `claim listed ${scenarioCondition.icd10}`
+      : "claim submitted without this diagnosis";
     return [
       {
         id: `${prefix}-hpi`,
@@ -348,7 +516,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         id: `${prefix}-ap`,
         reviewId,
         documentId: `gen-doc-${reviewId}-progress`,
-        anchorId: `chart-${reviewId}-plan-${scenarioCondition.suffix}`,
+        anchorId: `chart-${reviewId}-encounter-current-ap`,
         text: scenarioCondition.plan,
         exactText: scenarioCondition.plan,
         date: noteDate,
@@ -362,7 +530,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         id: `${prefix}-lab`,
         reviewId,
         documentId: `gen-doc-${reviewId}-labs`,
-        anchorId: `chart-${reviewId}-lab-${scenarioCondition.suffix}-0`,
+        anchorId: `chart-${reviewId}-labs`,
         text: scenarioCondition.labResults.map((result) => `${result.component} ${result.value} ${result.unit}`.trim()).join("; "),
         exactText: scenarioCondition.labResults[0] ? `${scenarioCondition.labResults[0].component} ${scenarioCondition.labResults[0].value} ${scenarioCondition.labResults[0].unit}`.trim() : undefined,
         date: labDate,
@@ -376,15 +544,15 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
         id: `${prefix}-claim`,
         reviewId,
         documentId: `gen-doc-${reviewId}-chart`,
-        anchorId: `gen-claim-${reviewId}-${scenarioCondition.suffix}`,
+        anchorId: `chart-${reviewId}-claims`,
         text: scenarioCondition.category === "prospective"
           ? `${priorDate} ${provider.name} annual wellness claim listed ${scenarioCondition.icd10}.`
-          : `${noteDate} ${provider.name} office visit claim ${scenarioCondition.icd10 ? `listed ${scenarioCondition.icd10}` : "submitted without this diagnosis"}.`,
+          : `${noteDate} ${provider.name} office visit ${currentClaimPhrase}.`,
         date: scenarioCondition.category === "prospective" ? priorDate : noteDate,
         category: scenarioCondition.category,
         subtype: scenarioCondition.subtype,
         conditionIds: [conditionId],
-        exactText: scenarioCondition.category === "prospective" ? `claim listed ${scenarioCondition.icd10}` : `claim ${scenarioCondition.icd10 ? `listed ${scenarioCondition.icd10}` : "submitted without this diagnosis"}`,
+        exactText: scenarioCondition.category === "prospective" ? `claim listed ${scenarioCondition.icd10}` : currentClaimPhrase,
         ...generatedEvidenceMeta(scenarioCondition, "claimLine"),
         chartAnchor: { tab: "claims", itemId: `gen-claim-${reviewId}-${scenarioCondition.suffix}` }
       }
@@ -392,7 +560,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
   });
   const evidenceByCondition = new Map(conditionIds.map((id) => [id, evidence.filter((item) => item.conditionIds.includes(id)).map((item) => item.id)]));
   const chartVitals = [
-    vital(`chart-${reviewId}-vital-current`, noteDate, scenario.vitals, evidence.map((item) => item.id).filter((id) => id.endsWith("-hpi"))),
+    vital(`chart-${reviewId}-vital-current`, noteDate, scenario.vitals, []),
     vital(`chart-${reviewId}-vital-prior`, priorDate, { ...scenario.vitals, systolic: scenario.vitals.systolic + 6, heartRate: scenario.vitals.heartRate + 3 }, [])
   ];
   const assessmentPlan: ChartAssessmentPlanItem[] = scenario.conditions.map((scenarioCondition, conditionIndex) => {
@@ -464,7 +632,6 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
     }
   ];
   const problems: ChartProblem[] = scenario.conditions.map((scenarioCondition, conditionIndex) => {
-    const conditionId = conditionIds[conditionIndex];
     return {
       id: `chart-${reviewId}-problem-${scenarioCondition.suffix}`,
       diagnosis: scenarioCondition.description,
@@ -472,40 +639,38 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
       status: scenarioCondition.problemStatus ?? "Active",
       dateAdded: `${calendarYear - 2}-02-${String(10 + conditionIndex).padStart(2, "0")}`,
       isHcc: true,
-      evidenceIds: evidenceByCondition.get(conditionId)?.filter((id) => id.endsWith("-hpi")) ?? []
+      evidenceIds: []
     };
   });
-  const medications = scenario.conditions.map((scenarioCondition, conditionIndex): ChartMedication => {
-    const conditionId = conditionIds[conditionIndex];
+  const medications = scenario.conditions.map((scenarioCondition): ChartMedication => {
     return {
       ...scenarioCondition.medication,
       id: `chart-${reviewId}-med-${scenarioCondition.suffix}`,
       prescriber: provider.name,
-      evidenceIds: evidenceByCondition.get(conditionId)?.filter((id) => id.endsWith("-hpi")) ?? []
+      evidenceIds: []
     };
   });
   const imaging = scenario.conditions.map((scenarioCondition, conditionIndex): ChartImagingReport => {
-    const conditionId = conditionIds[conditionIndex];
     return {
       ...scenarioCondition.imaging,
       id: `chart-${reviewId}-image-${scenarioCondition.suffix}`,
       date: conditionIndex === 0 ? `${calendarYear}-05-30` : `${calendarYear}-04-19`,
-      evidenceIds: evidenceByCondition.get(conditionId)?.filter((id) => id.endsWith("-hpi")) ?? []
+      evidenceIds: []
     };
   });
   const specialistNotes = scenario.conditions.map((scenarioCondition, conditionIndex): ChartSpecialistNote => {
-    const conditionId = conditionIds[conditionIndex];
     return {
       ...scenarioCondition.specialist,
       id: `chart-${reviewId}-specialist-${scenarioCondition.suffix}`,
       date: conditionIndex === 0 ? `${calendarYear}-05-21` : `${calendarYear}-03-12`,
-      evidenceIds: evidenceByCondition.get(conditionId)?.filter((id) => id.endsWith("-hpi")) ?? []
+      evidenceIds: []
     };
   });
   const claims = scenario.conditions.map((scenarioCondition, conditionIndex): Claim => {
     const conditionId = conditionIds[conditionIndex];
     const workflow = conditionWorkflow(scenarioCondition.category);
     const currentYearClaim = workflow !== "prospective";
+    const claimEvidenceText = evidence.find((item) => item.conditionIds.includes(conditionId) && item.id.endsWith("-claim"))?.text;
     return {
       id: `gen-claim-${reviewId}-${scenarioCondition.suffix}`,
       reviewId,
@@ -514,9 +679,9 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
       cptCode: currentYearClaim ? "99214" : "G0439",
       encounterType: currentYearClaim ? "Established patient office visit" : "Annual wellness visit / historical capture",
       payer: payer.name,
-      supportSummary: currentYearClaim
+      supportSummary: claimEvidenceText ?? (currentYearClaim
         ? `${noteDate} office visit claim from ${provider.name}; ICD-10 codes: ${workflow === "codesNotOnClaim" ? "none for this condition" : scenarioCondition.icd10}.`
-        : `${priorDate} historical claim from ${provider.name}; ICD-10 codes: ${scenarioCondition.icd10}.`,
+        : `${priorDate} historical claim from ${provider.name}; ICD-10 codes: ${scenarioCondition.icd10}.`),
       riskEligible: true,
       cptSourceEligible: true,
       providerTypeEligible: true,
@@ -577,7 +742,7 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
       sections: [
         section(`chart-${reviewId}-problem-list`, problems.map((item) => `${item.diagnosis} ${item.code}`).join("; ")),
         section(`chart-${reviewId}-meds`, medications.map((item) => `${item.name} ${item.dose} ${item.frequency}`).join("; ")),
-        section(`chart-${reviewId}-claims`, claims.map((item) => `${item.dateOfService} ${item.provider} ${item.cptCode} ${item.icd10Codes.join(", ") || "No diagnosis on claim"}`).join("; "), evidence.filter((item) => item.id.endsWith("-claim")).map((item) => item.id))
+        section(`chart-${reviewId}-claims`, claims.map((item) => item.supportSummary ?? `${item.dateOfService} ${item.provider} ${item.cptCode}`).join("; "), evidence.filter((item) => item.id.endsWith("-claim")).map((item) => item.id))
       ]
     }
   ];
@@ -626,8 +791,13 @@ export function buildGeneratedChart(data: SeedData, assignedUserId: string, cale
   return { patient, review, documents, evidence, claims, chart, conditions, appointment };
 }
 
-export function appendGeneratedChartForAssignee(data: SeedData, assignedUserId: string, calendarYear: number): SeedData {
-  const bundle = buildGeneratedChart(data, assignedUserId, calendarYear);
+export function appendGeneratedChartForAssignee(
+  data: SeedData,
+  assignedUserId: string,
+  calendarYear: number,
+  context?: Partial<GeneratedChartContext>
+): SeedData {
+  const bundle = buildGeneratedChart(data, assignedUserId, calendarYear, context);
   return {
     ...data,
     patients: [...data.patients, bundle.patient],

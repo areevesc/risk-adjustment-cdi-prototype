@@ -4,6 +4,7 @@ export interface ClinicalConditionProfile {
   hpi: string;
   plan: string;
   weakMention: string;
+  currentVitals?: { weightPounds: number; heightInches: number };
   labResults: Omit<ChartLabResult, "id" | "evidenceIds">[];
   medication: Omit<ChartMedication, "id" | "evidenceIds">;
   imaging: Omit<ChartImagingReport, "id" | "date" | "evidenceIds">;
@@ -44,7 +45,7 @@ function defaultProfile(condition: Condition): ClinicalConditionProfile {
   return {
     hpi: "Patient returns for follow-up of chronic medical conditions. Medication list, interval symptoms, and outside-office updates were discussed with the patient.",
     plan: "Medication list reconciled. Continue current chronic medications, request outside records when needed, and schedule routine follow-up.",
-    weakMention: `${condition.description} appears on the active problem list without a diagnosis-specific assessment or management plan in this encounter.`,
+    weakMention: `${condition.description} remains on the medical history. Outside records were requested for reconciliation, and no medication changes were made today.`,
     labResults: defaultLabs,
     medication: { name: "Atorvastatin", dose: "40 mg", route: "PO", frequency: "nightly", prescriber: "" },
     imaging: {
@@ -57,8 +58,8 @@ function defaultProfile(condition: Condition): ClinicalConditionProfile {
       specialty: "External chart",
       provider: "Consulting Specialist",
       title: "External documentation note",
-      note: `${condition.description} appears in older outside records. The current primary care note does not include a diagnosis-specific assessment.`,
-      assessment: ["Historical diagnosis in outside records", "Current status not addressed in primary care note"]
+      note: `Older outside records list ${condition.description}. Interval status was not discussed at today's primary care visit.`,
+      assessment: ["Diagnosis listed in outside records", "Interval status pending record reconciliation"]
     },
     pmh: `${condition.description} in past medical history.`,
     ros: ["Constitutional: no fever or acute weight loss.", "Cardiovascular: no syncope.", "Respiratory: no acute distress."],
@@ -81,6 +82,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
       labResults: [
         { component: "HbA1c", value: "8.4", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" },
         { component: "Estimated GFR", value: "41", unit: "mL/min", referenceRange: ">60", flag: "abnormal" },
+        { component: "Creatinine", value: "1.42", unit: "mg/dL", referenceRange: "0.60-1.20", flag: "abnormal" },
         { component: "Urine Albumin/Creatinine Ratio", value: "186", unit: "mg/g", referenceRange: "<30", flag: "abnormal" }
       ],
       medication: { name: "Metformin ER", dose: "500 mg", route: "PO", frequency: "daily", prescriber: "" },
@@ -109,7 +111,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (diabetesText && (text.includes("neuropathy") || text.includes("polyneuropathy"))) {
     return {
       hpi: "Patient reports burning and numbness in both feet, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration.",
-      plan: "Diabetic neuropathy assessed today. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
+      plan: "Burning and numbness in both feet remain active. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
       weakMention: "Diabetic neuropathy appears on the problem list and in prior podiatry records.",
       labResults: [
         { component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" },
@@ -138,10 +140,10 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
       ]
     };
   }
-  if (diabetesText) {
+  if (diabetesText && !text.includes("macular") && !text.includes("retinopathy") && !text.includes("eye")) {
     return {
       hpi: "Home glucose logs remain above goal with several fasting readings in the 160-190 mg/dL range. Patient reports taking metformin consistently but occasionally misses evening insulin.",
-      plan: "Type 2 diabetes assessed with A1c 8.4%, above goal. Continue metformin ER 500 mg daily, increase basal insulin to 18 units nightly, review hypoglycemia precautions, repeat A1c in 3 months, and bring glucose log to follow-up.",
+      plan: "A1c is 8.4%, above goal. Continue metformin ER 500 mg daily, increase basal insulin to 18 units nightly, review hypoglycemia precautions, repeat A1c in 3 months, and bring glucose log to follow-up.",
       weakMention: "Type 2 diabetes appears on the active problem list without a complete management plan.",
       labResults: [
         { component: "HbA1c", value: "8.4", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" },
@@ -173,7 +175,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (text.includes("macular") || text.includes("eye")) {
     return {
       hpi: "Patient reports no acute vision loss today. Diabetes follow-up continues in primary care, and outside ophthalmology records were requested for interval retinal treatment history.",
-      plan: "Diabetes assessed today. Continue glucose management, request the most recent ophthalmology note, and defer retinal treatment decisions to ophthalmology.",
+      plan: "No acute visual change is reported today. Continue glucose management, request the most recent ophthalmology note, and defer retinal treatment decisions to ophthalmology.",
       weakMention: "Registry lists diabetic eye disease history without current primary care assessment.",
       labResults: [{ component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" }],
       medication: { name: "Insulin glargine", dose: "18 units", route: "SC", frequency: "nightly", prescriber: "" },
@@ -199,13 +201,16 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
     };
   }
   if (text.includes("chronic kidney") || text.includes("end stage renal") || text.includes("ckd")) {
+    const stage4 = text.includes("stage 4") || text.includes("n18.4");
+    const egfr = stage4 ? "24" : "38";
+    const creatinine = stage4 ? "2.31" : "1.56";
     return {
       hpi: "Renal function trend reviewed. Patient avoids NSAIDs and reports no urinary obstruction symptoms; medication dosing was reviewed against most recent eGFR.",
-      plan: "Chronic kidney disease assessed with eGFR 38, creatinine 1.56, and urine albumin/creatinine ratio 212 mg/g. Continue ACE inhibitor, avoid nephrotoxins, renal-dose medications, repeat BMP and urine microalbumin in 3 months, and continue nephrology co-management.",
+      plan: `eGFR ${egfr}, creatinine ${creatinine}, and urine albumin/creatinine ratio 212 mg/g reviewed. Continue ACE inhibitor, avoid nephrotoxins, renal-dose medications, repeat BMP and urine microalbumin in 3 months, and continue nephrology co-management.`,
       weakMention: "CKD appears on past medical history and problem list.",
       labResults: [
-        { component: "Estimated GFR", value: "38", unit: "mL/min", referenceRange: ">60", flag: "abnormal" },
-        { component: "Creatinine", value: "1.56", unit: "mg/dL", referenceRange: "0.60-1.20", flag: "abnormal" },
+        { component: "Estimated GFR", value: egfr, unit: "mL/min", referenceRange: ">60", flag: "abnormal" },
+        { component: "Creatinine", value: creatinine, unit: "mg/dL", referenceRange: "0.60-1.20", flag: "abnormal" },
         { component: "Urine Albumin/Creatinine Ratio", value: "212", unit: "mg/g", referenceRange: "<30", flag: "abnormal" }
       ],
       medication: { name: "Lisinopril", dose: "20 mg", route: "PO", frequency: "daily", prescriber: "" },
@@ -220,7 +225,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
         provider: "Renee Cole, MD",
         title: "Nephrology interval note",
         note: "CKD stage and albuminuria reviewed; renal-dose medications and avoidance of NSAIDs reinforced.",
-        assessment: ["Chronic kidney disease", "Continue renal monitoring"]
+        assessment: [stage4 ? "Chronic kidney disease, stage 4" : "Chronic kidney disease", "Continue renal monitoring"]
       },
       pmh: "Chronic kidney disease followed by nephrology.",
       ros: ["Genitourinary: no dysuria or flank pain.", "Constitutional: fatigue stable.", "Cardiovascular: edema reviewed."],
@@ -234,7 +239,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (text.includes("heart failure") || text.includes("hfpef") || text.includes("hfr")) {
     return {
       hpi: "Patient reports dyspnea on exertion and intermittent ankle edema. Daily weights fluctuate by 2 to 3 lb with higher sodium intake; no chest pain reported today.",
-      plan: "Heart failure assessed. Continue carvedilol and furosemide, reinforce sodium restriction and daily weights, check BMP/BNP, review echo, adjust diuretic for edema, and continue cardiology follow-up in 3 months.",
+      plan: "Exertional dyspnea and intermittent ankle edema remain stable. Continue carvedilol and furosemide, reinforce sodium restriction and daily weights, check BMP/BNP, review echo, adjust diuretic for edema, and continue cardiology follow-up in 3 months.",
       weakMention: "Heart failure appears in prior-year claim history and cardiology problem list.",
       labResults: [
         { component: "BNP", value: "412", unit: "pg/mL", referenceRange: "<100", flag: "abnormal" },
@@ -266,7 +271,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (text.includes("copd") || text.includes("obstructive pulmonary")) {
     return {
       hpi: "Patient reports chronic exertional dyspnea and uses albuterol several times weekly. No fever or hemoptysis; inhaler technique reviewed.",
-      plan: "COPD assessed. Continue LAMA/LABA maintenance inhaler, refill albuterol rescue inhaler, review inhaler technique, update pneumococcal/influenza vaccines, monitor oxygen saturation, and follow pulmonology if dyspnea worsens.",
+      plan: "Chronic exertional dyspnea is unchanged, with albuterol use several times weekly. Continue LAMA/LABA maintenance inhaler, refill albuterol rescue inhaler, review inhaler technique, update pneumococcal/influenza vaccines, monitor oxygen saturation, and follow pulmonology if dyspnea worsens.",
       weakMention: "COPD appears in prior-year pulmonary note and claims history.",
       labResults: [{ component: "CO2", value: "31", unit: "mmol/L", referenceRange: "22-30", flag: "abnormal" }],
       medication: { name: "Tiotropium-olodaterol", dose: "2 inhalations", route: "Inhaled", frequency: "daily", prescriber: "" },
@@ -295,7 +300,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (text.includes("depress") || text.includes("mdd")) {
     return {
       hpi: "Patient reports low mood, poor sleep, low motivation, and social withdrawal over the last two months. PHQ-9 score is 15; denies active suicidal ideation.",
-      plan: "Recurrent moderate major depression assessed. Increase sertraline to 100 mg daily, continue counseling, review safety plan and crisis resources, check TSH/B12/Vitamin D, and follow up with integrated behavioral health in 4 weeks.",
+      plan: "PHQ-9 is 15 with persistent low mood, poor sleep, and low motivation. Increase sertraline to 100 mg daily, continue counseling, review safety plan and crisis resources, check TSH/B12/Vitamin D, and follow up with integrated behavioral health in 4 weeks.",
       weakMention: "Depression appears in behavioral health history.",
       labResults: [
         { component: "PHQ-9", value: "15", unit: "score", referenceRange: "0-4 minimal", flag: "abnormal" },
@@ -325,12 +330,20 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
     };
   }
   if (text.includes("obesity") || text.includes("bmi")) {
+    const historicalOnlyMeasurement = Boolean(condition.conflictingEvidence || condition.resolvedFlag);
+    const weightPounds = historicalOnlyMeasurement ? 189 : 260;
+    const bmi = historicalOnlyMeasurement ? "31.4" : "43.3";
     return {
-      hpi: "Weight remains elevated with limited activity from knee pain and poor stamina. Nutrition adherence and medication tolerance reviewed.",
-      plan: "Morbid obesity assessed with BMI 43.2. Continue structured nutrition counseling, review activity plan, discuss GLP-1 therapy tolerance, screen for OSA complications, and follow weight trend in 8 weeks.",
-      weakMention: "Obesity appears in PMH and vitals show elevated BMI.",
+      hpi: historicalOnlyMeasurement
+        ? "Current weight is 189 lb at 65 in (BMI 31.4). The prior record listing morbid obesity was reviewed for reconciliation."
+        : "Weight remains elevated with limited activity from knee pain and poor stamina. Nutrition adherence and medication tolerance reviewed.",
+      plan: `BMI is ${bmi} today. Continue structured nutrition counseling, review activity plan, discuss medication tolerance, and follow the weight trend in 8 weeks.`,
+      weakMention: historicalOnlyMeasurement
+        ? "Prior records list morbid obesity; current measurements are 189 lb at 65 in (BMI 31.4)."
+        : "Obesity appears in PMH and vitals show elevated BMI.",
+      currentVitals: { weightPounds, heightInches: 65 },
       labResults: [
-        { component: "BMI", value: "43.2", unit: "kg/m2", referenceRange: "18.5-24.9", flag: "abnormal" },
+        { component: "BMI", value: bmi, unit: "kg/m2", referenceRange: "18.5-24.9", flag: "abnormal" },
         { component: "HbA1c", value: "7.8", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" }
       ],
       medication: { name: "Semaglutide", dose: "0.5 mg", route: "SC", frequency: "weekly", prescriber: "" },
@@ -472,11 +485,11 @@ export function assessmentPlanTextForCondition(condition: Condition) {
     return `${condition.description} is documented as resolved; no active medication, monitoring, or follow-up plan is continued for this diagnosis today.`;
   }
   if (condition.conflictingEvidence) {
-    return `${profile.weakMention} Current documentation contains conflicting status, so no active capture decision should be made from this note alone.`;
+    return `${profile.weakMention} Prior records list a different status; reconciliation with the outside source is pending.`;
   }
   if (!condition.hasSufficientMeat) {
     if (condition.hasClinicalIndicators || condition.hasOtherSupportingEvidence) {
-      return `Current visit includes interval symptom and medication review. ${condition.description} is not assessed with a diagnosis-specific treatment or monitoring plan today.`;
+      return `${condition.description}: interval symptoms and the medication list were reviewed. No disease-specific therapy was changed today.`;
     }
     return profile.weakMention;
   }

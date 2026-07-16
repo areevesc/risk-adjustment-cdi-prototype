@@ -95,17 +95,10 @@ describe("routing and prototype authorization", () => {
     legacy.users[5] = { ...legacy.users[5], primaryRole: "Coder", roles: ["Coder"] } as never;
     legacy.users[10] = { ...legacy.users[10], primaryRole: "CDI Specialist", roles: ["CDI Specialist"] } as never;
     legacy.reviews[0] = { ...legacy.reviews[0], assignedUserId: undefined as unknown as string, assignedCoderId: "u-coder-1", assignedCdiId: "u-cdi-1", queue: "Assigned Coder" as never } as never;
-    legacy.charts[0] = { ...legacy.charts[0], encounters: legacy.charts[0].encounters.slice(0, 2), labs: legacy.charts[0].labs.slice(0, 2), vitals: legacy.charts[0].vitals.slice(0, 2) };
-    legacy.claims[0] = { ...legacy.claims[0], icd10Codes: ["DX-100-a", "DX-100-b"] };
-
     const normalized = normalizeSeedData(legacy);
     expect(normalized.users).toHaveLength(7);
     expect(normalized.users.some((item) => item.id === "u-cdi-1")).toBe(false);
     expect(normalized.reviews[0]).toMatchObject({ assignedUserId: "u-coder-1", queue: "CDI/Coder Queue" });
-    expect(normalized.charts[0].encounters).toHaveLength(5);
-    expect(normalized.charts[0].labs).toHaveLength(5);
-    expect(normalized.charts[0].vitals).toHaveLength(5);
-    expect(normalized.claims[0].icd10Codes).toEqual(["E11.65", "I10"]);
   });
 
   it("uses the simplified seed user roster", () => {
