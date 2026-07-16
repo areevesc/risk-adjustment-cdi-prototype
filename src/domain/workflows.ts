@@ -34,7 +34,7 @@ import {
   isReviewLockOwner
 } from "./auth";
 import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions, getUpcomingAppointmentsForReview } from "./selectors";
-import { appendGeneratedChartForAssignee } from "./generatedCharts";
+import { appendGeneratedChartForAssignee, GENERATED_CHART_CONTENT_REVISION } from "./generatedCharts";
 
 function stamp() {
   return new Date().toISOString();
@@ -232,8 +232,11 @@ export function completeReview(data: SeedData, reviewId: string, user: User, set
 
   let next = updateReview(data, reviewId, (item) => ({ ...item, status: "Completed", lock: undefined, auditReturn: undefined }));
   next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have a user-selected disposition or deterministic rule-derived outcome." });
-  next = appendGeneratedChartForAssignee(next, review.assignedUserId, settings.prototypeCurrentYear);
-  next = addHistory(next, { reviewId, userId: user.id, event: "Queue refilled", detail: "A deterministic synthetic chart was appended to the CDI/Coder queue." });
+  next = appendGeneratedChartForAssignee(next, review.assignedUserId, settings.prototypeCurrentYear, {
+    completedReviewId: review.id,
+    contentRevision: GENERATED_CHART_CONTENT_REVISION
+  });
+  next = addHistory(next, { reviewId, userId: user.id, event: "Queue refilled", detail: "A seeded synthetic chart was appended to the CDI/Coder queue." });
   if (shouldSampleReviewForAudit(reviewId, settings.auditSampleRate)) {
     next = startAudit(next, reviewId, user, true, settings.auditSampleRate);
   }

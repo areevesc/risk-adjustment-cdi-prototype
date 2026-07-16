@@ -21,14 +21,15 @@ import {
 } from "../domain/workflows";
 import { getCurrentUser } from "../domain/selectors";
 import type { DisagreeReason, RecommendationMode } from "../domain/types";
+import {
+  CURRENT_CONTENT_REVISION,
+  refreshSeedClinicalBundles,
+  storedContentRevision,
+  type PersistedState,
+  type StoredPersistedState
+} from "./persistence";
 
 const storageKey = "risk-adjustment-cdi-prototype-state-v1";
-
-interface PersistedState {
-  currentUserId: string;
-  settings: AppSettings;
-  data: SeedData;
-}
 
 interface AppStateValue extends PersistedState {
   currentUser: User;
@@ -74,6 +75,7 @@ const defaultSettings: AppSettings = {
 };
 
 const initialState: PersistedState = {
+  contentRevision: CURRENT_CONTENT_REVISION,
   currentUserId: "u-coder-1",
   settings: defaultSettings,
   data: seedData
@@ -136,27 +138,11 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
   });
   const clinicById = new Map(clinics.map((clinic) => [clinic.id, clinic]));
   const users = seedData.users;
-  const rawCharts = raw.charts ?? [];
-  const rawClaims = raw.claims ?? [];
-  const seededChartByReviewId = new Map(seedData.charts.map((chart) => [chart.reviewId, chart]));
-  const seededClaimByReviewId = new Map(seedData.claims.map((claim) => [claim.reviewId, claim]));
-  const persistedChartReviewIds = new Set(rawCharts.map((chart) => chart.reviewId));
-  const persistedClaimReviewIds = new Set(rawClaims.map((claim) => claim.reviewId));
-  const charts = [
-    ...rawCharts.map((chart) => seededChartByReviewId.get(chart.reviewId) ?? chart),
-    ...seedData.charts.filter((chart) => !persistedChartReviewIds.has(chart.reviewId))
-  ];
-  const claims = [
-    ...rawClaims.map((claim) => seededClaimByReviewId.get(claim.reviewId) ?? claim),
-    ...seedData.claims.filter((claim) => !persistedClaimReviewIds.has(claim.reviewId))
-  ];
   return {
     ...raw,
     users,
     teams: raw.teams.map((team) => ({ ...team, managerId: normalizeUserId(team.managerId) ?? "u-manager-1" })),
     clinics: clinics.map((clinic) => ({ ...clinic, defaultAssigneeId: normalizeUserId(clinic.defaultAssigneeId) ?? "u-coder-1" })),
-    charts,
-    claims,
     reviews: raw.reviews.map((review) => {
       const legacyReview = review as typeof review & { assignedCoderId?: string; assignedCdiId?: string };
       const { assignedCoderId: _assignedCoderId, assignedCdiId: _assignedCdiId, ...currentReview } = legacyReview;
@@ -193,20 +179,36 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
   };
 }
 
+export function migratePersistedState(parsed: StoredPersistedState): PersistedState {
+  const previousRevision = storedContentRevision(parsed.contentRevision);
+  const mergedData = { ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] };
+  const refreshedData = previousRevision < CURRENT_CONTENT_REVISION ? refreshSeedClinicalBundles(mergedData, seedData) : mergedData;
+  const data = normalizeSeedData(refreshedData);
+  const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
+  return {
+    contentRevision: Math.max(previousRevision, CURRENT_CONTENT_REVISION),
+    currentUserId: currentUser.id,
+    settings: { ...defaultSettings, ...parsed.settings },
+    data
+  };
+}
+
+function persistState(state: PersistedState) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch {
+    // The prototype remains usable when storage is disabled or full.
+  }
+}
+
 function loadInitialState(): PersistedState {
   try {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return initialState;
-    const parsed = JSON.parse(raw) as PersistedState;
+    const parsed = JSON.parse(raw) as StoredPersistedState;
     if (!parsed.data?.reviews?.length) return initialState;
-    const data = normalizeSeedData({ ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] });
-    const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
-    const next = {
-      currentUserId: currentUser.id,
-      settings: { ...defaultSettings, ...parsed.settings },
-      data
-    };
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    const next = migratePersistedState(parsed);
+    persistState(next);
     return next;
   } catch {
     return initialState;
@@ -220,7 +222,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   function commit(next: PersistedState) {
     setState(next);
-    localStorage.setItem(storageKey, JSON.stringify(next));
+    persistState(next);
   }
 
   const currentUser = getCurrentUser(state.data, state.currentUserId);
