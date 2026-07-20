@@ -90,7 +90,7 @@ describe("persisted clinical-content migration", () => {
       draftRuleOutcome: {
         source: "rule-suppressed",
         action: "Add to Claim",
-        ruleId: "same-hcc-duplicate-add",
+        ruleId: "legacy-draft-rule",
         explanation: "Preserve this draft rule preview",
         createdAt: "2026-07-15T09:16:30.000Z"
       },
@@ -181,6 +181,35 @@ describe("persisted clinical-content migration", () => {
 
     expect(migratePersistedState(migrated)).toEqual(migrated);
     expect(migrated.data.reviews.filter((item) => item.id === persistedReview.id)).toHaveLength(1);
+  });
+
+  it("removes obsolete same-HCC addition locks while preserving reviewer drafts", () => {
+    const legacy = structuredClone(demoSeedData);
+    const unspecified = legacy.conditions.find((item) => item.id === "cond-100-d")!;
+    const specific = legacy.conditions.find((item) => item.id === "cond-100-e")!;
+    unspecified.draftDisposition = {
+      action: "Add to Claim",
+      userId: "u-coder-1",
+      stagedAt: "2026-07-20T10:00:00.000Z",
+      source: "user-selected"
+    };
+    specific.draftRuleOutcome = {
+      source: "rule-suppressed",
+      action: "Add to Claim",
+      ruleId: "same-hcc-duplicate-add",
+      explanation: "Obsolete same-HCC lock",
+      createdAt: "2026-07-20T10:00:01.000Z"
+    };
+    specific.disabledReason = "Obsolete same-HCC lock";
+
+    const migrated = migratePersistedState({ contentRevision: 9, currentUserId: "u-coder-1", settings, data: legacy });
+    const migratedUnspecified = migrated.data.conditions.find((item) => item.id === unspecified.id)!;
+    const migratedSpecific = migrated.data.conditions.find((item) => item.id === specific.id)!;
+
+    expect(migratedUnspecified.draftDisposition?.action).toBe("Add to Claim");
+    expect(migratedSpecific.draftRuleOutcome).toBeUndefined();
+    expect(migratedSpecific.ruleOutcome).toBeUndefined();
+    expect(migratedSpecific.disabledReason).toBeUndefined();
   });
 
   it("migrates revision 3 generated rows to V28 metadata and COMMUNITY_NA demographics", () => {

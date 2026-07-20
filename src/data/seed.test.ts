@@ -151,21 +151,23 @@ describe("seeded clinical content", () => {
     expect(angiopathyEvidence.length).toBeGreaterThan(0);
     expect(angiopathyEvidence).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: "ev-cond-100-f-hpi",
-        sourceType: "hpiSentence",
-        evidenceStrength: "clinicalIndicatorOnly",
-        chartAnchor: expect.objectContaining({ tab: "encounters", sectionId: "hpi" })
+        id: "ev-cond-100-f-abi",
+        sourceType: "imagingImpression",
+        evidenceStrength: "imagingIndicatorOnly",
+        chartAnchor: expect.objectContaining({ tab: "imaging", itemId: "chart-rev-100-imaging-abi", sectionId: "findings" })
       })
     ]));
-    expect(angiopathyText).toContain("peripheral angiopathy");
-    expect(angiopathyText).toContain("pedal pulses are diminished");
+    expect(angiopathyEvidence).toHaveLength(1);
+    expect(angiopathyText).toContain("right abi 0.78");
+    expect(angiopathyText).toContain("left abi 0.82");
+    expect(angiopathyText).not.toMatch(/payer data|hie|sdoh/);
     expect(angiopathyText).not.toMatch(/retina|macular|ophthalm/);
 
     const chart = demoSeedData.charts.find((item) => item.reviewId === "rev-100")!;
-    const currentEncounter = chart.encounters.find((item) => item.id === "chart-rev-100-encounter-current")!;
-    const angiopathyHpi = angiopathyEvidence.find((item) => item.id === "ev-cond-100-f-hpi")!;
-    expect(currentEncounter.hpi).toContain(angiopathyHpi.exactText);
-    expect(currentEncounter.sectionEvidenceIds?.hpi).toContain(angiopathyHpi.id);
+    const abiReport = chart.imaging.find((item) => item.id === "chart-rev-100-imaging-abi")!;
+    const angiopathyAbi = angiopathyEvidence.find((item) => item.id === "ev-cond-100-f-abi")!;
+    expect(abiReport.findings).toContain("Right ABI 0.78");
+    expect(abiReport.evidenceIds).toContain(angiopathyAbi.id);
 
     expect(demoSeedData.conditions.find((item) => item.id === "cond-100-c")).toMatchObject({
       category: "potentialDelete",

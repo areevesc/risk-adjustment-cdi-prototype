@@ -415,25 +415,35 @@ describe("prototype workflow rules", () => {
     expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-a", "prev")?.id).toBe("ev-rev-100-e");
   });
 
-  it("previews duplicate same-HCC suppression without final history", () => {
+  it("keeps same-HCC additions independently actionable", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const historyCount = data.history.length;
-    const next = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
-    const duplicate = next.conditions.find((item) => item.id === "cond-100-e")!;
-    expect(duplicate.draftRuleOutcome?.explanation).toContain("HCC 37");
-    expect(duplicate.draftRuleOutcome).toMatchObject({ source: "rule-suppressed", action: "Add to Claim", ruleId: "same-hcc-duplicate-add" });
-    expect(duplicate.ruleOutcome).toBeUndefined();
-    expect(next.history).toHaveLength(historyCount);
+    const first = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", false, settings);
+    const review = first.reviews.find((item) => item.id === "rev-100")!;
+    const sibling = first.conditions.find((item) => item.id === "cond-100-e")!;
+
+    expect(sibling.draftRuleOutcome).toBeUndefined();
+    expect(getRuleResult(sibling, review, first, settings).disabledActions.some((item) => item.action === "Add to Claim")).toBe(false);
+
+    const second = setDisposition(first, "rev-100", "cond-100-e", user(first, "u-coder-1"), "Add to Claim", true, settings);
+    expect(second.conditions.find((item) => item.id === "cond-100-d")?.draftDisposition?.action).toBe("Add to Claim");
+    expect(second.conditions.find((item) => item.id === "cond-100-e")?.draftDisposition?.action).toBe("Add to Claim");
+    expect(second.history).toHaveLength(historyCount);
   });
 
-  it("does not suppress same-HCC Add to Claim from a recommendation alone", () => {
+  it("recommends the documented specific neuropathy code without locking the unspecified sibling", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const review = data.reviews.find((item) => item.id === "rev-100")!;
-    const recommended = data.conditions.find((item) => item.id === "cond-100-d")!;
-    const duplicate = data.conditions.find((item) => item.id === "cond-100-e")!;
+    const unspecified = data.conditions.find((item) => item.id === "cond-100-d")!;
+    const specific = data.conditions.find((item) => item.id === "cond-100-e")!;
 
-    expect(decisionSupportService.getRecommendation(recommended, review, data, settings)?.action).toBe("Add to Claim");
-    expect(getRuleResult(duplicate, review, data, settings).disabledActions.some((item) => item.action === "Add to Claim")).toBe(false);
+    expect(decisionSupportService.getRecommendation(unspecified, review, data, settings)).toMatchObject({
+      action: "Disagree",
+      replacementCode: "E11.42"
+    });
+    expect(decisionSupportService.getRecommendation(specific, review, data, settings)?.action).toBe("Add to Claim");
+    expect(getRuleResult(unspecified, review, data, settings).disabledActions.some((item) => item.action === "Add to Claim")).toBe(false);
+    expect(getRuleResult(specific, review, data, settings).disabledActions.some((item) => item.action === "Add to Claim")).toBe(false);
   });
 
   it("keeps officially distinct heart-failure HCCs in separate patient-year groups", () => {
@@ -471,12 +481,13 @@ describe("prototype workflow rules", () => {
     expect(data.conditions.find((item) => item.id === "cond-110-d")?.draftRuleOutcome).toBeUndefined();
   });
 
-  it("does not count rule-suppressed duplicate add outcomes as completed actions", () => {
+  it("keeps an unselected same-HCC sibling unresolved without fabricating a rule outcome", () => {
     let data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     data = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
     const totals = getActionTotals(data);
     const review = data.reviews.find((item) => item.id === "rev-100")!;
     expect(totals.some((item) => item.name === "Rule Suppressed")).toBe(false);
+    expect(data.conditions.find((item) => item.id === "cond-100-e")?.draftRuleOutcome).toBeUndefined();
     expect(getUnresolvedConditions(data, review).map((condition) => condition.id)).toContain("cond-100-e");
   });
 
@@ -977,7 +988,7 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const exports = getGeneratedExports(data);
     const rafSummary = getRafSummary(data, review);
 
-    expect(recommendation?.action).toBe("Add to Claim");
+    expect(recommendation).toMatchObject({ action: "Disagree", replacementCode: "E11.42" });
     expect(exports.find((record) => record.id === "generated-addition")?.rows.some((row) => row.reviewId === "rev-100" && row.icd10 === "E11.40")).toBe(false);
     expect(rafSummary.validatedCapturedRaf).toBeCloseTo(0.638);
   });

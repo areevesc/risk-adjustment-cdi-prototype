@@ -43,7 +43,7 @@ import {
   getRuleResult,
   reviewConditions
 } from "../../domain/selectors";
-import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult } from "../../domain/types";
+import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, Patient, RecommendationAction, RuleResult } from "../../domain/types";
 import { evidenceStrengthLabel } from "../../domain/mockClinicalContent";
 import { buildChartSearchResults, normalizeChartSearchQuery } from "../../domain/chartSearch";
 import type { ChartSearchResult } from "../../domain/chartSearch";
@@ -53,6 +53,7 @@ import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/t
 import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute } from "../../domain/auth";
 import {
   compareConditionsByHierarchy,
+  getConditionClinicalFamily,
   getConditionHierarchySuppression,
   getConditionMarginalScore,
   isAcuteCondition,
@@ -167,6 +168,9 @@ export function ReviewPage() {
   const conditions = reviewConditions(data, activeReview);
   const riskConditions = conditions.filter(isRiskAdjustmentCondition).sort((left, right) => compareConditionsByHierarchy(left, right, patient));
   const visibleRiskConditions = riskConditions;
+  const conditionFamilies = groupRelatedRiskConditions(visibleRiskConditions, patient);
+  const familyConditionIds = new Set(conditionFamilies.flatMap((family) => family.conditions.map((condition) => condition.id)));
+  const standaloneRiskConditions = visibleRiskConditions.filter((condition) => !familyConditionIds.has(condition.id));
   const nonRiskConditions = conditions.filter((condition) => !isRiskAdjustmentCondition(condition));
   const relatedReviewIds = new Set(
     data.reviews
@@ -510,9 +514,26 @@ export function ReviewPage() {
 
         <Panel className="conditions-panel" title="Conditions & Actions">
           <div className="condition-groups">
+            {conditionFamilies.map((family) => (
+              <ConditionFamilyGroup
+                key={family.key}
+                family={family}
+                review={review}
+                editable={editable}
+                readOnlyTitle={readOnlyTitle}
+                warningIds={completionWarnings}
+                jumpToEvidence={jumpToEvidence}
+                activeConditionId={activeConditionId}
+                setActiveConditionId={setActiveConditionId}
+                onDisagree={setDisagreeCondition}
+                onChange={setChangeCondition}
+                onFlag={setFlagCondition}
+                onDeleteSafety={setDeleteSafetyCondition}
+              />
+            ))}
             <ConditionGroup
               title="Codes On Claim"
-              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "codesOnClaim")}
+              conditions={standaloneRiskConditions.filter((condition) => condition.workflow === "codesOnClaim")}
               review={review}
               editable={editable}
               readOnlyTitle={readOnlyTitle}
@@ -527,7 +548,7 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="Codes Not On Claim - Potential Additions"
-              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
+              conditions={standaloneRiskConditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
               review={review}
               editable={editable}
               readOnlyTitle={readOnlyTitle}
@@ -542,7 +563,7 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="CDI Prospective Review"
-              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "prospective")}
+              conditions={standaloneRiskConditions.filter((condition) => condition.workflow === "prospective")}
               review={review}
               editable={editable}
               readOnlyTitle={readOnlyTitle}
@@ -1246,6 +1267,131 @@ function renderEvidenceSpans(sectionText: string, evidence: EvidencePassage[], s
   return pieces.length ? pieces : renderSearchText(sectionText, normalizedSearchQuery, "section");
 }
 
+interface RelatedConditionFamily {
+  key: string;
+  label: string;
+  hccPath: string;
+  conditions: Condition[];
+}
+
+export function groupRelatedRiskConditions(conditions: Condition[], patient?: Patient): RelatedConditionFamily[] {
+  const grouped = new Map<string, { key: string; label: string; conditions: Condition[] }>();
+  conditions.forEach((condition) => {
+    const family = getConditionClinicalFamily(condition);
+    if (!family) return;
+    const existing = grouped.get(family.key);
+    if (existing) existing.conditions.push(condition);
+    else grouped.set(family.key, { ...family, conditions: [condition] });
+  });
+
+  return Array.from(grouped.values())
+    .filter((family) => family.conditions.length > 1)
+    .map((family) => {
+      const sorted = [...family.conditions].sort((left, right) => compareConditionsByHierarchy(left, right, patient));
+      const hccPath = Array.from(new Set(sorted.flatMap((condition) => condition.hcc.split(" + ").filter(Boolean)))).join(" → ");
+      return { ...family, hccPath, conditions: sorted };
+    })
+    .sort((left, right) => compareConditionsByHierarchy(left.conditions[0], right.conditions[0], patient));
+}
+
+type ConditionCardProps = {
+  condition: Condition;
+  review: ReturnType<typeof useAppState>["data"]["reviews"][number];
+  editable: boolean;
+  readOnlyTitle?: string;
+  isWarning: boolean;
+  jumpToEvidence: (evidence: EvidencePassage) => void;
+  isActive: boolean;
+  setActiveConditionId: (conditionId: string) => void;
+  onDisagree: (condition: Condition) => void;
+  onChange: (condition: Condition) => void;
+  onFlag: (condition: Condition) => void;
+  onDeleteSafety: (condition: Condition) => void;
+};
+
+type ConditionGroupProps = {
+  title: string;
+  conditions: Condition[];
+  review: ReturnType<typeof useAppState>["data"]["reviews"][number];
+  editable: boolean;
+  readOnlyTitle?: string;
+  warningIds: string[];
+  jumpToEvidence: (evidence: EvidencePassage) => void;
+  activeConditionId?: string;
+  setActiveConditionId: (conditionId: string) => void;
+  onDisagree: (condition: Condition) => void;
+  onChange: (condition: Condition) => void;
+  onFlag: (condition: Condition) => void;
+  onDeleteSafety: (condition: Condition) => void;
+};
+
+function HierarchyAwareConditionCard(props: ConditionCardProps) {
+  const { data } = useAppState();
+  const hierarchy = getConditionHierarchySuppression(props.condition, props.review, data);
+  if (!hierarchy.fullySuppressed) return <ConditionCard {...props} />;
+
+  const suppression = hierarchy.suppressedHccs[0];
+  return (
+    <details className="trumped-condition-card">
+      <summary onClick={() => props.setActiveConditionId(props.condition.id)}>
+        <span className="condition-marker trumped-condition-marker">T</span>
+        <span className="trumped-condition-copy">
+          <span><strong className="mono">{props.condition.icd10}</strong> {props.condition.description}</span>
+          <small>{suppression.lower} is below selected {suppression.higher} ({suppression.capturedCondition.icd10}).</small>
+        </span>
+        <StatusChip tone="warn">Trumped · review</StatusChip>
+        <ChevronDown size={17} aria-hidden="true" />
+      </summary>
+      <ConditionCard {...props} />
+    </details>
+  );
+}
+
+function ConditionFamilyGroup({
+  family,
+  review,
+  editable,
+  readOnlyTitle,
+  warningIds,
+  jumpToEvidence,
+  activeConditionId,
+  setActiveConditionId,
+  onDisagree,
+  onChange,
+  onFlag,
+  onDeleteSafety
+}: Omit<ConditionGroupProps, "title" | "conditions"> & { family: RelatedConditionFamily }) {
+  return (
+    <section className="condition-group condition-family-group" aria-label={`${family.label} hierarchy group`}>
+      <header className="condition-group-heading condition-family-heading">
+        <div>
+          <h3><span className="condition-group-dot" />{family.label} hierarchy</h3>
+          <p>Related diagnoses ordered by HCC hierarchy and documentation specificity. Each condition remains independently reviewable.</p>
+        </div>
+        <span className="condition-family-path">{family.hccPath}</span>
+      </header>
+      {family.conditions.map((condition) => (
+        <div className="condition-family-item" data-condition-code={condition.icd10} key={condition.id}>
+          <HierarchyAwareConditionCard
+            condition={condition}
+            review={review}
+            editable={editable}
+            readOnlyTitle={readOnlyTitle}
+            isWarning={warningIds.includes(condition.id)}
+            jumpToEvidence={jumpToEvidence}
+            isActive={activeConditionId === condition.id}
+            setActiveConditionId={setActiveConditionId}
+            onDisagree={onDisagree}
+            onChange={onChange}
+            onFlag={onFlag}
+            onDeleteSafety={onDeleteSafety}
+          />
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function ConditionGroup({
   title,
   conditions,
@@ -1260,21 +1406,7 @@ function ConditionGroup({
   onChange,
   onFlag,
   onDeleteSafety
-}: {
-  title: string;
-  conditions: Condition[];
-  review: ReturnType<typeof useAppState>["data"]["reviews"][number];
-  editable: boolean;
-  readOnlyTitle?: string;
-  warningIds: string[];
-  jumpToEvidence: (evidence: EvidencePassage) => void;
-  activeConditionId?: string;
-  setActiveConditionId: (conditionId: string) => void;
-  onDisagree: (condition: Condition) => void;
-  onChange: (condition: Condition) => void;
-  onFlag: (condition: Condition) => void;
-  onDeleteSafety: (condition: Condition) => void;
-}) {
+}: ConditionGroupProps) {
   if (!conditions.length) return null;
   const presentation = getConditionGroupPresentation(title);
   return (
@@ -1286,7 +1418,7 @@ function ConditionGroup({
         </div>
       </header>
       {conditions.map((condition) => (
-        <ConditionCard
+        <HierarchyAwareConditionCard
           key={condition.id}
           condition={condition}
           review={review}
@@ -1332,20 +1464,7 @@ function ConditionCard({
   onChange,
   onFlag,
   onDeleteSafety
-}: {
-  condition: Condition;
-  review: ReturnType<typeof useAppState>["data"]["reviews"][number];
-  editable: boolean;
-  readOnlyTitle?: string;
-  isWarning: boolean;
-  jumpToEvidence: (evidence: EvidencePassage) => void;
-  isActive: boolean;
-  setActiveConditionId: (conditionId: string) => void;
-  onDisagree: (condition: Condition) => void;
-  onChange: (condition: Condition) => void;
-  onFlag: (condition: Condition) => void;
-  onDeleteSafety: (condition: Condition) => void;
-}) {
+}: ConditionCardProps) {
   const { data, settings, actions } = useAppState();
   const [prospectiveHandoffOpen, setProspectiveHandoffOpen] = useState(false);
   const evidence = getEvidenceForCondition(data, condition);
@@ -1439,7 +1558,7 @@ function ConditionCard({
         </div>
         {riskAdjustment ? <CategoryBadge category={condition.category} subtype={condition.subtype} /> : <StatusChip tone="info">Non-HCC context</StatusChip>}
       </div>
-      {riskAdjustment ? <RecommendationBox recommendation={recommendation} settings={settings} /> : null}
+      {riskAdjustment && !hierarchy.fullySuppressed ? <RecommendationBox recommendation={recommendation} settings={settings} /> : null}
       {hierarchy.fullySuppressed ? (
         <div className="disabled-reason">
           <LockKeyhole size={15} />

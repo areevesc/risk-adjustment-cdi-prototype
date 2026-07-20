@@ -72,7 +72,9 @@ export function RecommendationBox({
         <StatusChip tone={recommendation.confidence === "High" ? "good" : recommendation.confidence === "Medium" ? "info" : "warn"}>{recommendation.confidence}</StatusChip>
       </div>
       <strong>{recommendation.action}</strong>
-      {recommendation.replacementCode ? <span className="mono"> replacement: {recommendation.replacementCode}</span> : null}
+      {recommendation.replacementCode ? (
+        <span className="mono">{recommendation.action === "Change" ? "Replacement" : "More specific option"}: {recommendation.replacementCode}</span>
+      ) : null}
       <p>{recommendation.rationale}</p>
     </div>
   );

@@ -681,20 +681,6 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           summary: "MOR recapture example for prior HCC 224."
         },
         {
-          id: `ev-${review.id}-payer`,
-          reviewId: review.id,
-          documentId: `doc-${review.id}-mor`,
-          anchorId: `sec-${review.id}-mor-1`,
-          sectionId: `sec-${review.id}-mor-1`,
-          text: "Payer data lists diabetic peripheral angiopathy without gangrene as a suspect opportunity.",
-          exactText: "payer data lists diabetic peripheral angiopathy without gangrene as a suspect opportunity",
-          date: `${review.calendarYear}-01-18`,
-          category: "prospective" as const,
-          subtype: "suspect" as const,
-          conditionIds: ["cond-100-f"],
-          summary: "Payer data suspect example."
-        },
-        {
           id: `ev-${review.id}-specialist`,
           reviewId: review.id,
           documentId: `doc-${review.id}-specialist`,
@@ -706,20 +692,6 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           category: "validated" as const,
           conditionIds: ["cond-100-c"],
           summary: "Specialist note supports a chronic heart failure example."
-        },
-        {
-          id: `ev-${review.id}-hie`,
-          reviewId: review.id,
-          documentId: `doc-${review.id}-hie`,
-          anchorId: `sec-${review.id}-hie-1`,
-          sectionId: `sec-${review.id}-hie-1`,
-          text: "HIE payload includes registry history of diabetic peripheral angiopathy without gangrene and an SDoH transportation code.",
-          exactText: "registry history of diabetic peripheral angiopathy without gangrene",
-          date: `${review.calendarYear}-02-22`,
-          category: "prospective" as const,
-          subtype: "suspect" as const,
-          conditionIds: ["cond-100-f"],
-          summary: "HIE and SDoH source example."
         },
         {
           id: `ev-${review.id}-pathology`,
@@ -949,23 +921,23 @@ const correctedDiagnosisEvidence: EvidencePassage[] = [
     chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
   },
   {
-    id: "ev-cond-100-f-hpi",
+    id: "ev-cond-100-f-abi",
     reviewId: "rev-100",
-    documentId: "doc-rev-100-note",
-    anchorId: "sec-rev-100-note-2",
-    sectionId: "sec-rev-100-note-2",
-    text: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
-    exactText: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
-    date: "2026-04-12",
+    documentId: "doc-rev-100-meds",
+    anchorId: "sec-rev-100-imaging",
+    sectionId: "sec-rev-100-imaging",
+    text: "Resting ankle-brachial index is abnormal bilaterally: right ABI 0.78 and left ABI 0.82. Distal Doppler waveforms are monophasic; no ulcer or gangrene is present.",
+    exactText: "Right ABI 0.78 and left ABI 0.82 with monophasic distal Doppler waveforms",
+    date: "2026-03-18",
     category: "prospective",
     subtype: "suspect",
     conditionIds: ["cond-100-f"],
-    summary: "Current vascular symptoms and diminished pedal pulses support diagnosis-specific review for diabetic peripheral angiopathy without gangrene.",
-    sourceType: "hpiSentence",
-    evidenceStrength: "clinicalIndicatorOnly",
+    summary: "Abnormal bilateral ABI and monophasic waveforms support prospective review for diabetic peripheral angiopathy without gangrene.",
+    sourceType: "imagingImpression",
+    evidenceStrength: "imagingIndicatorOnly",
     currentYearSupport: false,
     suspectOnly: true,
-    chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "hpi" }
+    chartAnchor: { tab: "imaging", itemId: "chart-rev-100-imaging-abi", sectionId: "findings" }
   }
 ];
 
@@ -1105,7 +1077,7 @@ export const conditions: Condition[] = [
     hcc: "HCC 37",
     raf: 0.318,
     claimStatus: "Registry",
-    sourceDate: "2026-02-14",
+    sourceDate: "2026-03-18",
     evidenceIds: [],
     actionable: true,
     currentYear: true,
@@ -1114,6 +1086,12 @@ export const conditions: Condition[] = [
     hadPriorCapture: false,
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
+    seededRecommendation: {
+      action: "Yes",
+      confidence: "High",
+      source: "seeded",
+      rationale: "Abnormal bilateral resting ABI values and monophasic distal waveforms create a diagnosis-specific prospective opportunity; provider confirmation is still required."
+    },
     documentationIssues: []
   },
   {
@@ -1560,6 +1538,7 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
   const firstLabEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "labs" && item.anchorId.endsWith("lab-1")).map((item) => item.id);
   const secondLabEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "labs" && item.anchorId.endsWith("lab-2")).map((item) => item.id);
   const historyEvidence = reviewEvidence.filter((item) => item.chartAnchor?.tab === "claims");
+  const imagingEvidence = reviewEvidence.filter((item) => item.chartAnchor?.tab === "imaging");
   const currentVitals = clinicalVitalsForConditions(reviewConditions);
   const hpi = clinicalHpi(patientName, reviewConditions);
   const assessment = reviewConditions
@@ -1650,7 +1629,13 @@ function richDocumentsFor(review: PatientReview): SourceDocument[] {
             .join(" ")}`.trim(),
           reviewEvidence.filter((item) => item.chartAnchor?.tab === "medications").map((item) => item.id)
         ),
-        section(`sec-${review.id}-imaging`, "Imaging / specialist notes: echo, renal ultrasound, chest imaging, nephrology, cardiology, pulmonology, and behavioral health snippets appear when relevant.", [])
+        section(
+          `sec-${review.id}-imaging`,
+          `Imaging / specialist notes: echo, renal ultrasound, chest imaging, vascular studies, nephrology, cardiology, pulmonology, and behavioral health snippets appear when relevant. ${imagingEvidence
+            .map((item) => item.exactText ?? item.text)
+            .join(" ")}`.trim(),
+          imagingEvidence.map((item) => item.id)
+        )
       ]
     }
   ];
@@ -2052,6 +2037,7 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
       .find((result) => result.component === "Creatinine");
     const primaryProfile = clinicalProfileForCondition(reviewConditions[0] ?? clinicalSeedConditions[0]);
     const imagingEvidence = reviewEvidence.filter((item) => item.chartAnchor?.tab === "imaging");
+    const primaryImagingEvidence = imagingEvidence.filter((item) => item.chartAnchor?.itemId === `chart-${review.id}-imaging`);
     const conditionEvidenceIds = (condition: Condition) => reviewEvidence.filter((item) => item.conditionIds.includes(condition.id)).map((item) => item.id);
     const hpiEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "encounters" && item.chartAnchor.sectionId === "hpi").map((item) => item.id);
     const planEvidenceIds = reviewEvidence.filter((item) => item.chartAnchor?.tab === "encounters" && item.chartAnchor.sectionId === "assessmentPlan").map((item) => item.id);
@@ -2291,11 +2277,11 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
           type: primaryProfile.imaging.type,
           date: `${review.calendarYear}-05-11`,
           indication: primaryProfile.imaging.indication,
-          findings: uniqueStrings([primaryProfile.imaging.findings, ...imagingEvidence.map((item) => item.text)]).join(" "),
+          findings: uniqueStrings([primaryProfile.imaging.findings, ...primaryImagingEvidence.map((item) => item.text)]).join(" "),
           impression: primaryProfile.imaging.impression,
-          evidenceIds: imagingEvidence.map((item) => item.id)
+          evidenceIds: primaryImagingEvidence.map((item) => item.id)
         },
-        ...reviewConditions.slice(1, 4).map((condition, index) => {
+        ...reviewConditions.slice(1, 4).filter((condition) => condition.icd10 !== "E11.51").map((condition, index) => {
           const imaging = clinicalProfileForCondition(condition).imaging;
           return {
             id: `chart-${review.id}-imaging-${index + 2}`,
@@ -2305,6 +2291,21 @@ function buildClinicalCharts(seedReviews: PatientReview[], seedEvidence: Evidenc
             findings: imaging.findings,
             impression: imaging.impression,
             evidenceIds: []
+          };
+        }),
+        ...reviewConditions.filter((condition) => condition.icd10 === "E11.51").map((condition) => {
+          const imaging = clinicalProfileForCondition(condition).imaging;
+          const evidenceIds = imagingEvidence
+            .filter((item) => item.conditionIds.includes(condition.id) && item.chartAnchor?.itemId === `chart-${review.id}-imaging-abi`)
+            .map((item) => item.id);
+          return {
+            id: `chart-${review.id}-imaging-abi`,
+            type: "Resting ankle-brachial index with Doppler waveforms",
+            date: `${review.calendarYear}-03-18`,
+            indication: "Exertional calf discomfort and diminished pedal pulses",
+            findings: imaging.findings,
+            impression: imaging.impression,
+            evidenceIds
           };
         })
       ],

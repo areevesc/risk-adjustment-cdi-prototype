@@ -50,24 +50,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       condition.ruleOutcome.conflictingEvidenceIds?.forEach((id) => conflictingEvidenceIds.add(id));
     }
 
-    if (!condition.disposition && condition.workflow === "codesNotOnClaim") {
-      const selectedDuplicate = getSamePatientYearHccConditions(data, review, condition.hcc).find(
-        (item) => item.id !== condition.id && item.workflow === "codesNotOnClaim" && item.disposition?.action === "Add to Claim"
-      );
-      if (selectedDuplicate) {
-        const selectedBy = data.users.find((item) => item.id === selectedDuplicate.disposition?.userId);
-        const selectedAt = selectedDuplicate.disposition?.decidedAt ? ` at ${selectedDuplicate.disposition.decidedAt}` : "";
-        selectedDuplicate.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
-        disabledActions.push({
-          action: "Add to Claim",
-          reason: `Add to Claim unavailable because ${selectedDuplicate.icd10} was selected by ${selectedBy?.name ?? "a reviewer"}${selectedAt} for the same patient, calendar year, and ${condition.hcc}.`,
-          ruleId: "same-hcc-duplicate-add",
-          source: "rule-suppressed",
-          supportingEvidenceIds: selectedDuplicate.evidenceIds
-        });
-      }
-    }
-
     if (condition.workflow === "codesOnClaim" && deleteSafety.supportingEvidenceIds.length > 0) {
       warnings.push({
         message: "Possible current-year supporting evidence was identified. Review before deleting.",
@@ -358,6 +340,16 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Add to Claim is not supported."
         };
       }
+      const moreSpecificCandidate = getMoreSpecificSameHccCandidate(condition, review, data);
+      if (moreSpecificCandidate) {
+        return {
+          action: "Disagree",
+          confidence: "High",
+          source: "rules",
+          replacementCode: moreSpecificCandidate.icd10,
+          rationale: `${moreSpecificCandidate.icd10} is supported by diagnosis-specific documentation and is more specific than ${condition.icd10}. Both conditions remain available for reviewer judgment; review the more specific option before adding the unspecified code.`
+        };
+      }
       if (condition.hasSufficientMeat) {
         return {
           action: "Add to Claim",
@@ -410,6 +402,20 @@ function getSamePatientYearHccConditions(data: SeedData, review: PatientReview, 
   return data.conditions.filter(
     (condition) => patientYearReviewIds.has(condition.reviewId) && getConditionHccs(condition, patient).some((conditionHcc) => requested.has(conditionHcc))
   );
+}
+
+function getMoreSpecificSameHccCandidate(condition: Condition, review: PatientReview, data: SeedData) {
+  if (!/\bunspecified\b/i.test(condition.description)) return undefined;
+  return getSamePatientYearHccConditions(data, review, condition.hcc)
+    .filter(
+      (candidate) =>
+        candidate.id !== condition.id &&
+        candidate.workflow === condition.workflow &&
+        !/\bunspecified\b/i.test(candidate.description) &&
+        candidate.hasSufficientMeat &&
+        candidate.evidenceIds.some((id) => data.evidence.some((item) => item.id === id && item.conditionIds.includes(candidate.id)))
+    )
+    .sort((left, right) => left.icd10.localeCompare(right.icd10))[0];
 }
 
 function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {

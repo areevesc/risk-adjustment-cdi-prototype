@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoSeedData } from "../data/seed";
-import { getConditionHierarchySuppression } from "./conditionRisk";
+import { compareConditionsByHierarchy, getConditionClinicalFamily, getConditionHierarchySuppression } from "./conditionRisk";
 import { getUnresolvedConditions } from "./selectors";
 import { completeReview, openReview, setDisposition } from "./workflows";
 
@@ -12,6 +12,16 @@ const settings = {
 };
 
 describe("human-only V28 hierarchy state", () => {
+  it("orders related diabetes diagnoses by HCC hierarchy and documented specificity", () => {
+    const data = structuredClone(demoSeedData);
+    const patient = data.patients.find((item) => item.id === "pat-100")!;
+    const diabetes = data.conditions
+      .filter((condition) => condition.reviewId === "rev-100" && getConditionClinicalFamily(condition)?.key === "diabetes")
+      .sort((left, right) => compareConditionsByHierarchy(left, right, patient));
+
+    expect(diabetes.map((condition) => condition.icd10)).toEqual(["E11.42", "E11.51", "E11.40", "E11.65"]);
+  });
+
   it("does not lock a lower HCC from flags, seeded recommendations, or prospective Yes", () => {
     const data = structuredClone(demoSeedData);
     const review = data.reviews.find((item) => item.id === "rev-116")!;

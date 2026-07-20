@@ -150,22 +150,22 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (condition.icd10 === "E11.51") {
     return {
       hpi: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
-      plan: "Diabetic peripheral angiopathy without gangrene remains active. Continue statin and antiplatelet therapy, reinforce foot protection, obtain ankle-brachial indices, and follow vascular medicine.",
+      plan: "Abnormal bilateral ABI results were reviewed. Refer to vascular medicine for confirmation of diabetic peripheral angiopathy, continue vascular risk reduction, and reinforce foot protection.",
       weakMention: "Diabetic peripheral angiopathy appears in the vascular problem list.",
       labResults: [],
       medication: { name: "Aspirin", dose: "81 mg", route: "PO", frequency: "daily", prescriber: "" },
       imaging: {
         type: "Lower-extremity arterial duplex",
         indication: "Diabetic peripheral angiopathy assessment",
-        findings: "Reduced distal arterial flow without occlusion; ankle-brachial indices are abnormal bilaterally.",
-        impression: ["Peripheral arterial disease without gangrene."]
+        findings: "Right ABI 0.78 and left ABI 0.82 with monophasic distal Doppler waveforms; no occlusion, ulcer, or gangrene.",
+        impression: ["Abnormal bilateral resting ABI consistent with lower-extremity peripheral arterial disease.", "No gangrene."]
       },
       specialist: {
         specialty: "Vascular Medicine",
         provider: "Rina Shah, MD",
         title: "Vascular follow-up",
-        note: "Diabetic peripheral angiopathy without gangrene reviewed with abnormal pedal pulses and ABI results.",
-        assessment: ["Diabetic peripheral angiopathy without gangrene", "Continue vascular risk reduction"]
+        note: "Abnormal bilateral resting ABI results reviewed; diabetic peripheral angiopathy requires provider confirmation at the upcoming visit.",
+        assessment: ["Abnormal ABI with suspected peripheral arterial disease", "Continue vascular risk reduction"]
       },
       pmh: "Type 2 diabetes with peripheral angiopathy without gangrene.",
       ros: ["Vascular: exertional calf discomfort without rest pain.", "Skin: no ulcer or gangrene."],

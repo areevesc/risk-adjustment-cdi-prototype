@@ -510,7 +510,6 @@ function commitDisposition(
     next = applyThreeValidationRule(next, reviewId, condition.hcc, user, settings.sameHccValidationThreshold);
   }
   if (condition && action === "Add to Claim") {
-    next = disableDuplicateHccAdditions(next, reviewId, condition.hcc, conditionId, user);
     next = createDownstreamTask(next, reviewId, conditionId, "Addition to Claim", user, comments);
   }
   if (condition && action === "Delete") {
@@ -652,37 +651,6 @@ function refreshDraftRuleOutcomes(data: SeedData, review: PatientReview, setting
     });
   });
 
-  const stagedAdditions = patientYearConditions.filter(
-    (condition) => condition.workflow === "codesNotOnClaim" && getEffectiveDisposition(condition)?.action === "Add to Claim"
-  );
-  stagedAdditions.forEach((selectedCondition) => {
-    getPatientCalendarYearHccGroup(next, review.patientId, review.calendarYear, selectedCondition.hcc)
-      .filter(
-        (condition) =>
-          condition.workflow === "codesNotOnClaim" &&
-          condition.id !== selectedCondition.id &&
-          !getEffectiveDisposition(condition) &&
-          !condition.ruleOutcome &&
-          !condition.auditorDisposition &&
-          !condition.draftRuleOutcome
-      )
-      .forEach((condition) => {
-        const explanation = `Add to Claim will be suppressed because ${selectedCondition.icd10} is staged for the same patient, calendar year, and ${selectedCondition.hcc}.`;
-        next = updateCondition(next, condition.id, (item) => ({
-          ...item,
-          draftRuleOutcome: {
-            source: "rule-suppressed",
-            action: "Add to Claim",
-            ruleId: "same-hcc-duplicate-add",
-            explanation,
-            selectedConditionId: selectedCondition.id,
-            supportingEvidenceIds: selectedCondition.evidenceIds,
-            createdAt: stamp()
-          }
-        }));
-      });
-  });
-
   return next;
 }
 
@@ -719,49 +687,6 @@ function applyThreeValidationRule(data: SeedData, reviewId: string, hcc: string,
     }
   });
   return addHistory(next, { reviewId, userId: user.id, event: "Same-HCC rule applied", detail: `${threshold} validations reached for ${hcc}.` });
-}
-
-function disableDuplicateHccAdditions(data: SeedData, reviewId: string, hcc: string, selectedConditionId: string, user: User): SeedData {
-  const review = data.reviews.find((item) => item.id === reviewId);
-  if (!review) return data;
-  const selectedCondition = data.conditions.find((condition) => condition.id === selectedConditionId);
-  if (!selectedCondition) return data;
-  let next = data;
-  getPatientCalendarYearHccGroup(data, review.patientId, review.calendarYear, hcc)
-    .filter(
-      (condition) =>
-        condition.workflow === "codesNotOnClaim" &&
-        condition.id !== selectedConditionId &&
-        !condition.disposition &&
-        !condition.ruleOutcome &&
-        !condition.auditorDisposition
-    )
-    .forEach((condition) => {
-      const selectedBy = data.users.find((item) => item.id === selectedCondition.disposition?.userId)?.name ?? "a reviewer";
-      const selectedAt = selectedCondition.disposition?.decidedAt ? ` at ${selectedCondition.disposition.decidedAt}` : "";
-      const explanation = `Add to Claim suppressed because ${selectedCondition.icd10} was selected by ${selectedBy}${selectedAt} for the same patient, calendar year, and ${hcc}.`;
-      next = updateCondition(next, condition.id, (item) => ({
-        ...item,
-        ruleOutcome: {
-          source: "rule-suppressed",
-          action: "Add to Claim",
-          ruleId: "same-hcc-duplicate-add",
-          explanation,
-          selectedConditionId,
-          supportingEvidenceIds: selectedCondition.evidenceIds,
-          createdAt: stamp()
-        },
-        disabledReason: explanation
-      }));
-      next = addHistory(next, {
-        reviewId: condition.reviewId,
-        conditionId: condition.id,
-        userId: user.id,
-        event: "Rule-suppressed condition",
-        detail: explanation
-      });
-    });
-  return next;
 }
 
 export function flagDocumentationIssue(
