@@ -342,7 +342,12 @@ export function getActiveConditionEvidence(data: SeedData, relatedEvidence: Evid
   if (!activeConditionId) return relatedEvidence;
   const condition = data.conditions.find((item) => item.id === activeConditionId);
   if (!condition) return relatedEvidence.filter((item) => item.conditionIds.includes(activeConditionId));
-  const allowedIds = new Set(condition.evidenceIds);
+  const allowedIds = new Set([
+    ...condition.evidenceIds,
+    ...(condition.supportingEvidenceIds ?? []),
+    ...(condition.conflictingEvidenceIds ?? []),
+    ...(condition.lookbackEvidenceIds ?? [])
+  ]);
   return relatedEvidence.filter((item) => allowedIds.has(item.id) || item.conditionIds.includes(activeConditionId));
 }
 

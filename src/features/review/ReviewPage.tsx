@@ -163,9 +163,7 @@ export function ReviewPage() {
   const displayAppointment = outreachStatus.appointment ?? appointment;
   const conditions = reviewConditions(data, activeReview);
   const riskConditions = conditions.filter(isRiskAdjustmentCondition).sort((left, right) => compareConditionsByHierarchy(left, right, patient));
-  const visibleRiskConditions = riskConditions.filter(
-    (condition) => !getConditionHierarchySuppression(condition, activeReview, data).fullySuppressed
-  );
+  const visibleRiskConditions = riskConditions;
   const nonRiskConditions = conditions.filter((condition) => !isRiskAdjustmentCondition(condition));
   const relatedReviewIds = new Set(
     data.reviews
@@ -174,7 +172,15 @@ export function ReviewPage() {
   );
   const documents = data.documents.filter((document) => relatedReviewIds.has(document.reviewId));
   const relatedEvidence = data.evidence.filter((item) => relatedReviewIds.has(item.reviewId));
-  const navigableEvidence = relatedEvidence.filter((item) => item.reviewId === activeReview.id && item.conditionIds.length > 0);
+  const navigableEvidenceIds = new Set(
+    conditions.flatMap((condition) => [
+      ...condition.evidenceIds,
+      ...(condition.supportingEvidenceIds ?? []),
+      ...(condition.conflictingEvidenceIds ?? []),
+      ...(condition.lookbackEvidenceIds ?? [])
+    ])
+  );
+  const navigableEvidence = relatedEvidence.filter((item) => navigableEvidenceIds.has(item.id));
   const activeEvidence = getActiveConditionEvidence(data, navigableEvidence, activeConditionId);
   const chart = data.charts.find((item) => item.reviewId === activeReview.id);
   const editable = canEditReview(activeReview, currentUser);
@@ -1355,7 +1361,6 @@ function ConditionCard({
   const marginalRaf = getConditionMarginalScore(data, review, condition);
   const showActionControls =
     riskAdjustment &&
-    !hierarchy.fullySuppressed &&
     (!condition.disposition || Boolean(condition.draftDisposition) || review.status === "Rework Required");
 
   function act(action: RecommendationAction) {

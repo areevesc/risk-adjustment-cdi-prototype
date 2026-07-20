@@ -546,7 +546,7 @@ export function assessmentPlanTextForCondition(condition: Condition) {
     }
     return profile.weakMention;
   }
-  return profile.plan;
+  return `${condition.description}: ${profile.plan}`;
 }
 
 export function meatTypesForSource(sourceType: EvidenceSourceType, strength: EvidenceStrength): MeatType[] | undefined {

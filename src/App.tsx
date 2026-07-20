@@ -71,10 +71,7 @@ export function App() {
       </aside>
       <main className="main-shell">
         <header className="topbar">
-          <div>
-            <h1>Risk Adjustment Coding/CDI Platform</h1>
-            <p>Functional prototype using deterministic rules, seeded evidence, and rule-based recommendations.</p>
-          </div>
+          <h1>Risk Adjustment Coding/CDI</h1>
           <div className="topbar-meta">
             <Users size={18} />
             <span>{currentUser.name}</span>
