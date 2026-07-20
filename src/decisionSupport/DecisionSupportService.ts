@@ -1,5 +1,5 @@
 import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
-import { getConditionHccs, getConditionHierarchySuppression, isRiskAdjustmentCondition } from "../domain/conditionRisk";
+import { getConditionHccs, getConditionHierarchySuppression, isAcuteCondition, isRiskAdjustmentCondition } from "../domain/conditionRisk";
 import type { CmsV28Hcc } from "../domain/cmsV28";
 
 export interface DecisionSupportService {
@@ -21,6 +21,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const supportingEvidenceIds = new Set<string>(condition.supportingEvidenceIds ?? []);
     const conflictingEvidenceIds = new Set<string>(condition.conflictingEvidenceIds ?? []);
     const acuteExclusion = evaluateAcuteOnlyRecaptureExclusion(condition);
+    const acuteOnClaim = isAcuteCondition(condition) && condition.workflow === "codesOnClaim";
     const hierarchy = evaluateHierarchySuppression(condition, review, data);
     const contextualExclusion = evaluateContextualExclusion(condition);
     const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
@@ -89,6 +90,21 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
         reason: `Send to Prospective is available only for current calendar-year claims. This review is CY ${review.calendarYear}.`,
         ruleId: "current-year-prospective-routing",
         source: "rule-suppressed"
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && acuteOnClaim) {
+      disabledActions.push({
+        action: "Send to Prospective",
+        reason: "Acute diagnoses are not carried into prospective review in this prototype. Review the encounter-specific documentation and validate only when the acute diagnosis is actively managed; otherwise delete it from the claim.",
+        ruleId: "acute-on-claim-conservative-delete",
+        source: "rule-suppressed",
+        supportingEvidenceIds: condition.evidenceIds
+      });
+      warnings.push({
+        message: "Acute diagnosis: do not carry this condition forward. Validate only when encounter-specific acute-care documentation supports it; otherwise delete.",
+        severity: "warning",
+        evidenceIds: condition.evidenceIds
       });
     }
 
@@ -164,9 +180,11 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     return {
       ruleId:
         condition.ruleOutcome?.ruleId ??
-        (acuteExclusion.applies
-          ? "acute-only-recapture-exclusion"
-          : hierarchy.applies
+        (acuteOnClaim
+          ? "acute-on-claim-conservative-delete"
+          : acuteExclusion.applies
+            ? "acute-only-recapture-exclusion"
+            : hierarchy.applies
             ? "hierarchy-trumping-suppression"
             : contextualExclusion.applies
               ? contextualExclusion.ruleId
@@ -189,6 +207,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const hasConditionEvidence = condition.evidenceIds.some((id) =>
       data.evidence.some((item) => item.id === id && item.conditionIds.includes(condition.id))
     );
+    if (isAcuteCondition(condition) && condition.workflow === "codesOnClaim") {
+      return {
+        action: "Delete",
+        confidence: "High",
+        source: "rules",
+        rationale: "Acute diagnoses are handled conservatively in this prototype. The outpatient chart does not establish encounter-specific acute-condition management, so this code should be reviewed for deletion rather than carried forward."
+      };
+    }
     const evidenceDependentActions: RecommendationAction[] = ["Validate", "Add to Claim", "Yes", "Send to Prospective", "Change"];
     if (condition.seededRecommendation && (!evidenceDependentActions.includes(condition.seededRecommendation.action) || hasConditionEvidence)) {
       return condition.seededRecommendation;
@@ -283,7 +309,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           action: "Yes",
           confidence: "Medium",
           source: "rules",
-          rationale: "Current clinical indicators exist without prior capture, so this is a suspect opportunity."
+          rationale: "Diagnosis-scoped clinical indicators exist without prior capture, so this is a supported suspect opportunity."
         };
       }
     }

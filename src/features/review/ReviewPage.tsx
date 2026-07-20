@@ -55,6 +55,7 @@ import {
   compareConditionsByHierarchy,
   getConditionHierarchySuppression,
   getConditionMarginalScore,
+  isAcuteCondition,
   isRiskAdjustmentCondition
 } from "../../domain/conditionRisk";
 import { CMS_V28_MODEL } from "../../domain/cmsV28";
@@ -65,7 +66,8 @@ const documentationIssues: DocumentationIssue[] = [
   "Not risk eligible provider type",
   "Not a face-to-face service",
   "Invalid or missing provider signature",
-  "Provider education"
+  "Provider education",
+  "Other documentation issue"
 ];
 
 const validationToken = { color: "#075e45", bg: "#e8f7ee", border: "#2bb673" };
@@ -73,6 +75,7 @@ const mentionToken = { color: "#7a4b00", bg: "#fff5db", border: "#d79b1e" };
 const indicatorToken = { color: "#0f4d78", bg: "#e8f4ff", border: "#5aa4d8" };
 const historyToken = { color: "#5b3a96", bg: "#f1ecff", border: "#9a7bd8" };
 const suspectToken = { color: "#8a3d00", bg: "#fff0e3", border: "#e18a35" };
+const clinicalContextToken = { color: "#475467", bg: "#f2f4f7", border: "#98a2b3" };
 
 const strengthTokens = {
   strongCurrentYearMEAT: { color: "#075e45", bg: "#e8f7ee", border: "#2bb673" },
@@ -1358,6 +1361,7 @@ function ConditionCard({
   const existingProspectiveHandoff = prospectiveHandoffTasks[0];
   const claim = getClaimForReview(data, review.id);
   const riskAdjustment = isRiskAdjustmentCondition(condition);
+  const acuteCondition = isAcuteCondition(condition);
   const hierarchy = getConditionHierarchySuppression(condition, review, data);
   const marginalRaf = getConditionMarginalScore(data, review, condition);
   const failedEligibilityChecks = [
@@ -1397,7 +1401,11 @@ function ConditionCard({
     return `${base}${condition.draftDisposition?.action === action ? " action-selected" : ""}`;
   }
 
-  const token = condition.subtype ? subtypeTokens[condition.subtype] : categoryTokens[condition.category];
+  const token = riskAdjustment
+    ? condition.subtype
+      ? subtypeTokens[condition.subtype]
+      : categoryTokens[condition.category]
+    : clinicalContextToken;
   const marker =
     !riskAdjustment
       ? "Q"
@@ -1413,7 +1421,7 @@ function ConditionCard({
   const evidenceSummary = evidence[0]?.summary ?? "No evidence found.";
 
   return (
-    <article className={`condition-card condition-${condition.category} ${condition.workflow === "prospective" ? "prospective-condition" : ""} ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
+    <article className={`condition-card ${riskAdjustment ? `condition-${condition.category}` : "condition-context"} ${condition.workflow === "prospective" ? "prospective-condition" : ""} ${isWarning ? "needs-action" : ""} ${isActive ? "active-condition" : ""}`} onClick={() => setActiveConditionId(condition.id)}>
       <div className="condition-card-header">
         <div className="condition-marker" style={{ color: token.color, background: token.bg, borderColor: token.border }}>{marker}</div>
         <div>
@@ -1427,9 +1435,9 @@ function ConditionCard({
             <span>{condition.claimStatus}</span>
             <span>Source {formatDate(condition.sourceDate)}</span>
           </div>
-          <p className="condition-meat-line">MEAT: {evidenceSummary}</p>
+          <p className="condition-meat-line">{riskAdjustment ? "MEAT" : "Evidence"}: {evidenceSummary}</p>
         </div>
-        <CategoryBadge category={condition.category} subtype={condition.subtype} />
+        {riskAdjustment ? <CategoryBadge category={condition.category} subtype={condition.subtype} /> : <StatusChip tone="info">Non-HCC context</StatusChip>}
       </div>
       {riskAdjustment ? <RecommendationBox recommendation={recommendation} settings={settings} /> : null}
       {hierarchy.fullySuppressed ? (
@@ -1438,14 +1446,14 @@ function ConditionCard({
           {hierarchy.suppressedHccs.map(({ lower, higher }) => `${lower} locked by captured ${higher}`).join("; ")}
         </div>
       ) : null}
-      {condition.workflow === "prospective" ? (
+      {riskAdjustment && condition.workflow === "prospective" ? (
         <div className="prospective-question">
           <strong>Prospective CDI question</strong>
           <span>Does the available evidence support addressing {condition.icd10} at the upcoming encounter?</span>
         </div>
       ) : null}
       {riskAdjustment ? <RuleMessages ruleResult={ruleResult} jumpToEvidence={jumpToEvidence} /> : null}
-      {failedEligibilityChecks.length ? (
+      {riskAdjustment && failedEligibilityChecks.length ? (
         <div className="source-eligibility-row compact eligibility-issues" aria-label="Source eligibility issues">
           {failedEligibilityChecks.map((item) => <EligibilityChip key={item.label} label={item.label} ok={false} />)}
         </div>
@@ -1453,7 +1461,7 @@ function ConditionCard({
       <details className="condition-history-details">
         <summary>Review details</summary>
         <div className="condition-history">
-          <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
+          <span>{riskAdjustment ? `Originally presented as: ${categoryTokens[condition.originalCategory ?? condition.category].label}` : "Original context: Non-payment clinical context"}</span>
           <span>Recommendation: {recommendation?.action ?? condition.originalRecommendation ?? "None"} ({recommendation?.source ?? condition.recommendationSource ?? "rules"})</span>
           <span>Draft decision: {condition.draftDisposition ? `${condition.draftDisposition.action} for CY ${review.calendarYear}` : "None"}</span>
           <span>Committed decision: {condition.disposition ? condition.disposition.action : "None"}</span>
@@ -1605,7 +1613,19 @@ function ConditionCard({
           </div>
         </div>
       ) : null}
-      {riskAdjustment && !hierarchy.fullySuppressed ? (
+      {!riskAdjustment ? (
+        <div className="condition-decision-controls condition-context-controls">
+          <strong className="decision-year-label">Non-HCC clinical context</strong>
+          <div className="action-row">
+            <span className="condition-context-note">Evidence remains available for review; this diagnosis does not change HCC or RAF.</span>
+            <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>
+              <Flag size={14} />
+              Flag issue
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {riskAdjustment && !hierarchy.fullySuppressed && !acuteCondition ? (
         <div className="condition-secondary-actions">
           <span>Optional next-year follow-up</span>
           <Button
@@ -1798,6 +1818,7 @@ function FlagModal({ condition, reviewId, onClose }: { condition: Condition; rev
   const { actions } = useAppState();
   const [issue, setIssue] = useState<DocumentationIssue>("Not risk eligible CPT source");
   const [comments, setComments] = useState("");
+  const commentsRequired = issue === "Provider education" || issue === "Other documentation issue";
   return (
     <Modal title="Flag Documentation Issue" onClose={onClose}>
       <label>
@@ -1810,13 +1831,13 @@ function FlagModal({ condition, reviewId, onClose }: { condition: Condition; rev
       </label>
       <label>
         Comments
-        <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder={issue === "Provider education" ? "Provider education comments" : "Optional comments"} />
+        <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder={commentsRequired ? "Describe the issue" : "Optional comments"} />
       </label>
       <div className="modal-actions">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
-          disabled={issue === "Provider education" && !comments.trim()}
+          disabled={commentsRequired && !comments.trim()}
           onClick={() => {
             actions.flagDocumentationIssue(reviewId, condition.id, issue, comments);
             onClose();

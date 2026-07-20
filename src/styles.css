@@ -2005,6 +2005,22 @@ tr.chart-row.has-evidence td {
   color: var(--text-muted);
 }
 
+.condition-context {
+  background: #fcfcfd;
+}
+
+.condition-context-controls {
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.condition-context-note {
+  flex: 1 1 320px;
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
 .condition-meat-line {
   font-size: 0.84rem;
   font-weight: 650;

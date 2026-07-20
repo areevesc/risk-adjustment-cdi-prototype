@@ -947,6 +947,25 @@ const correctedDiagnosisEvidence: EvidencePassage[] = [
     evidenceStrength: "assessmentWithPlan",
     currentYearSupport: true,
     chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
+  },
+  {
+    id: "ev-cond-100-f-hpi",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-note",
+    anchorId: "sec-rev-100-note-2",
+    sectionId: "sec-rev-100-note-2",
+    text: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
+    exactText: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
+    date: "2026-04-12",
+    category: "prospective",
+    subtype: "suspect",
+    conditionIds: ["cond-100-f"],
+    summary: "Current vascular symptoms and diminished pedal pulses support diagnosis-specific review for diabetic peripheral angiopathy without gangrene.",
+    sourceType: "hpiSentence",
+    evidenceStrength: "clinicalIndicatorOnly",
+    currentYearSupport: false,
+    suspectOnly: true,
+    chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "hpi" }
   }
 ];
 
@@ -1007,8 +1026,7 @@ export const conditions: Condition[] = [
     id: "cond-100-c",
     reviewId: "rev-100",
     workflow: "codesOnClaim",
-    category: "prospective",
-    subtype: "recapture",
+    category: "potentialDelete",
     icd10: "I50.33",
     description: "Acute-on-chronic diastolic heart failure",
     hcc: "HCC 222",
@@ -1018,16 +1036,18 @@ export const conditions: Condition[] = [
     evidenceIds: ["ev-rev-100-b", "ev-rev-100-f"],
     actionable: true,
     currentYear: true,
+    persistence: "acute",
+    acuteCondition: true,
     hasSufficientMeat: false,
-    hasOtherSupportingEvidence: true,
+    hasOtherSupportingEvidence: false,
     hadPriorCapture: true,
     hasCurrentYearCapture: true,
     hasClinicalIndicators: true,
     seededRecommendation: {
-      action: "Send to Prospective",
-      confidence: "Medium",
+      action: "Delete",
+      confidence: "High",
       source: "seeded",
-      rationale: "Documentation is suggestive but MEAT is incomplete while the current-year opportunity remains open."
+      rationale: "This acute diagnosis is not supported by encounter-specific acute-condition management in the outpatient chart and should not be carried forward."
     },
     documentationIssues: []
   },
@@ -1816,7 +1836,8 @@ function evidenceIsRelevantToDiagnosis(evidenceItem: EvidencePassage, condition:
   const code = condition.icd10.toLowerCase();
   if (text.includes(code)) return true;
   const hccs = getCmsV28DisplayHccs(condition.icd10).toLowerCase().split(" + ").filter(Boolean);
-  if (["claimLine", "morPayerRegistryHie"].includes(evidenceItem.sourceType ?? "") && hccs.some((hcc) => text.includes(hcc))) return true;
+  const acuteCondition = condition.persistence === "acute" || condition.acuteCondition === true || /\bacute\b/i.test(condition.description);
+  if (!acuteCondition && ["claimLine", "morPayerRegistryHie"].includes(evidenceItem.sourceType ?? "") && hccs.some((hcc) => text.includes(hcc))) return true;
 
   switch (condition.icd10) {
     case "I10":

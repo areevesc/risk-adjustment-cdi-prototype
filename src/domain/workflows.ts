@@ -774,7 +774,7 @@ export function flagDocumentationIssue(
 ): SeedData {
   const review = data.reviews.find((item) => item.id === reviewId);
   if (!review || !userCanFlagDocumentationIssue(review, user)) return data;
-  if (issue === "Provider education" && !comments?.trim()) return data;
+  if (["Provider education", "Other documentation issue"].includes(issue) && !comments?.trim()) return data;
   let next = updateCondition(data, conditionId, (condition) => ({
     ...condition,
     documentationIssues: [{ issue, comments: comments?.trim() || undefined, userId: user.id, createdAt: stamp() }, ...condition.documentationIssues]

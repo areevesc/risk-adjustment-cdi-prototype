@@ -67,7 +67,7 @@ function disposeRev100(data: SeedData, auditSampleRate: number) {
   let next = openReview(data, "rev-100", user(data, "u-coder-1"));
   next = setDisposition(next, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Delete", true, settings);
-  next = setDisposition(next, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
+  next = setDisposition(next, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Delete", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Disagree", true, settings, "Condition Resolved");
   next = setDisposition(next, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
@@ -407,7 +407,8 @@ describe("prototype workflow rules", () => {
     const chfEvidence = getActiveConditionEvidence(data, relatedEvidence, "cond-100-c");
 
     expect(diabetesEvidence.map((evidence) => evidence.id)).toEqual(["ev-rev-100-a", "ev-rev-100-e"]);
-    expect(chfEvidence.map((evidence) => evidence.id)).toEqual(expect.arrayContaining(["ev-rev-100-f", "ev-rev-100-mor"]));
+    expect(chfEvidence.map((evidence) => evidence.id)).toEqual(["ev-rev-100-f"]);
+    expect(chfEvidence.map((evidence) => evidence.id)).not.toContain("ev-rev-100-mor");
     expect(chfEvidence.map((evidence) => evidence.id)).not.toContain("ev-rev-100-a");
     expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-a", "next")?.id).toBe("ev-rev-100-e");
     expect(getEvidenceCycleTarget(diabetesEvidence, "ev-rev-100-e", "next")?.id).toBe("ev-rev-100-a");
@@ -558,25 +559,25 @@ describe("prototype workflow rules", () => {
     expect(getDispositionSummary(next, review).Validated.count).toBe(0);
   });
 
-  it("stages current-year Send to Prospective as a claim decision without replacing the independent next-year handoff", () => {
+  it("keeps an acute on-claim diagnosis in the conservative delete path", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = data.conditions.find((item) => item.id === "cond-100-c")!;
+    const recommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
+    const result = getRuleResult(condition, review, data, settings);
     const next = setDisposition(data, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
-    const review = next.reviews.find((item) => item.id === "rev-100")!;
-    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftDisposition?.action).toBe("Send to Prospective");
-    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftProspectiveHandoff).toBeUndefined();
-    expect(next.downstreamTasks).toHaveLength(0);
-    expect(getUnresolvedConditions(next, review).map((item) => item.id)).not.toContain("cond-100-c");
+    const deleted = setDisposition(data, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Delete", true, settings);
 
-    const completed = disposeRev100(cloneSeed(), 0).data;
-    expect(completed.downstreamTasks).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        conditionId: "cond-100-c",
-        type: "Prospective CDI Review",
-        queue: "Prospective Review Queue",
-        sourceCalendarYear: 2026,
-        targetCalendarYear: 2026
-      })
+    expect(condition).toMatchObject({ category: "potentialDelete", persistence: "acute", acuteCondition: true });
+    expect(condition.subtype).toBeUndefined();
+    expect(recommendation).toMatchObject({ action: "Delete", confidence: "High" });
+    expect(result.disabledActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "Send to Prospective", ruleId: "acute-on-claim-conservative-delete" })
     ]));
+    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftDisposition).toBeUndefined();
+    expect(deleted.conditions.find((item) => item.id === "cond-100-c")?.draftDisposition?.action).toBe("Delete");
+    expect(getUnresolvedConditions(deleted, review).map((item) => item.id)).not.toContain("cond-100-c");
+    expect(disposeRev100(cloneSeed(), 0).data.downstreamTasks.some((task) => task.conditionId === "cond-100-c" && task.type === "Prospective CDI Review")).toBe(false);
   });
 
   it("disables the claim-year Send to Prospective decision outside the configured current year", () => {
@@ -759,10 +760,10 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     const summary = getRafSummary(data, review);
     expect(summary.demographicRaf).toBeCloseTo(0.465);
     expect(summary.validatedCapturedRaf).toBeCloseTo(0.638);
-    expect(summary.unresolvedPotentialRaf).toBeCloseTo(0);
+    expect(summary.unresolvedPotentialRaf).toBeCloseTo(0.472);
     expect(summary.potentialAdditionRaf).toBeCloseTo(0);
-    expect(summary.potentialDeletionRaf).toBeCloseTo(0);
-    expect(summary.prospectiveRecaptureRaf).toBeCloseTo(0.472);
+    expect(summary.potentialDeletionRaf).toBeCloseTo(0.472);
+    expect(summary.prospectiveRecaptureRaf).toBeCloseTo(0);
     expect(summary.prospectiveSuspectRaf).toBeCloseTo(0);
     expect(summary.projectedRaf).toBeCloseTo(1.103);
   });

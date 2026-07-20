@@ -19,6 +19,10 @@ export function isRiskAdjustmentCondition(condition: Condition) {
   return getConditionProgram(condition) === "risk-adjustment";
 }
 
+export function isAcuteCondition(condition: Condition) {
+  return condition.persistence === "acute" || condition.acuteCondition === true || /\bacute\b/i.test(condition.description);
+}
+
 export function getConditionHccs(condition: Condition, patient?: Patient): CmsV28Hcc[] {
   const age = patient ? ageForPatient(patient) : undefined;
   return getCmsV28Hccs(getEffectiveDiagnosisCode(condition), age);

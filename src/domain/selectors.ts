@@ -131,6 +131,7 @@ export function getPresentedOpportunitySummary(data: SeedData, review: PatientRe
     prospective: { count: 0, raf: 0 }
   };
   return conditions.reduce((summary, condition) => {
+    if (!isRiskAdjustmentCondition(condition)) return summary;
     const category = condition.originalCategory ?? condition.category;
     summary[category].count += 1;
     summary[category].raf += getConditionMarginalScore(data, review, condition);
@@ -157,7 +158,7 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
     DispositionSummaryLabel,
     { count: number; raf: number }
   >;
-  reviewConditions(data, review).forEach((condition) => {
+  reviewConditions(data, review).filter(isRiskAdjustmentCondition).forEach((condition) => {
     const label = getDispositionSummaryLabel(condition);
     initial[label].count += 1;
     initial[label].raf += getConditionMarginalScore(data, review, condition);

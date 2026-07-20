@@ -149,8 +149,30 @@ describe("seeded clinical content", () => {
     const angiopathyEvidence = demoSeedData.evidence.filter((item) => item.conditionIds.includes("cond-100-f"));
     const angiopathyText = angiopathyEvidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase();
     expect(angiopathyEvidence.length).toBeGreaterThan(0);
+    expect(angiopathyEvidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "ev-cond-100-f-hpi",
+        sourceType: "hpiSentence",
+        evidenceStrength: "clinicalIndicatorOnly",
+        chartAnchor: expect.objectContaining({ tab: "encounters", sectionId: "hpi" })
+      })
+    ]));
     expect(angiopathyText).toContain("peripheral angiopathy");
+    expect(angiopathyText).toContain("pedal pulses are diminished");
     expect(angiopathyText).not.toMatch(/retina|macular|ophthalm/);
+
+    const chart = demoSeedData.charts.find((item) => item.reviewId === "rev-100")!;
+    const currentEncounter = chart.encounters.find((item) => item.id === "chart-rev-100-encounter-current")!;
+    const angiopathyHpi = angiopathyEvidence.find((item) => item.id === "ev-cond-100-f-hpi")!;
+    expect(currentEncounter.hpi).toContain(angiopathyHpi.exactText);
+    expect(currentEncounter.sectionEvidenceIds?.hpi).toContain(angiopathyHpi.id);
+
+    expect(demoSeedData.conditions.find((item) => item.id === "cond-100-c")).toMatchObject({
+      category: "potentialDelete",
+      persistence: "acute",
+      acuteCondition: true,
+      seededRecommendation: { action: "Delete", confidence: "High" }
+    });
   });
 
   it("uses coherent stage 4 CKD and severe-obesity facts throughout Victor Coleman's chart", () => {
