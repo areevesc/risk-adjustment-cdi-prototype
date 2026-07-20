@@ -106,7 +106,7 @@ function isDeterministicRuleResolved(condition: Condition) {
 
 function hasRequiredWorkflowDecision(condition: Condition) {
   const action = getEffectiveDisposition(condition)?.action;
-  if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete";
+  if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete" || action === "Send to Prospective";
   if (condition.workflow === "codesNotOnClaim") return action === "Add to Claim" || action === "Disagree";
   return action === "Yes" || action === "No" || action === "Change";
 }
@@ -131,6 +131,7 @@ export function getPresentedOpportunitySummary(data: SeedData, review: PatientRe
     prospective: { count: 0, raf: 0 }
   };
   return conditions.reduce((summary, condition) => {
+    if (!isRiskAdjustmentCondition(condition)) return summary;
     const category = condition.originalCategory ?? condition.category;
     summary[category].count += 1;
     summary[category].raf += getConditionMarginalScore(data, review, condition);
@@ -157,7 +158,7 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
     DispositionSummaryLabel,
     { count: number; raf: number }
   >;
-  reviewConditions(data, review).forEach((condition) => {
+  reviewConditions(data, review).filter(isRiskAdjustmentCondition).forEach((condition) => {
     const label = getDispositionSummaryLabel(condition);
     initial[label].count += 1;
     initial[label].raf += getConditionMarginalScore(data, review, condition);
@@ -342,7 +343,12 @@ export function getActiveConditionEvidence(data: SeedData, relatedEvidence: Evid
   if (!activeConditionId) return relatedEvidence;
   const condition = data.conditions.find((item) => item.id === activeConditionId);
   if (!condition) return relatedEvidence.filter((item) => item.conditionIds.includes(activeConditionId));
-  const allowedIds = new Set(condition.evidenceIds);
+  const allowedIds = new Set([
+    ...condition.evidenceIds,
+    ...(condition.supportingEvidenceIds ?? []),
+    ...(condition.conflictingEvidenceIds ?? []),
+    ...(condition.lookbackEvidenceIds ?? [])
+  ]);
   return relatedEvidence.filter((item) => allowedIds.has(item.id) || item.conditionIds.includes(activeConditionId));
 }
 

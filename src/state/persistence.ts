@@ -1,7 +1,7 @@
 import type { AppSettings, Condition, PatientReview, SeedData } from "../domain/types";
 import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "../domain/cmsV28";
 
-export const CURRENT_CONTENT_REVISION = 8;
+export const CURRENT_CONTENT_REVISION = 10;
 
 export interface PersistedState {
   contentRevision: number;

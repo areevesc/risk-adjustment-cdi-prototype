@@ -109,10 +109,17 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
     };
   }
   if (diabetesText && (text.includes("neuropathy") || text.includes("polyneuropathy"))) {
+    const polyneuropathy = condition.icd10 === "E11.42";
     return {
-      hpi: "Patient reports burning and numbness in both feet, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration.",
-      plan: "Burning and numbness in both feet remain active. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
-      weakMention: "Diabetic neuropathy appears on the problem list and in prior podiatry records.",
+      hpi: polyneuropathy
+        ? "Patient reports bilateral burning and numbness in a stocking distribution, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration."
+        : "Patient reports burning and numbness in both feet, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration.",
+      plan: polyneuropathy
+        ? "Diabetic polyneuropathy remains active with bilateral burning and numbness. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months."
+        : "Diabetic neuropathy remains active with burning and numbness in both feet. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
+      weakMention: polyneuropathy
+        ? "Diabetic polyneuropathy appears on the problem list and in prior podiatry records."
+        : "Diabetic neuropathy appears on the problem list and in prior podiatry records.",
       labResults: [
         { component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" },
         { component: "Vitamin B12", value: "388", unit: "pg/mL", referenceRange: "232-1245", flag: "normal" }
@@ -131,7 +138,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
         note: "Protective sensation reduced bilaterally; nail care performed and diabetic footwear reviewed.",
         assessment: ["Diabetic peripheral neuropathy", "Continue foot surveillance"]
       },
-      pmh: "Type 2 diabetes with neuropathic symptoms in both feet.",
+      pmh: polyneuropathy ? "Type 2 diabetes with bilateral polyneuropathy symptoms." : "Type 2 diabetes with neuropathic symptoms in both feet.",
       ros: ["Neurologic: numbness and burning in both feet.", "Skin: no new ulcer or drainage.", "Endocrine: glucose variability reviewed."],
       exam: [
         { system: "Neurologic", text: "Diminished sensation to monofilament testing at bilateral plantar feet." },
@@ -143,22 +150,22 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
   if (condition.icd10 === "E11.51") {
     return {
       hpi: "Patient reports exertional calf discomfort without rest pain. Pedal pulses are diminished bilaterally; no gangrene or active ulcer is present.",
-      plan: "Diabetic peripheral angiopathy without gangrene remains active. Continue statin and antiplatelet therapy, reinforce foot protection, obtain ankle-brachial indices, and follow vascular medicine.",
+      plan: "Abnormal bilateral ABI results were reviewed. Refer to vascular medicine for confirmation of diabetic peripheral angiopathy, continue vascular risk reduction, and reinforce foot protection.",
       weakMention: "Diabetic peripheral angiopathy appears in the vascular problem list.",
       labResults: [],
       medication: { name: "Aspirin", dose: "81 mg", route: "PO", frequency: "daily", prescriber: "" },
       imaging: {
         type: "Lower-extremity arterial duplex",
         indication: "Diabetic peripheral angiopathy assessment",
-        findings: "Reduced distal arterial flow without occlusion; ankle-brachial indices are abnormal bilaterally.",
-        impression: ["Peripheral arterial disease without gangrene."]
+        findings: "Right ABI 0.78 and left ABI 0.82 with monophasic distal Doppler waveforms; no occlusion, ulcer, or gangrene.",
+        impression: ["Abnormal bilateral resting ABI consistent with lower-extremity peripheral arterial disease.", "No gangrene."]
       },
       specialist: {
         specialty: "Vascular Medicine",
         provider: "Rina Shah, MD",
         title: "Vascular follow-up",
-        note: "Diabetic peripheral angiopathy without gangrene reviewed with abnormal pedal pulses and ABI results.",
-        assessment: ["Diabetic peripheral angiopathy without gangrene", "Continue vascular risk reduction"]
+        note: "Abnormal bilateral resting ABI results reviewed; diabetic peripheral angiopathy requires provider confirmation at the upcoming visit.",
+        assessment: ["Abnormal ABI with suspected peripheral arterial disease", "Continue vascular risk reduction"]
       },
       pmh: "Type 2 diabetes with peripheral angiopathy without gangrene.",
       ros: ["Vascular: exertional calf discomfort without rest pain.", "Skin: no ulcer or gangrene."],
@@ -546,7 +553,7 @@ export function assessmentPlanTextForCondition(condition: Condition) {
     }
     return profile.weakMention;
   }
-  return profile.plan;
+  return `${condition.description}: ${profile.plan}`;
 }
 
 export function meatTypesForSource(sourceType: EvidenceSourceType, strength: EvidenceStrength): MeatType[] | undefined {

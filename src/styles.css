@@ -457,14 +457,20 @@ button:disabled,
 
 .filter-bar {
   display: grid;
-  grid-template-columns: minmax(280px, 1.5fr) repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: minmax(240px, 1.5fr) repeat(4, minmax(112px, 0.7fr)) auto;
   gap: 10px;
   align-items: center;
   margin-bottom: 14px;
 }
 
 .filter-bar .button {
+  width: auto;
+  justify-self: end;
   white-space: nowrap;
+}
+
+.manager-queue-page .filter-bar {
+  grid-template-columns: minmax(220px, 1.35fr) repeat(5, minmax(106px, 0.65fr)) auto;
 }
 
 .search-box {
@@ -534,32 +540,30 @@ label {
 }
 
 .queue-count {
-  margin: 0 0 10px;
+  margin: 0;
   color: var(--text-muted);
   font-weight: 800;
+  white-space: nowrap;
 }
 
-.queue-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
+.queue-list-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
-.queue-metric-card,
+.queue-action-feedback {
+  margin-bottom: 14px;
+}
+
 .patient-queue-row {
   background: #ffffff;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
-.queue-metric-card {
-  min-height: 94px;
-  padding: 16px;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
-}
-
-.queue-metric-card span,
 .patient-queue-status span {
   display: block;
   color: var(--text-muted);
@@ -568,20 +572,12 @@ label {
   text-transform: uppercase;
 }
 
-.queue-metric-card strong {
-  display: block;
-  margin-top: 8px;
-  color: #101828;
-  font-size: 1.5rem;
-  letter-spacing: 0;
-}
-
 .queue-category-legend {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 18px;
-  margin: 2px 0 18px;
+  margin: 2px 0;
   color: #667085;
   font-size: 0.82rem;
   font-weight: 650;
@@ -642,8 +638,8 @@ label {
 
 .patient-queue-table-head {
   display: grid;
-  grid-template-columns: minmax(220px, 1.35fr) minmax(160px, 0.9fr) minmax(150px, 0.82fr) 86px 132px 86px;
-  gap: 14px;
+  grid-template-columns: minmax(200px, 1.3fr) minmax(150px, 0.9fr) minmax(135px, 0.75fr) 75px 156px 80px;
+  gap: 10px;
   padding: 10px 16px;
   color: #667085;
   background: #f8fbfd;
@@ -661,8 +657,8 @@ label {
 
 .patient-queue-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.35fr) minmax(160px, 0.9fr) minmax(150px, 0.82fr) 86px 132px 86px;
-  gap: 14px;
+  grid-template-columns: minmax(200px, 1.3fr) minmax(150px, 0.9fr) minmax(135px, 0.75fr) 75px 156px 80px;
+  gap: 10px;
   align-items: center;
   padding: 15px 16px;
   border: 0;
@@ -911,18 +907,13 @@ label {
   gap: 6px;
 }
 
-.queue-table .queue-category-badge,
-.queue-card .queue-category-badge {
+.queue-table .queue-category-badge {
   width: auto;
   min-width: 0;
 }
 
 .queue-table .row-actions {
   flex-wrap: nowrap;
-}
-
-.mobile-queue-list {
-  display: none;
 }
 
 .stat span,
@@ -1181,6 +1172,23 @@ label {
 .review-page .split-workspace > .panel {
   max-height: none;
   overflow: visible;
+}
+
+.review-page .split-workspace > .chart-evidence-panel {
+  position: sticky;
+  top: 68px;
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.chart-evidence-panel > .panel-header {
+  position: sticky;
+  top: -18px;
+  z-index: 6;
+  padding: 14px 0 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .document-viewer {
@@ -1913,12 +1921,97 @@ tr.chart-row.has-evidence td {
   background: #667085;
 }
 
+.condition-family-group .condition-group-dot {
+  background: #0b6fae;
+}
+
+.condition-family-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: #f8fbfe;
+}
+
+.condition-family-path {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  color: #0f4d78;
+  background: #e8f4ff;
+  border: 1px solid #b7d8ef;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.condition-family-item:last-child > .condition-card,
+.condition-family-item:last-child > .trumped-condition-card {
+  border-bottom: 0;
+}
+
+.trumped-condition-card {
+  overflow: hidden;
+  background: #fafbfc;
+  border-bottom: 1px solid var(--border);
+}
+
+.trumped-condition-card > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.trumped-condition-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.trumped-condition-card > summary:hover {
+  background: #f2f6fa;
+}
+
+.trumped-condition-card[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.trumped-condition-card[open] > summary > svg {
+  transform: rotate(180deg);
+}
+
+.trumped-condition-card > .condition-card {
+  border-bottom: 0;
+}
+
+.trumped-condition-marker {
+  color: #7a4b00;
+  background: #fff5db;
+  border-color: #d79b1e;
+}
+
+.trumped-condition-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: #263e54;
+  font-size: 0.84rem;
+}
+
+.trumped-condition-copy small {
+  color: #667085;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
 .condition-card,
 .audit-condition,
 .export-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 15px 16px;
   background: #ffffff;
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -1997,6 +2090,22 @@ tr.chart-row.has-evidence td {
   color: var(--text-muted);
 }
 
+.condition-context {
+  background: #fcfcfd;
+}
+
+.condition-context-controls {
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+
+.condition-context-note {
+  flex: 1 1 320px;
+  color: #667085;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
 .condition-meat-line {
   font-size: 0.84rem;
   font-weight: 650;
@@ -2048,22 +2157,20 @@ tr.chart-row.has-evidence td {
   font-weight: 700;
 }
 
-.prospective-rationale {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  background: #fffaf3;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
+.condition-history-details {
+  color: #475569;
+  font-size: 0.82rem;
 }
 
-.prospective-rationale ul {
-  display: grid;
-  gap: 5px;
-  margin: 0;
-  padding-left: 1.1rem;
-  color: #344054;
-  font-size: 0.86rem;
+.condition-history-details > summary {
+  width: fit-content;
+  color: #52677c;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.condition-history-details[open] > summary {
+  margin-bottom: 7px;
 }
 
 .prospective-question {
@@ -2165,25 +2272,22 @@ tr.chart-row.has-evidence td {
   background: #fff8ed;
 }
 
-.prospective-handoff-controls {
+.condition-secondary-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  padding: 10px;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  background: #fffaf3;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
 }
 
-.prospective-handoff-controls > div {
-  display: grid;
-  flex: 1 1 340px;
-  gap: 3px;
+.condition-secondary-actions > span {
+  color: #667085;
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
-.prospective-handoff-controls p,
 .incoming-prospective-handoffs p,
 .incoming-handoff-card p {
   margin: 0;
@@ -2191,13 +2295,13 @@ tr.chart-row.has-evidence td {
   font-size: 0.8rem;
 }
 
-.prospective-handoff-controls .action-prospective:not(:disabled) {
+.condition-secondary-actions .action-prospective:not(:disabled) {
   color: #b45309;
-  background: #ffedcf;
+  background: #fff8ed;
   border-color: #fed7aa;
 }
 
-.prospective-handoff-controls .action-selected:not(:disabled) {
+.condition-secondary-actions .action-selected:not(:disabled) {
   box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.2);
   font-weight: 800;
 }
@@ -2531,6 +2635,13 @@ tr.chart-row.has-evidence td {
   gap: 14px;
 }
 
+.audit-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .audit-condition-list {
   display: grid;
   gap: 10px;
@@ -2539,58 +2650,6 @@ tr.chart-row.has-evidence td {
 .compact-list {
   display: grid;
   gap: 4px;
-}
-
-.queue-card {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  background: #ffffff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.queue-card header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.queue-card-details {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px 12px;
-  margin: 0;
-}
-
-.queue-card-details div {
-  min-width: 0;
-}
-
-.queue-card-details dt {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.queue-card-details dd {
-  margin: 2px 0 0;
-  color: #1b242c;
-  line-height: 1.25;
-}
-
-.queue-card-indicators {
-  align-items: flex-start;
-}
-
-.queue-card-actions {
-  justify-content: flex-end;
-}
-
-.queue-card-actions .button {
-  min-height: 42px;
 }
 
 .export-grid {
@@ -2646,6 +2705,14 @@ tr.chart-row.has-evidence td {
 
   .review-page .split-workspace > .panel {
     max-height: none;
+    position: static;
+    overflow: visible;
+  }
+
+  .chart-evidence-panel > .panel-header {
+    position: static;
+    padding: 0;
+    border-bottom: 0;
   }
 }
 
@@ -2695,37 +2762,12 @@ tr.chart-row.has-evidence td {
 }
 
 @media (max-width: 760px) {
-  .queue-table-wrap {
-    display: none;
-  }
-
-  .mobile-queue-list {
-    display: grid;
-    gap: 12px;
-  }
-
   .filter-bar {
     grid-template-columns: 1fr;
   }
 
   .filter-bar .button {
     justify-self: stretch;
-  }
-
-  .queue-card header {
-    flex-direction: column;
-  }
-
-  .queue-card-details {
-    grid-template-columns: 1fr;
-  }
-
-  .queue-card-actions {
-    justify-content: stretch;
-  }
-
-  .queue-card-actions .button {
-    flex: 1 1 0;
   }
 
   .patient-header-actions {

@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table";
-import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
+import { ArrowUpDown, Info, Lock, Play, Search, UserPlus } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
   getPresentedOpportunitySummary,
   getProspectiveCounts,
-  getReviewScenarioTags,
   isAssignedToUser
 } from "../../domain/selectors";
 import type { PatientReview, WorkflowStatus } from "../../domain/types";
@@ -37,7 +36,6 @@ interface QueueRow {
   categories: ReturnType<typeof getPresentedOpportunitySummary>;
   recapture: number;
   suspect: number;
-  sourceExamples: string[];
   noVisit: boolean;
   age: number;
   totalRaf: number;
@@ -55,12 +53,13 @@ export function QueuePage() {
   const canUseCdiCoverageFilter = currentUser.roles.includes("CDI/Coder") && !hasAnyRole(currentUser, ["Administrator", "Manager", "Auditor"]);
   const [teamMemberFilter, setTeamMemberFilter] = useState(canUseCdiCoverageFilter ? "Mine" : "All");
   const [categoryFilter, setCategoryFilter] = useState("All");
-  const [sourceExampleFilter, setSourceExampleFilter] = useState("All");
-  const [noVisitOnly, setNoVisitOnly] = useState(false);
+  const [visitFilter, setVisitFilter] = useState("All");
+  const [nextPatientMessage, setNextPatientMessage] = useState("");
   const canFilterByTeamMember = canAssignReviews(currentUser) || canUseCdiCoverageFilter;
 
   useEffect(() => {
     setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
+    setNextPatientMessage("");
   }, [canUseCdiCoverageFilter, currentUser.id]);
 
   const maps = useMemo(
@@ -108,7 +107,6 @@ export function QueuePage() {
         categories,
         recapture: counts.recapture,
         suspect: counts.suspect,
-        sourceExamples: getReviewScenarioTags(data, review),
         noVisit: !maps.appointments.has(patient.id),
         age: calculateAge(patient.dob, appointment?.date),
         totalRaf
@@ -116,18 +114,12 @@ export function QueuePage() {
     });
   }, [currentUser, data, maps]);
 
-  const sourceExampleOptions = useMemo(() => Array.from(new Set(rows.flatMap((row) => row.sourceExamples))).sort((a, b) => a.localeCompare(b)), [rows]);
   const teamMemberOptions = useMemo(
     () =>
       data.users
         .filter((user) => user.roles.includes("CDI/Coder"))
-        .filter((user) => !canUseCdiCoverageFilter || user.teamId === currentUser.teamId)
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [canUseCdiCoverageFilter, currentUser.teamId, data.users]
-  );
-  const selectableTeamMemberOptions = useMemo(
-    () => teamMemberOptions.filter((user) => !(canUseCdiCoverageFilter && user.id === currentUser.id)),
-    [canUseCdiCoverageFilter, currentUser.id, teamMemberOptions]
+    [data.users]
   );
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((row) => row.status))), [rows]);
 
@@ -143,10 +135,9 @@ export function QueuePage() {
       teamMemberFilter === "All" ||
       (teamMemberFilter === "Mine" ? isAssignedToUser(row.review, currentUser) : row.review.assignedUserId === teamMemberFilter);
     const matchesCategory = categoryFilter === "All" || row.categories[categoryFilter as keyof typeof row.categories]?.count > 0;
-    const matchesSourceExample = sourceExampleFilter === "All" || row.sourceExamples.includes(sourceExampleFilter);
-    const matchesVisit = !noVisitOnly || row.noVisit;
-    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesSourceExample && matchesVisit;
-  }), [canFilterByTeamMember, categoryFilter, currentUser, noVisitOnly, query, reviewTypeFilter, rows, sourceExampleFilter, statusFilter, teamMemberFilter]);
+    const matchesVisit = visitFilter === "All" || (visitFilter === "Upcoming" ? !row.noVisit : row.noVisit);
+    return matchesSearch && matchesStatus && matchesType && matchesMember && matchesCategory && matchesVisit;
+  }), [canFilterByTeamMember, categoryFilter, currentUser, query, reviewTypeFilter, rows, statusFilter, teamMemberFilter, visitFilter]);
 
   function clearFilters() {
     setQuery("");
@@ -154,8 +145,8 @@ export function QueuePage() {
     setReviewTypeFilter("All");
     if (canFilterByTeamMember) setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
     setCategoryFilter("All");
-    setSourceExampleFilter("All");
-    setNoVisitOnly(false);
+    setVisitFilter("All");
+    setNextPatientMessage("");
   }
 
   function open(reviewId: string) {
@@ -165,7 +156,16 @@ export function QueuePage() {
 
   function nextPatient() {
     const next = filteredRows.find((row) => canOpenReview(data, row.review, currentUser) && !row.review.lock && ["Available", "Pended"].includes(row.review.status));
-    if (next) open(next.review.id);
+    if (next) {
+      setNextPatientMessage("");
+      open(next.review.id);
+      return;
+    }
+    setNextPatientMessage(
+      filteredRows.length === 0
+        ? "No charts match the current filters. Clear or adjust the filters to continue."
+        : "No eligible next chart is available. The visible charts are locked, completed, or unavailable for your role."
+    );
   }
 
   const columns = [
@@ -177,7 +177,6 @@ export function QueuePage() {
           <span>
             {info.row.original.dob} - {info.row.original.memberId}
           </span>
-          {info.row.original.sourceExamples.length ? <ScenarioTagList tags={info.row.original.sourceExamples} limit={3} /> : null}
         </div>
       )
     }),
@@ -254,14 +253,6 @@ export function QueuePage() {
   const sortedRows = table.getRowModel().rows.map((row) => row.original);
   const priorityRows = sortedRows.filter((row) => !row.noVisit);
   const lowPriorityRows = sortedRows.filter((row) => row.noVisit);
-  const completedCount = rows.filter((row) => row.status === "Completed" || row.status === "Audit Complete").length;
-  const assignedCount = rows.length;
-  const averageRaf = rows.length
-    ? rows.reduce((sum, row) => sum + row.categories.validated.raf + row.categories.potentialAddition.raf + row.categories.prospective.raf - row.categories.potentialDelete.raf, 0) / rows.length
-    : 0;
-  const agreementCount = data.conditions.filter((condition) => condition.disposition?.agreedWithRecommendation).length;
-  const decisionCount = data.conditions.filter((condition) => condition.disposition).length;
-
   return (
     <div className={`page-stack ${canAssignReviews(currentUser) ? "manager-queue-page" : "cdi-queue-page"}`}>
       <Panel
@@ -273,65 +264,101 @@ export function QueuePage() {
           </Button>
         }
       >
+        {nextPatientMessage ? (
+          <div className="warning-banner queue-action-feedback" role="status" aria-live="polite">
+            <Info size={17} aria-hidden="true" />
+            {nextPatientMessage}
+          </div>
+        ) : null}
         <div className="filter-bar">
           <label className="search-box">
             <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patient, clinic, payer, provider, assigned user" />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setNextPatientMessage("");
+              }}
+              placeholder="Search patients, member ID, payer, or provider"
+            />
           </label>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Workflow status">
-            <option>All</option>
+          <select
+            value={statusFilter}
+            onChange={(event) => {
+              setStatusFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Workflow status"
+          >
+            <option value="All">All statuses</option>
             {statusOptions.map((status) => (
               <option key={status}>{status}</option>
             ))}
           </select>
-          <select value={reviewTypeFilter} onChange={(event) => setReviewTypeFilter(event.target.value)} aria-label="Review type">
-            <option>All</option>
+          <select
+            value={reviewTypeFilter}
+            onChange={(event) => {
+              setReviewTypeFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Review type"
+          >
+            <option value="All">All review types</option>
             <option>Retrospective</option>
             <option>Concurrent</option>
             <option>Prospective</option>
           </select>
-          {canFilterByTeamMember ? (
-            <select value={teamMemberFilter} onChange={(event) => setTeamMemberFilter(event.target.value)} aria-label="Team member">
-              {canUseCdiCoverageFilter ? <option value="Mine">My Queue</option> : null}
-              <option value="All">{canUseCdiCoverageFilter ? "All CDI/Coder Queues" : "All team members"}</option>
-              {selectableTeamMemberOptions.map((user) => (
+          {canAssignReviews(currentUser) ? (
+            <select
+              value={teamMemberFilter}
+              onChange={(event) => {
+                setTeamMemberFilter(event.target.value);
+                setNextPatientMessage("");
+              }}
+              aria-label="Team member"
+            >
+              <option value="All">All team members</option>
+              {teamMemberOptions.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.name}
                 </option>
               ))}
             </select>
           ) : null}
-          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Category">
+          <select
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Category"
+          >
             <option value="All">All categories</option>
             <option value="validated">Validated</option>
             <option value="potentialDelete">Potential Delete</option>
             <option value="potentialAddition">Potential Addition</option>
             <option value="prospective">CDI Recapture/Suspect</option>
           </select>
-          <select value={sourceExampleFilter} onChange={(event) => setSourceExampleFilter(event.target.value)} aria-label="Scenario or source example">
-            <option value="All">All source/scenario examples</option>
-            {sourceExampleOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
+          <select
+            value={visitFilter}
+            onChange={(event) => {
+              setVisitFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Visit timing"
+          >
+            <option value="All">All visits</option>
+            <option value="Upcoming">Upcoming visits</option>
+            <option value="No upcoming visit">No upcoming visit</option>
           </select>
-          <label className="checkbox-filter">
-            <input type="checkbox" checked={noVisitOnly} onChange={(event) => setNoVisitOnly(event.target.checked)} />
-            No upcoming visit
-          </label>
           <Button variant="ghost" onClick={clearFilters}>
             Clear Filters
           </Button>
         </div>
-        <div className="queue-count">{filteredRows.length} result(s)</div>
-        <div className="queue-metric-grid">
-          <QueueMetric label="Charts assigned" value={assignedCount} />
-          <QueueMetric label="Charts completed" value={completedCount} />
-          <QueueMetric label="Average RAF impact" value={averageRaf.toFixed(3)} />
-          <QueueMetric label="AI agreement" value={`${Math.round((agreementCount / Math.max(1, decisionCount)) * 100)}%`} />
+        <div className="queue-list-meta">
+          <CategoryLegend />
+          <div className="queue-count">{filteredRows.length} chart(s)</div>
         </div>
-        <CategoryLegend />
         <PatientQueueSection title="Upcoming Visits" rows={priorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
         <PatientQueueSection title="Low Priority - No Upcoming Visit" rows={lowPriorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} lowPriority />
         <div className="table-wrap queue-table-wrap legacy-queue-table" aria-label="Detailed desktop work queue">
@@ -376,112 +403,7 @@ export function QueuePage() {
             </tbody>
           </table>
         </div>
-        <div className="mobile-queue-list" aria-label="Mobile work queue cards">
-          {sortedRows.map((row) => (
-            <MobileQueueCard key={row.review.id} row={row} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
-          ))}
-        </div>
       </Panel>
-    </div>
-  );
-}
-
-function MobileQueueCard({
-  row,
-  data,
-  currentUser,
-  onOpen,
-  onCover
-}: {
-  row: QueueRow;
-  data: ReturnType<typeof useAppState>["data"];
-  currentUser: ReturnType<typeof useAppState>["currentUser"];
-  onOpen: (reviewId: string) => void;
-  onCover: (reviewId: string) => void;
-}) {
-  const canCover = canTakeCoverage(data, row.review, currentUser) && !isAssignedToUser(row.review, currentUser);
-  return (
-    <article className="queue-card">
-      <header>
-        <div className="patient-cell">
-          <strong>{row.patient}</strong>
-          <span>
-            {row.dob} - {row.memberId}
-          </span>
-        </div>
-        <StatusChip tone={row.status.includes("Complete") ? "good" : row.status.includes("Audit") ? "purple" : row.status.includes("Pended") ? "warn" : "info"}>
-          <IconForStatus status={row.status} />
-          {row.status}
-        </StatusChip>
-      </header>
-      <dl className="queue-card-details">
-        <div>
-          <dt>Payer</dt>
-          <dd>{row.payer}</dd>
-        </div>
-        <div>
-          <dt>Clinic</dt>
-          <dd>{row.clinic}</dd>
-        </div>
-        <div>
-          <dt>Provider</dt>
-          <dd>{row.provider}</dd>
-        </div>
-        <div>
-          <dt>CY / type</dt>
-          <dd>
-            {row.year} - {row.type}
-          </dd>
-        </div>
-        <div>
-          <dt>Assigned</dt>
-          <dd>{row.assigned}</dd>
-        </div>
-        <div>
-          <dt>Original CDI/Coder</dt>
-          <dd>{row.originalAssignee}</dd>
-        </div>
-        <div>
-          <dt>Coverage</dt>
-          <dd>{row.coverageBy || "None"}</dd>
-        </div>
-        <div>
-          <dt>Queue</dt>
-          <dd>{row.queue}</dd>
-        </div>
-        <div>
-          <dt>Editing</dt>
-          <dd>{row.lockedBy ? `Being edited by ${row.lockedBy}` : "No active editor"}</dd>
-        </div>
-      </dl>
-      <div className="category-strip queue-card-indicators" aria-label="Category indicators">
-        {Object.entries(row.categories).map(([category, value]) => (
-          <QueueCategoryBadge key={category} category={category as keyof typeof categoryTokens} count={value.count} />
-        ))}
-        <StatusChip tone="purple">Recapture {row.recapture}</StatusChip>
-        <StatusChip tone="warn">Suspect {row.suspect}</StatusChip>
-      </div>
-      {row.sourceExamples.length ? <ScenarioTagList tags={row.sourceExamples} limit={6} /> : null}
-      <div className="row-actions queue-card-actions">
-        <Button variant="primary" onClick={() => onOpen(row.review.id)}>
-          {canOpenReview(data, row.review, currentUser) ? "Open" : "View"}
-        </Button>
-        {canCover ? (
-          <Button variant="secondary" onClick={() => onCover(row.review.id)}>
-            <UserPlus size={14} />
-            Take Coverage
-          </Button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function QueueMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="queue-metric-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
     </div>
   );
 }
@@ -539,7 +461,6 @@ function PatientQueueSection({
                   {row.memberId} - DOB {row.dob} - Age {row.age}
                 </span>
               </button>
-              {row.sourceExamples.length ? <ScenarioTagList tags={row.sourceExamples} limit={2} /> : null}
               <div className="patient-queue-status">
                 {lowPriority ? <StatusChip tone="warn">Low priority - no upcoming visit</StatusChip> : <StatusChip tone="good">Upcoming visit</StatusChip>}
                 <StatusChip>{row.status}</StatusChip>
@@ -584,25 +505,17 @@ function calculateAge(dob: string, asOfDate?: string) {
   return age;
 }
 
-function ScenarioTagList({ tags, limit }: { tags: string[]; limit?: number }) {
-  const visibleTags = typeof limit === "number" ? tags.slice(0, limit) : tags;
-  const remaining = typeof limit === "number" ? tags.length - visibleTags.length : 0;
-  return (
-    <div className="scenario-tags" aria-label="Source and scenario examples">
-      {visibleTags.map((tag) => (
-        <span key={tag}>{tag}</span>
-      ))}
-      {remaining > 0 ? <span>+{remaining}</span> : null}
-    </div>
-  );
-}
-
 function QueueCategoryBadge({ category, count, compact = false }: { category: keyof typeof categoryTokens; count: number; compact?: boolean }) {
   const token = categoryTokens[category];
   const label =
     category === "potentialDelete" ? "Delete" : category === "potentialAddition" ? "Addition" : category === "prospective" ? "CDI" : token.label;
   return (
-    <span className={`category-badge queue-category-badge${compact ? " compact" : ""}`} style={{ color: token.color, background: token.bg, borderColor: token.border }}>
+    <span
+      className={`category-badge queue-category-badge${compact ? " compact" : ""}`}
+      style={{ color: token.color, background: token.bg, borderColor: token.border }}
+      aria-label={`${token.label}: ${count}`}
+      title={`${token.label}: ${count}`}
+    >
       {compact ? null : <span className="dot" />}
       {compact ? null : label}
       <strong>{count}</strong>

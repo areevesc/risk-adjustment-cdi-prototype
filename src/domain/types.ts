@@ -42,7 +42,8 @@ export type DocumentationIssue =
   | "Not risk eligible provider type"
   | "Not a face-to-face service"
   | "Invalid or missing provider signature"
-  | "Provider education";
+  | "Provider education"
+  | "Other documentation issue";
 export type DownstreamTaskType =
   | "Prospective CDI Review"
   | "Addition to Claim"

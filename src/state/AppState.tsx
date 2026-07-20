@@ -178,7 +178,13 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
         ? { ...condition.draftProspectiveHandoff, userId: normalizeUserId(condition.draftProspectiveHandoff.userId) ?? "u-coder-1" }
         : undefined,
       auditorDisposition: condition.auditorDisposition ? { ...condition.auditorDisposition, auditorId: normalizeUserId(condition.auditorDisposition.auditorId) ?? "u-auditor-1" } : undefined,
-      documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: normalizeUserId(issue.userId) ?? "u-coder-1" }))
+      documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: normalizeUserId(issue.userId) ?? "u-coder-1" })),
+      ruleOutcome: condition.ruleOutcome?.ruleId === "same-hcc-duplicate-add" ? undefined : condition.ruleOutcome,
+      draftRuleOutcome: condition.draftRuleOutcome?.ruleId === "same-hcc-duplicate-add" ? undefined : condition.draftRuleOutcome,
+      disabledReason:
+        condition.ruleOutcome?.ruleId === "same-hcc-duplicate-add" || condition.draftRuleOutcome?.ruleId === "same-hcc-duplicate-add"
+          ? undefined
+          : condition.disabledReason
     })),
     downstreamTasks: (raw.downstreamTasks ?? []).map((task) => ({
       ...task,

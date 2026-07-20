@@ -1,5 +1,5 @@
 import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
-import { getConditionHccs, getConditionHierarchySuppression, isRiskAdjustmentCondition } from "../domain/conditionRisk";
+import { getConditionHccs, getConditionHierarchySuppression, getEffectiveDisposition, isAcuteCondition, isRiskAdjustmentCondition } from "../domain/conditionRisk";
 import type { CmsV28Hcc } from "../domain/cmsV28";
 
 export interface DecisionSupportService {
@@ -21,9 +21,11 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const supportingEvidenceIds = new Set<string>(condition.supportingEvidenceIds ?? []);
     const conflictingEvidenceIds = new Set<string>(condition.conflictingEvidenceIds ?? []);
     const acuteExclusion = evaluateAcuteOnlyRecaptureExclusion(condition);
+    const acuteOnClaim = isAcuteCondition(condition) && condition.workflow === "codesOnClaim";
     const hierarchy = evaluateHierarchySuppression(condition, review, data);
     const contextualExclusion = evaluateContextualExclusion(condition);
     const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
+    const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
 
     const deleteSafety = evaluateDeleteSafety(condition, review, data);
     deleteSafety.supportingEvidenceIds.forEach((id) => supportingEvidenceIds.add(id));
@@ -48,24 +50,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       condition.ruleOutcome.conflictingEvidenceIds?.forEach((id) => conflictingEvidenceIds.add(id));
     }
 
-    if (!condition.disposition && condition.workflow === "codesNotOnClaim") {
-      const selectedDuplicate = getSamePatientYearHccConditions(data, review, condition.hcc).find(
-        (item) => item.id !== condition.id && item.workflow === "codesNotOnClaim" && item.disposition?.action === "Add to Claim"
-      );
-      if (selectedDuplicate) {
-        const selectedBy = data.users.find((item) => item.id === selectedDuplicate.disposition?.userId);
-        const selectedAt = selectedDuplicate.disposition?.decidedAt ? ` at ${selectedDuplicate.disposition.decidedAt}` : "";
-        selectedDuplicate.evidenceIds.forEach((id) => supportingEvidenceIds.add(id));
-        disabledActions.push({
-          action: "Add to Claim",
-          reason: `Add to Claim unavailable because ${selectedDuplicate.icd10} was selected by ${selectedBy?.name ?? "a reviewer"}${selectedAt} for the same patient, calendar year, and ${condition.hcc}.`,
-          ruleId: "same-hcc-duplicate-add",
-          source: "rule-suppressed",
-          supportingEvidenceIds: selectedDuplicate.evidenceIds
-        });
-      }
-    }
-
     if (condition.workflow === "codesOnClaim" && deleteSafety.supportingEvidenceIds.length > 0) {
       warnings.push({
         message: "Possible current-year supporting evidence was identified. Review before deleting.",
@@ -79,6 +63,30 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
         message: "Conflicting or ambiguous current-year evidence exists. Escalate to manager or auditor review when needed.",
         severity: "warning",
         evidenceIds: deleteSafety.conflictingEvidenceIds
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesOnClaim" && !currentPrototypeYear) {
+      disabledActions.push({
+        action: "Send to Prospective",
+        reason: `Send to Prospective is available only for current calendar-year claims. This review is CY ${review.calendarYear}.`,
+        ruleId: "current-year-prospective-routing",
+        source: "rule-suppressed"
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && acuteOnClaim) {
+      disabledActions.push({
+        action: "Send to Prospective",
+        reason: "Acute diagnoses are not carried into prospective review in this prototype. Review the encounter-specific documentation and validate only when the acute diagnosis is actively managed; otherwise delete it from the claim.",
+        ruleId: "acute-on-claim-conservative-delete",
+        source: "rule-suppressed",
+        supportingEvidenceIds: condition.evidenceIds
+      });
+      warnings.push({
+        message: "Acute diagnosis: do not carry this condition forward. Validate only when encounter-specific acute-care documentation supports it; otherwise delete.",
+        severity: "warning",
+        evidenceIds: condition.evidenceIds
       });
     }
 
@@ -154,9 +162,11 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     return {
       ruleId:
         condition.ruleOutcome?.ruleId ??
-        (acuteExclusion.applies
-          ? "acute-only-recapture-exclusion"
-          : hierarchy.applies
+        (acuteOnClaim
+          ? "acute-on-claim-conservative-delete"
+          : acuteExclusion.applies
+            ? "acute-only-recapture-exclusion"
+            : hierarchy.applies
             ? "hierarchy-trumping-suppression"
             : contextualExclusion.applies
               ? contextualExclusion.ruleId
@@ -175,8 +185,22 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
   private getBaseRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (!isRiskAdjustmentCondition(condition)) return undefined;
-    if (condition.seededRecommendation) return condition.seededRecommendation;
     const claim = data.claims.find((item) => item.reviewId === review.id);
+    const hasConditionEvidence = condition.evidenceIds.some((id) =>
+      data.evidence.some((item) => item.id === id && item.conditionIds.includes(condition.id))
+    );
+    if (isAcuteCondition(condition) && condition.workflow === "codesOnClaim") {
+      return {
+        action: "Delete",
+        confidence: "High",
+        source: "rules",
+        rationale: "Acute diagnoses are handled conservatively in this prototype. The outpatient chart does not establish encounter-specific acute-condition management, so this code should be reviewed for deletion rather than carried forward."
+      };
+    }
+    const evidenceDependentActions: RecommendationAction[] = ["Validate", "Add to Claim", "Yes", "Send to Prospective", "Change"];
+    if (condition.seededRecommendation && (!evidenceDependentActions.includes(condition.seededRecommendation.action) || hasConditionEvidence)) {
+      return condition.seededRecommendation;
+    }
     const riskEligibleSource =
       claim?.riskEligible !== false &&
       claim?.cptSourceEligible !== false &&
@@ -184,7 +208,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       claim?.faceToFace !== false &&
       claim?.providerSignatureValid !== false;
     const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
-
     if (!riskEligibleSource && condition.workflow !== "prospective") {
       return {
         action: "Disagree",
@@ -235,6 +258,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "prospective") {
+      if (!hasConditionEvidence) {
+        return {
+          action: "No",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so this prospective opportunity is not supported."
+        };
+      }
       const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
       if (condition.subtype === "recapture") {
         if (lookback.qualifies) {
@@ -260,13 +291,21 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           action: "Yes",
           confidence: "Medium",
           source: "rules",
-          rationale: "Current clinical indicators exist without prior capture, so this is a suspect opportunity."
+          rationale: "Diagnosis-scoped clinical indicators exist without prior capture, so this is a supported suspect opportunity."
         };
       }
     }
 
     if (condition.workflow === "codesOnClaim") {
-      if (condition.hasSufficientMeat) {
+      if (!hasConditionEvidence) {
+        return {
+          action: "Delete",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Validate is not supported."
+        };
+      }
+      if (condition.hasSufficientMeat && hasConditionEvidence) {
         return {
           action: "Validate",
           confidence: "High",
@@ -274,7 +313,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "The code is on a risk-eligible claim and current documentation supports MEAT."
         };
       }
-      if (currentPrototypeYear && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
+      if (currentPrototypeYear && hasConditionEvidence && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
         return {
           action: "Send to Prospective",
           confidence: "Medium",
@@ -293,6 +332,24 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "codesNotOnClaim") {
+      if (!hasConditionEvidence) {
+        return {
+          action: "Disagree",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Add to Claim is not supported."
+        };
+      }
+      const moreSpecificCandidate = getMoreSpecificSameHccCandidate(condition, review, data);
+      if (moreSpecificCandidate) {
+        return {
+          action: "Disagree",
+          confidence: "High",
+          source: "rules",
+          replacementCode: moreSpecificCandidate.icd10,
+          rationale: `${moreSpecificCandidate.icd10} is supported by diagnosis-specific documentation and is more specific than ${condition.icd10}. Both conditions remain available for reviewer judgment; review the more specific option before adding the unspecified code.`
+        };
+      }
       if (condition.hasSufficientMeat) {
         return {
           action: "Add to Claim",
@@ -311,7 +368,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       }
     }
 
-    if (review.reviewType === "Prospective" && condition.hasClinicalIndicators) {
+    if (review.reviewType === "Prospective" && condition.hasClinicalIndicators && hasConditionEvidence) {
       return {
         action: "Yes",
         confidence: "Low",
@@ -347,6 +404,20 @@ function getSamePatientYearHccConditions(data: SeedData, review: PatientReview, 
   );
 }
 
+function getMoreSpecificSameHccCandidate(condition: Condition, review: PatientReview, data: SeedData) {
+  if (!/\bunspecified\b/i.test(condition.description)) return undefined;
+  return getSamePatientYearHccConditions(data, review, condition.hcc)
+    .filter(
+      (candidate) =>
+        candidate.id !== condition.id &&
+        candidate.workflow === condition.workflow &&
+        !/\bunspecified\b/i.test(candidate.description) &&
+        candidate.hasSufficientMeat &&
+        candidate.evidenceIds.some((id) => data.evidence.some((item) => item.id === id && item.conditionIds.includes(candidate.id)))
+    )
+    .sort((left, right) => left.icd10.localeCompare(right.icd10))[0];
+}
+
 function evaluateAcuteOnlyRecaptureExclusion(condition: Condition) {
   const acuteOnly = condition.persistence === "acute" || condition.acuteCondition;
   const applies =
@@ -377,13 +448,19 @@ function evaluateHierarchySuppression(condition: Condition, review: PatientRevie
     };
   }
   const suppression = state.suppressedHccs[0];
-  const disposition = suppression.capturedCondition.disposition!;
-  const user = data.users.find((candidate) => candidate.id === disposition.userId);
+  const disposition = getEffectiveDisposition(suppression.capturedCondition);
+  const user = disposition ? data.users.find((candidate) => candidate.id === disposition.userId) : undefined;
+  const action = disposition?.action ?? "a capture action";
+  const selectedAt = disposition
+    ? "decidedAt" in disposition
+      ? disposition.decidedAt
+      : disposition.stagedAt
+    : "an unknown time";
   return {
     applies: true,
     disabledActions,
     evidenceIds: [...condition.evidenceIds, ...suppression.capturedCondition.evidenceIds],
-    reason: `${suppression.lower} remains visible but direct capture is locked because ${suppression.higher} was captured through ${suppression.capturedCondition.icd10} by ${user?.name ?? "a CDI/coder"} using ${disposition.action} on ${disposition.decidedAt}.`,
+    reason: `${suppression.lower} remains visible but direct capture is locked because ${suppression.higher} was selected through ${suppression.capturedCondition.icd10} by ${user?.name ?? "a CDI/coder"} using ${action} on ${selectedAt}.`,
     warning: "",
     replacementCode: suppression.capturedCondition.icd10
   };

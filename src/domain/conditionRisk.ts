@@ -19,6 +19,18 @@ export function isRiskAdjustmentCondition(condition: Condition) {
   return getConditionProgram(condition) === "risk-adjustment";
 }
 
+export function isAcuteCondition(condition: Condition) {
+  return condition.persistence === "acute" || condition.acuteCondition === true || /\bacute\b/i.test(condition.description);
+}
+
+export function getConditionClinicalFamily(condition: Condition) {
+  if (/^E1[0-3]\./.test(condition.icd10)) return { key: "diabetes", label: "Diabetes" };
+  if (/^I50\./.test(condition.icd10)) return { key: "heart-failure", label: "Heart failure" };
+  if (/^N18\./.test(condition.icd10)) return { key: "chronic-kidney-disease", label: "Chronic kidney disease" };
+  if (/^J44\./.test(condition.icd10)) return { key: "copd", label: "COPD" };
+  return undefined;
+}
+
 export function getConditionHccs(condition: Condition, patient?: Patient): CmsV28Hcc[] {
   const age = patient ? ageForPatient(patient) : undefined;
   return getCmsV28Hccs(getEffectiveDiagnosisCode(condition), age);
@@ -79,6 +91,11 @@ export function compareConditionsByHierarchy(left: Condition, right: Condition, 
   const leftIndex = Math.min(...getConditionHccs(left, patient).map((hcc) => ordered.indexOf(hcc)));
   const rightIndex = Math.min(...getConditionHccs(right, patient).map((hcc) => ordered.indexOf(hcc)));
   if (Number.isFinite(leftIndex) && Number.isFinite(rightIndex) && leftIndex !== rightIndex) return leftIndex - rightIndex;
+
+  const leftUnspecified = /\bunspecified\b/i.test(left.description);
+  const rightUnspecified = /\bunspecified\b/i.test(right.description);
+  if (leftUnspecified !== rightUnspecified) return leftUnspecified ? 1 : -1;
+  if (left.hasSufficientMeat !== right.hasSufficientMeat) return left.hasSufficientMeat ? -1 : 1;
   return left.icd10.localeCompare(right.icd10);
 }
 
