@@ -57,7 +57,7 @@ describe("persisted clinical-content migration", () => {
         comments: "Preserve this review state"
       }
     };
-    const conditionWorkflow: Pick<Condition, "disposition" | "ruleOutcome" | "auditorDisposition" | "agreementWithAuditor" | "documentationIssues" | "disabledReason"> = {
+    const conditionWorkflow: Pick<Condition, "disposition" | "draftDisposition" | "draftProspectiveHandoff" | "ruleOutcome" | "draftRuleOutcome" | "auditorDisposition" | "agreementWithAuditor" | "documentationIssues" | "disabledReason"> = {
       disposition: {
         action: "Validate",
         comments: "Preserve this disposition",
@@ -66,12 +66,33 @@ describe("persisted clinical-content migration", () => {
         agreedWithRecommendation: true,
         source: "user-selected"
       },
+      draftDisposition: {
+        action: "Delete",
+        comments: "Preserve this reversible draft",
+        userId: "u-coder-3",
+        stagedAt: "2026-07-15T09:15:30.000Z",
+        agreedWithRecommendation: false,
+        source: "user-selected"
+      },
+      draftProspectiveHandoff: {
+        targetCalendarYear: 2027,
+        note: "Preserve this prospective handoff draft",
+        userId: "u-coder-3",
+        stagedAt: "2026-07-15T09:15:45.000Z"
+      },
       ruleOutcome: {
         source: "rule-resolved",
         action: "Validate",
         ruleId: "legacy-rule",
         explanation: "Preserve this rule outcome",
         createdAt: "2026-07-15T09:16:00.000Z"
+      },
+      draftRuleOutcome: {
+        source: "rule-suppressed",
+        action: "Add to Claim",
+        ruleId: "same-hcc-duplicate-add",
+        explanation: "Preserve this draft rule preview",
+        createdAt: "2026-07-15T09:16:30.000Z"
       },
       auditorDisposition: {
         outcome: "Agree",
@@ -149,7 +170,8 @@ describe("persisted clinical-content migration", () => {
       icd10: seedCondition.icd10,
       evidenceIds: seedCondition.evidenceIds,
       hasSufficientMeat: seedCondition.hasSufficientMeat,
-      ...conditionWorkflow
+      ...conditionWorkflow,
+      disposition: undefined
     });
     expect(generatedSnapshot(migrated.data)).toEqual(generatedBefore);
     expect(migrated.data.audits).toEqual(auditsBefore);
@@ -184,6 +206,85 @@ describe("persisted clinical-content migration", () => {
       hcc: "HCC 37",
       raf: 0.166,
       trumpedByCode: undefined
+    });
+  });
+
+  it("converts unfinished legacy decisions into reversible drafts without premature action records", () => {
+    const legacy = structuredClone(demoSeedData);
+    const reviewId = "rev-110";
+    const conditionId = "cond-110-a";
+    legacy.reviews = legacy.reviews.map((review) =>
+      review.id === reviewId ? { ...review, status: "In Progress", lock: { lockedByUserId: "u-coder-1", lockedAt: "2026-07-19T10:00:00.000Z" } } : review
+    );
+    legacy.conditions = legacy.conditions.map((condition) =>
+      condition.id === conditionId
+        ? {
+            ...condition,
+            disposition: {
+              action: "Validate",
+              userId: "u-coder-1",
+              decidedAt: "2026-07-19T10:05:00.000Z",
+              agreedWithRecommendation: true,
+              source: "user-selected"
+            }
+          }
+        : condition
+    );
+    legacy.downstreamTasks.push({
+      id: "legacy-task",
+      reviewId,
+      conditionId,
+      type: "Deletion",
+      status: "Open",
+      queue: "Export List",
+      createdByUserId: "u-coder-1",
+      createdAt: "2026-07-19T10:05:00.000Z"
+    });
+    legacy.history.unshift({
+      id: "legacy-action-history",
+      reviewId,
+      conditionId,
+      userId: "u-coder-1",
+      at: "2026-07-19T10:05:00.000Z",
+      event: "Action selected",
+      detail: "Validate"
+    });
+
+    const migrated = migratePersistedState({ contentRevision: 5, currentUserId: "u-coder-1", settings, data: legacy });
+    const condition = migrated.data.conditions.find((item) => item.id === conditionId)!;
+    expect(condition.disposition).toBeUndefined();
+    expect(condition.draftDisposition).toMatchObject({ action: "Validate", stagedAt: "2026-07-19T10:05:00.000Z", userId: "u-coder-1" });
+    expect(migrated.data.downstreamTasks.some((task) => task.id === "legacy-task")).toBe(false);
+    expect(migrated.data.history.some((entry) => entry.id === "legacy-action-history")).toBe(false);
+  });
+
+  it("migrates an unfinished legacy Send to Prospective selection into the independent handoff draft", () => {
+    const legacy = structuredClone(demoSeedData);
+    const reviewId = "rev-102";
+    const conditionId = "cond-102-a";
+    legacy.conditions = legacy.conditions.map((condition) =>
+      condition.id === conditionId
+        ? {
+            ...condition,
+            draftDisposition: {
+              action: "Send to Prospective",
+              comments: "Carry this forward",
+              userId: "u-coder-3",
+              stagedAt: "2026-07-19T10:05:00.000Z",
+              source: "user-selected"
+            }
+          }
+        : condition
+    );
+
+    const migrated = migratePersistedState({ contentRevision: 7, currentUserId: "u-coder-3", settings, data: legacy });
+    const condition = migrated.data.conditions.find((item) => item.id === conditionId)!;
+    expect(condition.draftDisposition).toBeUndefined();
+    expect(condition.draftProspectiveHandoff).toMatchObject({
+      targetCalendarYear: 2026,
+      note: "Carry this forward",
+      userId: "u-coder-3",
+      stagedAt: "2026-07-19T10:05:00.000Z"
     });
   });
 });

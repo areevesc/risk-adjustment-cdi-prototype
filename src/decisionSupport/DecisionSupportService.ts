@@ -82,15 +82,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       });
     }
 
-    if (condition.workflow === "codesOnClaim" && (review.calendarYear !== settings.prototypeCurrentYear || !condition.currentYear)) {
-      disabledActions.push({
-        action: "Send to Prospective",
-        reason: "Send to Prospective is unavailable because this is not the configured prototype current calendar year.",
-        ruleId: "current-year-prospective-routing",
-        source: "rule-suppressed"
-      });
-    }
-
     if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "prospective" && condition.subtype === "recapture" && lookback.hasCurrentYearCapture) {
       disabledActions.push({
         action: "Yes",
@@ -428,14 +419,14 @@ function evaluateContextualExclusion(condition: Condition) {
 }
 
 function getCaptureActionsForWorkflow(condition: Condition): RecommendationAction[] {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Send to Prospective"];
+  if (condition.workflow === "codesOnClaim") return ["Validate"];
   if (condition.workflow === "codesNotOnClaim") return ["Add to Claim"];
   if (condition.workflow === "prospective") return ["Yes", "Change"];
   return [];
 }
 
 function getAllActionsForWorkflow(condition: Condition): RecommendationAction[] {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"];
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete"];
   if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"];
   if (condition.workflow === "prospective") return ["Yes", "No", "Change"];
   return [];

@@ -423,6 +423,25 @@ export interface UserDisposition {
   ruleId?: string;
 }
 
+export interface DraftDisposition {
+  action: RecommendationAction;
+  reason?: DisagreeReason;
+  replacementCode?: string;
+  comments?: string;
+  userId: string;
+  stagedAt: string;
+  agreedWithRecommendation?: boolean;
+  source?: Extract<RuleOutcomeSource, "user-selected">;
+  ruleId?: string;
+}
+
+export interface DraftProspectiveHandoff {
+  targetCalendarYear: number;
+  note?: string;
+  userId: string;
+  stagedAt: string;
+}
+
 export interface AuditorDisposition {
   outcome: "Agree" | "Disagree" | "Return for Correction";
   comments?: string;
@@ -473,7 +492,10 @@ export interface Condition {
   trustedCodeMetadata?: boolean;
   seededRecommendation?: Recommendation;
   disposition?: UserDisposition;
+  draftDisposition?: DraftDisposition;
+  draftProspectiveHandoff?: DraftProspectiveHandoff;
   ruleOutcome?: RuleGeneratedOutcome;
+  draftRuleOutcome?: RuleGeneratedOutcome;
   auditorDisposition?: AuditorDisposition;
   agreementWithAuditor?: boolean;
   documentationIssues: DocumentationFlag[];
@@ -558,6 +580,10 @@ export interface DownstreamTask {
   createdByUserId: string;
   createdAt: string;
   comments?: string;
+  sourceCalendarYear?: number;
+  targetCalendarYear?: number;
+  updatedByUserId?: string;
+  updatedAt?: string;
 }
 
 export interface SeedData {

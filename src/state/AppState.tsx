@@ -3,6 +3,8 @@ import { demoSeedData as seedData } from "../data/seed";
 import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, QueueType, RecommendationAction, Role, SeedData, User } from "../domain/types";
 import {
   assignReview,
+  clearDispositionDraft,
+  clearProspectiveHandoffDraft,
   completeAudit,
   completeReview,
   flagDocumentationIssue,
@@ -15,6 +17,7 @@ import {
   reopenAudit,
   routeReview,
   setDisposition,
+  stageProspectiveHandoff,
   startAudit,
   takeCoverage,
   updateDownstreamTaskStatus
@@ -59,6 +62,9 @@ interface AppStateValue extends PersistedState {
       comments?: string,
       replacementCode?: string
     ) => void;
+    clearDispositionDraft: (reviewId: string, conditionId: string) => void;
+    stageProspectiveHandoff: (reviewId: string, conditionId: string, note?: string) => void;
+    clearProspectiveHandoffDraft: (reviewId: string, conditionId: string) => void;
     flagDocumentationIssue: (reviewId: string, conditionId: string, issue: DocumentationIssue, comments?: string) => void;
     startAudit: (reviewId: string) => void;
     completeAudit: (reviewId: string, outcome: "Agree" | "Disagree" | "Return for Correction", comments?: string) => void;
@@ -167,13 +173,18 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
     conditions: raw.conditions.map((condition) => ({
       ...condition,
       disposition: condition.disposition ? { ...condition.disposition, userId: normalizeUserId(condition.disposition.userId) ?? "u-coder-1" } : undefined,
+      draftDisposition: condition.draftDisposition ? { ...condition.draftDisposition, userId: normalizeUserId(condition.draftDisposition.userId) ?? "u-coder-1" } : undefined,
+      draftProspectiveHandoff: condition.draftProspectiveHandoff
+        ? { ...condition.draftProspectiveHandoff, userId: normalizeUserId(condition.draftProspectiveHandoff.userId) ?? "u-coder-1" }
+        : undefined,
       auditorDisposition: condition.auditorDisposition ? { ...condition.auditorDisposition, auditorId: normalizeUserId(condition.auditorDisposition.auditorId) ?? "u-auditor-1" } : undefined,
       documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: normalizeUserId(issue.userId) ?? "u-coder-1" }))
     })),
     downstreamTasks: (raw.downstreamTasks ?? []).map((task) => ({
       ...task,
       assignedUserId: normalizeUserId(task.assignedUserId),
-      createdByUserId: normalizeUserId(task.createdByUserId) ?? "u-coder-1"
+      createdByUserId: normalizeUserId(task.createdByUserId) ?? "u-coder-1",
+      updatedByUserId: normalizeUserId(task.updatedByUserId)
     })),
     history: raw.history.map((entry) => ({ ...entry, userId: normalizeUserId(entry.userId) ?? "u-coder-1" }))
   };
@@ -183,13 +194,78 @@ export function migratePersistedState(parsed: StoredPersistedState): PersistedSt
   const previousRevision = storedContentRevision(parsed.contentRevision);
   const mergedData = { ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] };
   const refreshedData = previousRevision < CURRENT_CONTENT_REVISION ? refreshSeedClinicalBundles(mergedData, seedData) : mergedData;
-  const data = normalizeSeedData(refreshedData);
+  const normalizedData = normalizeSeedData(refreshedData);
+  const data = previousRevision < CURRENT_CONTENT_REVISION ? migrateLegacyImmediateDecisions(normalizedData) : normalizedData;
   const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
   return {
     contentRevision: Math.max(previousRevision, CURRENT_CONTENT_REVISION),
     currentUserId: currentUser.id,
     settings: { ...defaultSettings, ...parsed.settings },
     data
+  };
+}
+
+function migrateLegacyImmediateDecisions(data: SeedData): SeedData {
+  const finalStatuses = new Set<PatientReview["status"]>(["Completed", "Under Audit", "Audit Complete"]);
+  const unfinishedReviewIds = new Set(data.reviews.filter((review) => !finalStatuses.has(review.status)).map((review) => review.id));
+  const reviewById = new Map(data.reviews.map((review) => [review.id, review]));
+  const convertedConditionIds = new Set(
+    data.conditions
+      .filter(
+        (condition) =>
+          unfinishedReviewIds.has(condition.reviewId) &&
+          Boolean(condition.disposition || condition.draftDisposition?.action === "Send to Prospective")
+      )
+      .map((condition) => condition.id)
+  );
+  const actionTaskTypes = new Set(["Addition to Claim", "Deletion", "Prospective CDI Review", "Scheduling Outreach"]);
+  const draftHistoryEvents = new Set(["Action selected", "Hierarchy lock applied", "Rule-resolved condition", "Rule-suppressed condition"]);
+
+  return {
+    ...data,
+    conditions: data.conditions.map((condition) => {
+      if (!unfinishedReviewIds.has(condition.reviewId)) return condition;
+      const legacyDisposition = condition.disposition;
+      const legacyProspectiveHandoff =
+        legacyDisposition?.action === "Send to Prospective"
+          ? legacyDisposition
+          : condition.draftDisposition?.action === "Send to Prospective"
+            ? condition.draftDisposition
+            : undefined;
+      const sourceCalendarYear = reviewById.get(condition.reviewId)?.calendarYear ?? 2025;
+      const convertRuleOutcome = ["same-hcc-validation-threshold", "same-hcc-duplicate-add"].includes(condition.ruleOutcome?.ruleId ?? "");
+      return {
+        ...condition,
+        disposition: legacyDisposition ? undefined : condition.disposition,
+        draftDisposition: legacyProspectiveHandoff
+          ? undefined
+          : legacyDisposition
+          ? condition.draftDisposition ?? {
+              ...legacyDisposition,
+              stagedAt: legacyDisposition.decidedAt,
+              decidedAt: undefined
+            }
+          : condition.draftDisposition,
+        draftProspectiveHandoff: legacyProspectiveHandoff
+          ? condition.draftProspectiveHandoff ?? {
+              targetCalendarYear: sourceCalendarYear + 1,
+              note: legacyProspectiveHandoff.comments,
+              userId: legacyProspectiveHandoff.userId,
+              stagedAt: "decidedAt" in legacyProspectiveHandoff ? legacyProspectiveHandoff.decidedAt : legacyProspectiveHandoff.stagedAt
+            }
+          : condition.draftProspectiveHandoff,
+        ruleOutcome: convertRuleOutcome ? undefined : condition.ruleOutcome,
+        draftRuleOutcome: convertRuleOutcome ? condition.draftRuleOutcome ?? condition.ruleOutcome : condition.draftRuleOutcome
+      };
+    }),
+    downstreamTasks: data.downstreamTasks.filter(
+      (task) => !(convertedConditionIds.has(task.conditionId) && actionTaskTypes.has(task.type))
+    ),
+    history: data.history.filter(
+      (entry) =>
+        !(entry.conditionId && convertedConditionIds.has(entry.conditionId) && draftHistoryEvents.has(entry.event)) &&
+        !(unfinishedReviewIds.has(entry.reviewId) && entry.event === "Same-HCC rule applied")
+    )
   };
 }
 
@@ -275,6 +351,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         takeCoverage: (reviewId) => withData((data) => takeCoverage(data, reviewId, currentUser)),
         setDisposition: (reviewId, conditionId, action, agreed, reason, comments, replacementCode) =>
           withData((data) => setDisposition(data, reviewId, conditionId, currentUser, action, agreed, state.settings, reason, comments, replacementCode)),
+        clearDispositionDraft: (reviewId, conditionId) =>
+          withData((data) => clearDispositionDraft(data, reviewId, conditionId, currentUser, state.settings)),
+        stageProspectiveHandoff: (reviewId, conditionId, note) =>
+          withData((data) => stageProspectiveHandoff(data, reviewId, conditionId, currentUser, note)),
+        clearProspectiveHandoffDraft: (reviewId, conditionId) =>
+          withData((data) => clearProspectiveHandoffDraft(data, reviewId, conditionId, currentUser)),
         flagDocumentationIssue: (reviewId, conditionId, issue, comments) => withData((data) => flagDocumentationIssue(data, reviewId, conditionId, currentUser, issue, comments)),
         startAudit: (reviewId) => withData((data) => startAudit(data, reviewId, currentUser)),
         completeAudit: (reviewId, outcome, comments) => withData((data) => completeAudit(data, reviewId, currentUser, outcome, comments)),

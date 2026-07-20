@@ -32,6 +32,7 @@ import {
   getActiveConditionEvidence,
   getDownstreamTaskForCondition,
   getDownstreamTasksForCondition,
+  getIncomingProspectiveHandoffs,
   getEvidenceCycleTarget,
   getEvidenceForCondition,
   getOutreachStatusForReview,
@@ -40,7 +41,6 @@ import {
   getRafSummary,
   getRecommendation,
   getRuleResult,
-  isPrototypeCurrentYear,
   reviewConditions
 } from "../../domain/selectors";
 import type { ChartTab, ClinicalChart, Condition, DisagreeReason, DocumentationIssue, EvidencePassage, RecommendationAction, RuleResult } from "../../domain/types";
@@ -159,9 +159,13 @@ export function ReviewPage() {
   const provider = maps.providers.get(activeReview.providerId);
   const appointment = activeReview.appointmentId ? maps.appointments.get(activeReview.appointmentId) : undefined;
   const outreachStatus = getOutreachStatusForReview(data, activeReview);
+  const incomingProspectiveHandoffs = getIncomingProspectiveHandoffs(data, activeReview);
   const displayAppointment = outreachStatus.appointment ?? appointment;
   const conditions = reviewConditions(data, activeReview);
   const riskConditions = conditions.filter(isRiskAdjustmentCondition).sort((left, right) => compareConditionsByHierarchy(left, right, patient));
+  const visibleRiskConditions = riskConditions.filter(
+    (condition) => !getConditionHierarchySuppression(condition, activeReview, data).fullySuppressed
+  );
   const nonRiskConditions = conditions.filter((condition) => !isRiskAdjustmentCondition(condition));
   const relatedReviewIds = new Set(
     data.reviews
@@ -181,7 +185,6 @@ export function ReviewPage() {
   const claim = getClaimForReview(data, activeReview.id);
   const lockOwner = activeReview.lock ? maps.users.get(activeReview.lock.lockedByUserId)?.name : undefined;
   const canRelease = canReleaseReviewLock(activeReview, currentUser);
-  const canUseProspectiveActions = isPrototypeCurrentYear(activeReview, settings);
   const readOnlyTitle = !editable ? (activeReview.lock ? `Read-only while being edited by ${lockOwner}` : "Open the chart to acquire an edit lock") : undefined;
   const selectedEvidenceIndex = selectedEvidenceId ? activeEvidence.findIndex((item) => item.id === selectedEvidenceId) : -1;
 
@@ -342,6 +345,24 @@ export function ReviewPage() {
             {actionMessage}
           </div>
         ) : null}
+        {incomingProspectiveHandoffs.length ? (
+          <div className="incoming-prospective-handoffs">
+            <div>
+              <strong>Prospective handoffs for CY {activeReview.calendarYear}</strong>
+              <p>Internal CDI notes waiting in the shared Prospective Review Queue.</p>
+            </div>
+            <div className="incoming-handoff-list">
+              {incomingProspectiveHandoffs.map(({ task, sourceReview, condition }) => (
+                <div key={task.id} className="incoming-handoff-card">
+                  <span className="mono">{condition.icd10}</span>
+                  <strong>{condition.description}</strong>
+                  <small>From CY {sourceReview.calendarYear} · {task.status}</small>
+                  <p>{task.comments ?? "No additional reviewer note."}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {!editable ? (
           <div className="read-only-banner">
             <AlertTriangle size={16} />
@@ -350,14 +371,17 @@ export function ReviewPage() {
         ) : null}
         <CompactReviewSummary
           dispositionSummary={dispositionSummary}
-          presentedSummary={presentedSummary}
           projectedRaf={rafSummary.projectedRaf}
           unresolvedRaf={rafSummary.unresolvedPotentialRaf}
+          hasDrafts={conditions.some((condition) => Boolean(condition.draftDisposition || condition.draftProspectiveHandoff || condition.draftRuleOutcome))}
           summaryExpanded={summaryExpanded}
         />
         {summaryExpanded ? (
           <>
-            <div className="summary-label">Current dispositions</div>
+            <div className="summary-label">
+              Draft and committed dispositions
+              {conditions.some((condition) => Boolean(condition.draftDisposition || condition.draftProspectiveHandoff || condition.draftRuleOutcome)) ? <StatusChip tone="info">Draft</StatusChip> : null}
+            </div>
             <div className="summary-grid disposition-summary-grid">
               {Object.entries(dispositionSummary).map(([label, summary]) => {
                 const token = dispositionTokens[label as keyof typeof dispositionTokens];
@@ -478,10 +502,9 @@ export function ReviewPage() {
           <div className="condition-groups">
             <ConditionGroup
               title="Codes On Claim"
-              conditions={riskConditions.filter((condition) => condition.workflow === "codesOnClaim")}
+              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "codesOnClaim")}
               review={review}
               editable={editable}
-              canUseProspectiveActions={canUseProspectiveActions}
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
@@ -494,10 +517,9 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="Codes Not On Claim - Potential Additions"
-              conditions={riskConditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
+              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "codesNotOnClaim")}
               review={review}
               editable={editable}
-              canUseProspectiveActions={canUseProspectiveActions}
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
@@ -510,10 +532,9 @@ export function ReviewPage() {
             />
             <ConditionGroup
               title="CDI Prospective Review"
-              conditions={riskConditions.filter((condition) => condition.workflow === "prospective")}
+              conditions={visibleRiskConditions.filter((condition) => condition.workflow === "prospective")}
               review={review}
               editable={editable}
-              canUseProspectiveActions={canUseProspectiveActions}
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
@@ -529,7 +550,6 @@ export function ReviewPage() {
               conditions={nonRiskConditions}
               review={review}
               editable={editable}
-              canUseProspectiveActions={canUseProspectiveActions}
               readOnlyTitle={readOnlyTitle}
               warningIds={completionWarnings}
               jumpToEvidence={jumpToEvidence}
@@ -571,25 +591,28 @@ export function ReviewPage() {
 
 function CompactReviewSummary({
   dispositionSummary,
-  presentedSummary,
   projectedRaf,
   unresolvedRaf,
+  hasDrafts,
   summaryExpanded
 }: {
   dispositionSummary: ReturnType<typeof getDispositionSummary>;
-  presentedSummary: ReturnType<typeof getPresentedOpportunitySummary>;
   projectedRaf: number;
   unresolvedRaf: number;
+  hasDrafts: boolean;
   summaryExpanded: boolean;
 }) {
   if (summaryExpanded) return null;
-  const prospectiveOpen = dispositionSummary["Sent to Prospective"].count + dispositionSummary["Prospective Yes"].count + dispositionSummary["Prospective No"].count;
+  const prospectiveDecisions = ["Prospective Yes", "Prospective No", "Changed"] as const;
+  const prospectiveCount = prospectiveDecisions.reduce((sum, label) => sum + dispositionSummary[label].count, 0);
+  const prospectiveRaf = prospectiveDecisions.reduce((sum, label) => sum + dispositionSummary[label].raf, 0);
   return (
     <div className="compact-review-summary" aria-label="Compact review summary">
-      <ReviewSummaryCard category="validated" label="Validated" value={presentedSummary.validated.count} raf={presentedSummary.validated.raf} />
-      <ReviewSummaryCard category="potentialDelete" label="Potential Delete" value={presentedSummary.potentialDelete.count} raf={presentedSummary.potentialDelete.raf} />
-      <ReviewSummaryCard category="potentialAddition" label="Potential Addition" value={presentedSummary.potentialAddition.count} raf={presentedSummary.potentialAddition.raf} />
-      <ReviewSummaryCard category="prospective" label="CDI Recapture / Suspect" value={presentedSummary.prospective.count || prospectiveOpen} raf={presentedSummary.prospective.raf} />
+      {hasDrafts ? <StatusChip tone="info">Draft</StatusChip> : null}
+      <ReviewSummaryCard category="validated" label="Validated" value={dispositionSummary.Validated.count} raf={dispositionSummary.Validated.raf} />
+      <ReviewSummaryCard category="potentialDelete" label="Selected Delete" value={dispositionSummary.Deleted.count} raf={dispositionSummary.Deleted.raf} />
+      <ReviewSummaryCard category="potentialAddition" label="Selected Addition" value={dispositionSummary["Added to Claim"].count} raf={dispositionSummary["Added to Claim"].raf} />
+      <ReviewSummaryCard category="prospective" label="Prospective Decisions" value={prospectiveCount} raf={prospectiveRaf} />
       <div className="review-summary-card total-raf-card">
         <span>Total RAF</span>
         <strong>{formatRaf(projectedRaf)}</strong>
@@ -1218,7 +1241,6 @@ function ConditionGroup({
   conditions,
   review,
   editable,
-  canUseProspectiveActions,
   readOnlyTitle,
   warningIds,
   jumpToEvidence,
@@ -1233,7 +1255,6 @@ function ConditionGroup({
   conditions: Condition[];
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
-  canUseProspectiveActions: boolean;
   readOnlyTitle?: string;
   warningIds: string[];
   jumpToEvidence: (evidence: EvidencePassage) => void;
@@ -1260,7 +1281,6 @@ function ConditionGroup({
           condition={condition}
           review={review}
           editable={editable}
-          canUseProspectiveActions={canUseProspectiveActions}
           readOnlyTitle={readOnlyTitle}
           isWarning={warningIds.includes(condition.id)}
           jumpToEvidence={jumpToEvidence}
@@ -1293,7 +1313,6 @@ function ConditionCard({
   condition,
   review,
   editable,
-  canUseProspectiveActions,
   readOnlyTitle,
   isWarning,
   jumpToEvidence,
@@ -1307,7 +1326,6 @@ function ConditionCard({
   condition: Condition;
   review: ReturnType<typeof useAppState>["data"]["reviews"][number];
   editable: boolean;
-  canUseProspectiveActions: boolean;
   readOnlyTitle?: string;
   isWarning: boolean;
   jumpToEvidence: (evidence: EvidencePassage) => void;
@@ -1319,17 +1337,26 @@ function ConditionCard({
   onDeleteSafety: (condition: Condition) => void;
 }) {
   const { data, settings, actions } = useAppState();
+  const [prospectiveHandoffOpen, setProspectiveHandoffOpen] = useState(false);
   const evidence = getEvidenceForCondition(data, condition);
   const recommendation = getRecommendation(condition, review, data, settings);
   const ruleResult = getRuleResult(condition, review, data, settings);
   const disabled = !editable;
   const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
   const downstreamTasks = getDownstreamTasksForCondition(data, condition.id);
+  const targetProspectiveYear = condition.draftProspectiveHandoff?.targetCalendarYear ?? review.calendarYear + 1;
+  const prospectiveHandoffTasks = downstreamTasks.filter(
+    (task) => task.type === "Prospective CDI Review" && (task.targetCalendarYear ?? review.calendarYear + 1) === targetProspectiveYear
+  );
+  const existingProspectiveHandoff = prospectiveHandoffTasks[0];
   const claim = getClaimForReview(data, review.id);
   const riskAdjustment = isRiskAdjustmentCondition(condition);
   const hierarchy = getConditionHierarchySuppression(condition, review, data);
   const marginalRaf = getConditionMarginalScore(data, review, condition);
-  const showActionControls = riskAdjustment && !hierarchy.fullySuppressed && (!condition.disposition || review.status === "Rework Required");
+  const showActionControls =
+    riskAdjustment &&
+    !hierarchy.fullySuppressed &&
+    (!condition.disposition || Boolean(condition.draftDisposition) || review.status === "Rework Required");
 
   function act(action: RecommendationAction) {
     if (action === "Delete" && hasDeleteSafetyWarning(ruleResult)) {
@@ -1345,12 +1372,17 @@ function ConditionCard({
   }
 
   function isDisabled(action: RecommendationAction) {
-    return disabled || Boolean(disabledRule(action));
+    return disabled || Boolean(disabledRule(action)) || (condition.draftRuleOutcome?.source === "rule-suppressed" && condition.draftRuleOutcome.action === action);
   }
 
   function actionTitle(action: RecommendationAction) {
     if (!editable) return readOnlyTitle;
+    if (condition.draftRuleOutcome?.source === "rule-suppressed" && condition.draftRuleOutcome.action === action) return condition.draftRuleOutcome.explanation;
     return disabledRule(action)?.reason;
+  }
+
+  function actionClass(base: string, action: RecommendationAction) {
+    return `${base}${condition.draftDisposition?.action === action ? " action-selected" : ""}`;
   }
 
   const token = condition.subtype ? subtypeTokens[condition.subtype] : categoryTokens[condition.category];
@@ -1417,8 +1449,16 @@ function ConditionCard({
       <div className="condition-history">
         <span>Originally presented as: {categoryTokens[condition.originalCategory ?? condition.category].label}</span>
         <span>Recommendation: {recommendation?.action ?? condition.originalRecommendation ?? "None"} ({recommendation?.source ?? condition.recommendationSource ?? "rules"})</span>
-        <span>User decision: {condition.disposition ? condition.disposition.action : "Unresolved"}</span>
-        <span>Rule outcome: {condition.ruleOutcome ? `${condition.ruleOutcome.source} - ${condition.ruleOutcome.action ?? "No action"}` : "None"}</span>
+        <span>Draft decision: {condition.draftDisposition ? `${condition.draftDisposition.action} for CY ${review.calendarYear}` : "None"}</span>
+        <span>Committed decision: {condition.disposition ? condition.disposition.action : "None"}</span>
+        <span>
+          Prospective handoff: {condition.draftProspectiveHandoff
+            ? `Draft for CY ${condition.draftProspectiveHandoff.targetCalendarYear}`
+            : existingProspectiveHandoff
+              ? `CY ${existingProspectiveHandoff.targetCalendarYear ?? review.calendarYear + 1} - ${existingProspectiveHandoff.status}`
+              : "None"}
+        </span>
+        <span>Rule outcome: {condition.draftRuleOutcome ? `Draft ${condition.draftRuleOutcome.source} - ${condition.draftRuleOutcome.action ?? "No action"}` : condition.ruleOutcome ? `${condition.ruleOutcome.source} - ${condition.ruleOutcome.action ?? "No action"}` : "None"}</span>
         <span>Downstream task: {downstreamTasks.length ? downstreamTasks.map((task) => `${task.type} - ${task.status}`).join("; ") : downstreamTask ? `${downstreamTask.type} - ${downstreamTask.status}` : "None"}</span>
         <span>Auditor decision: {condition.auditorDisposition?.outcome ?? "None"}</span>
       </div>
@@ -1449,6 +1489,43 @@ function ConditionCard({
         </div>
       ) : null}
       {condition.disabledReason ? <div className="disabled-reason">{condition.disabledReason}</div> : null}
+      {condition.draftDisposition ? (
+        <div className="disposition-row draft-disposition-row">
+          <StatusChip tone="info">
+            <Check size={14} />
+            Draft: {condition.draftDisposition.action} for CY {review.calendarYear}
+          </StatusChip>
+          {condition.draftDisposition.reason ? <span>{condition.draftDisposition.reason}</span> : null}
+          {condition.draftDisposition.replacementCode ? <span className="mono">{condition.draftDisposition.replacementCode}</span> : null}
+          <small>{formatDateTime(condition.draftDisposition.stagedAt)}</small>
+          <Button
+            variant="ghost"
+            disabled={!editable}
+            title={!editable ? readOnlyTitle : `Undo the staged CY ${review.calendarYear} decision`}
+            onClick={() => actions.clearDispositionDraft(review.id, condition.id)}
+          >
+            Undo
+          </Button>
+        </div>
+      ) : null}
+      {condition.draftProspectiveHandoff ? (
+        <div className="disposition-row draft-disposition-row prospective-handoff-ledger-row">
+          <StatusChip tone="info">
+            <Check size={14} />
+            Draft handoff for CY {condition.draftProspectiveHandoff.targetCalendarYear}
+          </StatusChip>
+          <span>{condition.draftProspectiveHandoff.note ?? "No additional reviewer note."}</span>
+          <small>{formatDateTime(condition.draftProspectiveHandoff.stagedAt)}</small>
+          <Button
+            variant="ghost"
+            disabled={!editable}
+            title={!editable ? readOnlyTitle : `Undo the staged CY ${condition.draftProspectiveHandoff.targetCalendarYear} handoff`}
+            onClick={() => actions.clearProspectiveHandoffDraft(review.id, condition.id)}
+          >
+            Undo handoff
+          </Button>
+        </div>
+      ) : null}
       {condition.disposition ? (
         <div className="disposition-row">
           <StatusChip tone="good">
@@ -1471,33 +1548,78 @@ function ConditionCard({
           <small>{formatDateTime(condition.ruleOutcome.createdAt)}</small>
         </div>
       ) : null}
+      {condition.draftRuleOutcome ? (
+        <div className="disposition-row draft-disposition-row">
+          <StatusChip tone="info">
+            <Check size={14} />
+            Draft rule outcome
+          </StatusChip>
+          <span>{condition.draftRuleOutcome.explanation}</span>
+        </div>
+      ) : null}
+      {prospectiveHandoffTasks.map((task) => (
+        <div key={task.id} className="disposition-row prospective-handoff-ledger-row">
+          <StatusChip tone="purple">Prospective CY {task.targetCalendarYear ?? review.calendarYear + 1}</StatusChip>
+          <span>Shared queue · {task.status}</span>
+          <span>{task.comments ?? "No additional reviewer note."}</span>
+          <small>{formatDateTime(task.updatedAt ?? task.createdAt)}</small>
+        </div>
+      ))}
       {showActionControls ? (
-        <div className="action-row">
+        <div className="condition-decision-controls">
+          <strong className="decision-year-label">
+            {condition.workflow === "prospective" ? `CY ${review.calendarYear} prospective decision` : `CY ${review.calendarYear} claim decision`}
+          </strong>
+          <div className="action-row">
           {condition.workflow === "codesOnClaim" ? (
             <>
-              <Button className="action-validate" disabled={isDisabled("Validate")} title={actionTitle("Validate")} onClick={() => act("Validate")}>Validate</Button>
-              <Button className="action-delete" variant="danger" disabled={isDisabled("Delete")} title={actionTitle("Delete")} onClick={() => act("Delete")}>Delete</Button>
-              <Button className="action-prospective" disabled={isDisabled("Send to Prospective")} title={actionTitle("Send to Prospective")} onClick={() => act("Send to Prospective")}>Send to Prospective</Button>
+              <Button className={actionClass("action-validate", "Validate")} aria-pressed={condition.draftDisposition?.action === "Validate"} disabled={isDisabled("Validate")} title={actionTitle("Validate")} onClick={() => act("Validate")}>Validate for {review.calendarYear}</Button>
+              <Button className={actionClass("action-delete", "Delete")} aria-pressed={condition.draftDisposition?.action === "Delete"} variant="danger" disabled={isDisabled("Delete")} title={actionTitle("Delete")} onClick={() => act("Delete")}>Delete for {review.calendarYear}</Button>
             </>
           ) : null}
           {condition.workflow === "codesNotOnClaim" ? (
             <>
-              <Button className="action-add" disabled={isDisabled("Add to Claim")} title={actionTitle("Add to Claim")} onClick={() => act("Add to Claim")}>Add to Claim</Button>
-              <Button disabled={isDisabled("Disagree")} title={actionTitle("Disagree")} onClick={() => onDisagree(condition)}>Disagree</Button>
+              <Button className={actionClass("action-add", "Add to Claim")} aria-pressed={condition.draftDisposition?.action === "Add to Claim"} disabled={isDisabled("Add to Claim")} title={actionTitle("Add to Claim")} onClick={() => act("Add to Claim")}>Add to {review.calendarYear} Claim</Button>
+              <Button className={actionClass("action-disagree", "Disagree")} aria-pressed={condition.draftDisposition?.action === "Disagree"} disabled={isDisabled("Disagree")} title={actionTitle("Disagree")} onClick={() => onDisagree(condition)}>Disagree for {review.calendarYear}</Button>
             </>
           ) : null}
           {condition.workflow === "prospective" ? (
             <>
-              <Button className="action-validate" disabled={isDisabled("Yes")} title={actionTitle("Yes")} onClick={() => act("Yes")}>Yes</Button>
-              <Button className="action-delete" disabled={isDisabled("No")} title={actionTitle("No")} onClick={() => act("No")}>No</Button>
-              <Button className="action-prospective" disabled={isDisabled("Change")} title={actionTitle("Change")} onClick={() => onChange(condition)}>Change</Button>
+              <Button className={actionClass("action-validate", "Yes")} aria-pressed={condition.draftDisposition?.action === "Yes"} disabled={isDisabled("Yes")} title={actionTitle("Yes")} onClick={() => act("Yes")}>Yes for {review.calendarYear}</Button>
+              <Button className={actionClass("action-delete", "No")} aria-pressed={condition.draftDisposition?.action === "No"} disabled={isDisabled("No")} title={actionTitle("No")} onClick={() => act("No")}>No for {review.calendarYear}</Button>
+              <Button className={actionClass("action-prospective", "Change")} aria-pressed={condition.draftDisposition?.action === "Change"} disabled={isDisabled("Change")} title={actionTitle("Change")} onClick={() => onChange(condition)}>Change for {review.calendarYear}</Button>
             </>
           ) : null}
           <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>
             <Flag size={14} />
             Flag issue
           </Button>
+          </div>
         </div>
+      ) : null}
+      {riskAdjustment && !hierarchy.fullySuppressed ? (
+        <div className="prospective-handoff-controls">
+          <div>
+            <strong>Next-year prospective handoff</strong>
+            <p>Send an internal note to the shared Prospective Review Queue without changing the CY {review.calendarYear} claim decision.</p>
+          </div>
+          <Button
+            className={condition.draftProspectiveHandoff ? "action-prospective action-selected" : "action-prospective"}
+            aria-pressed={Boolean(condition.draftProspectiveHandoff)}
+            disabled={!editable}
+            title={!editable ? readOnlyTitle : undefined}
+            onClick={() => setProspectiveHandoffOpen(true)}
+          >
+            {condition.draftProspectiveHandoff
+              ? `Edit Prospective Note for CY ${targetProspectiveYear}`
+              : existingProspectiveHandoff
+                ? `Update Prospective Note for CY ${targetProspectiveYear}`
+                : `Send to Prospective for CY ${targetProspectiveYear}`}
+          </Button>
+        </div>
+      ) : null}
+      {prospectiveHandoffOpen ? (
+        <ProspectiveHandoffModal condition={condition} reviewId={review.id} onClose={() => setProspectiveHandoffOpen(false)} />
       ) : null}
     </article>
   );
@@ -1510,25 +1632,27 @@ function hasDeleteSafetyWarning(ruleResult: RuleResult) {
 function RuleMessages({ ruleResult, jumpToEvidence }: { ruleResult: RuleResult; jumpToEvidence: (evidence: EvidencePassage) => void }) {
   const { data } = useAppState();
   const evidenceMap = byId(data.evidence);
+  const visibleWarnings = ruleResult.warnings.filter((warning) => !warning.message.includes("Possible current-year supporting evidence"));
+  const visibleDisabledActions = ruleResult.disabledActions;
   const evidenceIds = Array.from(
     new Set([
       ...ruleResult.supportingEvidenceIds,
       ...ruleResult.conflictingEvidenceIds,
-      ...ruleResult.disabledActions.flatMap((item) => [...(item.supportingEvidenceIds ?? []), ...(item.conflictingEvidenceIds ?? [])]),
-      ...ruleResult.warnings.flatMap((item) => item.evidenceIds ?? [])
+      ...visibleDisabledActions.flatMap((item) => [...(item.supportingEvidenceIds ?? []), ...(item.conflictingEvidenceIds ?? [])]),
+      ...visibleWarnings.flatMap((item) => item.evidenceIds ?? [])
     ])
   );
   const showLookbackEvidence = ruleResult.ruleId === "three-year-lookback-recapture" && evidenceIds.length > 0;
-  if (!ruleResult.disabledActions.length && !ruleResult.warnings.length && !showLookbackEvidence) return null;
+  if (!visibleDisabledActions.length && !visibleWarnings.length && !showLookbackEvidence) return null;
   return (
     <div className="rule-message-list">
       {showLookbackEvidence ? <div className="rule-info">Three-year lookback evidence used for this prototype recommendation.</div> : null}
-      {ruleResult.disabledActions.map((item) => (
+      {visibleDisabledActions.map((item) => (
         <div key={`${item.ruleId}-${item.action}`} className="disabled-reason">
           {item.reason}
         </div>
       ))}
-      {ruleResult.warnings.map((item, index) => (
+      {visibleWarnings.map((item, index) => (
         <div key={`${item.message}-${index}`} className="warning-banner compact-warning">
           <AlertTriangle size={16} />
           {item.message}
@@ -1547,6 +1671,43 @@ function RuleMessages({ ruleResult, jumpToEvidence }: { ruleResult: RuleResult; 
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ProspectiveHandoffModal({ condition, reviewId, onClose }: { condition: Condition; reviewId: string; onClose: () => void }) {
+  const { data, actions } = useAppState();
+  const review = data.reviews.find((item) => item.id === reviewId)!;
+  const targetCalendarYear = review.calendarYear + 1;
+  const existingTask = getDownstreamTasksForCondition(data, condition.id).find(
+    (task) => task.type === "Prospective CDI Review" && (task.targetCalendarYear ?? targetCalendarYear) === targetCalendarYear
+  );
+  const [note, setNote] = useState(condition.draftProspectiveHandoff?.note ?? existingTask?.comments ?? "");
+  return (
+    <Modal title={`Send to Prospective for CY ${targetCalendarYear}`} onClose={onClose}>
+      <p className="modal-copy">
+        This stages an internal note for the shared Prospective Review Queue. It does not change the CY {review.calendarYear} claim decision or send a provider query.
+      </p>
+      <label>
+        Note for the prospective reviewer <span className="optional-label">Optional</span>
+        <textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Why should the next prospective reviewer reconsider this condition?"
+        />
+      </label>
+      <div className="modal-actions">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button
+          variant="primary"
+          onClick={() => {
+            actions.stageProspectiveHandoff(reviewId, condition.id, note);
+            onClose();
+          }}
+        >
+          Stage handoff for CY {targetCalendarYear}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1580,7 +1741,7 @@ function DisagreeModal({ condition, reviewId, onClose }: { condition: Condition;
             onClose();
           }}
         >
-          Save disagreement
+          Stage disagreement
         </Button>
       </div>
     </Modal>
@@ -1616,7 +1777,7 @@ function ChangeModal({ condition, reviewId, onClose }: { condition: Condition; r
             onClose();
           }}
         >
-          Save change
+          Stage change
         </Button>
       </div>
     </Modal>
@@ -1669,7 +1830,7 @@ function DeleteSafetyModal({
   onClose: () => void;
   jumpToEvidence: (evidence: EvidencePassage) => void;
 }) {
-  const { data, currentUser, settings, actions } = useAppState();
+  const { data, settings, actions } = useAppState();
   const review = data.reviews.find((item) => item.id === reviewId)!;
   const ruleResult = getRuleResult(condition, review, data, settings);
   const evidenceMap = byId(data.evidence);
@@ -1730,7 +1891,7 @@ function DeleteSafetyModal({
             onClose();
           }}
         >
-          Save Delete
+          Stage Delete for {review.calendarYear}
         </Button>
       </div>
     </Modal>
