@@ -106,7 +106,7 @@ function isDeterministicRuleResolved(condition: Condition) {
 
 function hasRequiredWorkflowDecision(condition: Condition) {
   const action = getEffectiveDisposition(condition)?.action;
-  if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete";
+  if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete" || action === "Send to Prospective";
   if (condition.workflow === "codesNotOnClaim") return action === "Add to Claim" || action === "Disagree";
   return action === "Yes" || action === "No" || action === "Change";
 }

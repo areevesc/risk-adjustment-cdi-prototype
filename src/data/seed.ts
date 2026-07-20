@@ -411,7 +411,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           faceToFace: true,
           providerSignatureValid: true,
           sections: [
-            section(`sec-${review.id}-mor-1`, "MOR lists prior HCC 224 recapture and payer data lists a diabetes suspect opportunity.", [
+            section(`sec-${review.id}-mor-1`, "MOR lists prior HCC 224 recapture and payer data lists diabetic peripheral angiopathy without gangrene as a suspect opportunity.", [
               `ev-${review.id}-mor`,
               `ev-${review.id}-payer`
             ])
@@ -443,7 +443,7 @@ export const documents: SourceDocument[] = reviews.flatMap((review) => [
           providerTypeEligible: true,
           faceToFace: true,
           providerSignatureValid: true,
-          sections: [section(`sec-${review.id}-hie-1`, "HIE payload includes registry diabetic eye disease history and an SDoH transportation code.", [`ev-${review.id}-hie`])]
+          sections: [section(`sec-${review.id}-hie-1`, "HIE payload includes registry history of diabetic peripheral angiopathy without gangrene and an SDoH transportation code.", [`ev-${review.id}-hie`])]
         },
         {
           id: `doc-${review.id}-pathology`,
@@ -686,8 +686,8 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-mor`,
           anchorId: `sec-${review.id}-mor-1`,
           sectionId: `sec-${review.id}-mor-1`,
-          text: "Payer data lists a diabetes suspect opportunity.",
-          exactText: "payer data lists a diabetes suspect opportunity",
+          text: "Payer data lists diabetic peripheral angiopathy without gangrene as a suspect opportunity.",
+          exactText: "payer data lists diabetic peripheral angiopathy without gangrene as a suspect opportunity",
           date: `${review.calendarYear}-01-18`,
           category: "prospective" as const,
           subtype: "suspect" as const,
@@ -713,8 +713,8 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
           documentId: `doc-${review.id}-hie`,
           anchorId: `sec-${review.id}-hie-1`,
           sectionId: `sec-${review.id}-hie-1`,
-          text: "HIE payload includes registry diabetic eye disease history and an SDoH transportation code.",
-          exactText: "SDoH transportation code",
+          text: "HIE payload includes registry history of diabetic peripheral angiopathy without gangrene and an SDoH transportation code.",
+          exactText: "registry history of diabetic peripheral angiopathy without gangrene",
           date: `${review.calendarYear}-02-22`,
           category: "prospective" as const,
           subtype: "suspect" as const,
@@ -913,6 +913,40 @@ const correctedDiagnosisEvidence: EvidencePassage[] = [
     evidenceStrength: "assessmentWithPlan",
     currentYearSupport: true,
     chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
+  },
+  {
+    id: "ev-cond-100-d-plan",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-note",
+    anchorId: "sec-rev-100-note-3",
+    sectionId: "sec-rev-100-note-3",
+    text: "Diabetic neuropathy remains active with burning and numbness in both feet.",
+    exactText: "Diabetic neuropathy remains active with burning and numbness in both feet.",
+    date: "2026-04-12",
+    category: "potentialAddition",
+    conditionIds: ["cond-100-d"],
+    summary: "Current assessment and plan supports diabetic neuropathy.",
+    sourceType: "planSentence",
+    evidenceStrength: "assessmentWithPlan",
+    currentYearSupport: true,
+    chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
+  },
+  {
+    id: "ev-cond-100-e-plan",
+    reviewId: "rev-100",
+    documentId: "doc-rev-100-note",
+    anchorId: "sec-rev-100-note-3",
+    sectionId: "sec-rev-100-note-3",
+    text: "Diabetic polyneuropathy remains active with bilateral burning and numbness.",
+    exactText: "Diabetic polyneuropathy remains active with bilateral burning and numbness.",
+    date: "2026-04-12",
+    category: "potentialAddition",
+    conditionIds: ["cond-100-e"],
+    summary: "Current assessment and plan supports diabetic polyneuropathy.",
+    sourceType: "planSentence",
+    evidenceStrength: "assessmentWithPlan",
+    currentYearSupport: true,
+    chartAnchor: { tab: "encounters", itemId: "chart-rev-100-encounter-current", sectionId: "assessmentPlan" }
   }
 ];
 
@@ -1032,18 +1066,12 @@ export const conditions: Condition[] = [
     evidenceIds: [],
     actionable: true,
     currentYear: true,
-    hasSufficientMeat: false,
-    hasOtherSupportingEvidence: false,
+    hasSufficientMeat: true,
+    hasOtherSupportingEvidence: true,
     hadPriorCapture: false,
     hasCurrentYearCapture: false,
     hasClinicalIndicators: true,
-    conflictingEvidence: true,
-    seededRecommendation: {
-      action: "Disagree",
-      confidence: "Low",
-      source: "seeded",
-      rationale: "Conflicting behavioral health documentation requires human review before claim action."
-    },
+    conflictingEvidence: false,
     documentationIssues: []
   },
   {
@@ -1053,7 +1081,7 @@ export const conditions: Condition[] = [
     category: "prospective",
     subtype: "suspect",
     icd10: "E11.51",
-    description: "Type 2 DM with diabetic macular edema, right eye",
+    description: "Type 2 diabetes mellitus with diabetic peripheral angiopathy without gangrene",
     hcc: "HCC 37",
     raf: 0.318,
     claimStatus: "Registry",

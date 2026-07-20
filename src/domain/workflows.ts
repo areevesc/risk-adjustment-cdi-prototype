@@ -97,10 +97,17 @@ function createDownstreamTask(
   type: DownstreamTaskType,
   user: User,
   comments?: string,
-  assignedUserId?: string
+  assignedUserId?: string,
+  targetCalendarYear?: number
 ): SeedData {
+  const reviewCalendarYear = data.reviews.find((review) => review.id === reviewId)?.calendarYear;
   const existing = data.downstreamTasks.find(
-    (task) => task.reviewId === reviewId && task.conditionId === conditionId && task.type === type && task.status !== "Cancelled"
+    (task) =>
+      task.reviewId === reviewId &&
+      task.conditionId === conditionId &&
+      task.type === type &&
+      task.status !== "Cancelled" &&
+      (targetCalendarYear === undefined || (task.targetCalendarYear ?? reviewCalendarYear) === targetCalendarYear)
   );
   if (existing) return data;
   const task: DownstreamTask = {
@@ -113,7 +120,9 @@ function createDownstreamTask(
     assignedUserId,
     createdByUserId: user.id,
     createdAt: stamp(),
-    comments: comments?.trim() || undefined
+    comments: comments?.trim() || undefined,
+    sourceCalendarYear: targetCalendarYear === undefined ? undefined : reviewCalendarYear,
+    targetCalendarYear
   };
   return {
     ...data,
@@ -507,13 +516,16 @@ function commitDisposition(
   if (condition && action === "Delete") {
     next = createDownstreamTask(next, reviewId, conditionId, "Deletion", user, comments);
   }
+  if (condition && action === "Send to Prospective" && isPrototypeCurrentYear(review, condition, settings)) {
+    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, undefined, review.calendarYear);
+  }
   if (
     condition &&
     isPrototypeCurrentYear(review, condition, settings) &&
     action === "Disagree" &&
     (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")
   ) {
-    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
+    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, undefined, review.calendarYear);
   }
   if (condition && shouldCreateSchedulingOutreach(next, review, condition, action, reason, settings)) {
     next = createDownstreamTask(
@@ -543,7 +555,7 @@ function commitDisposition(
 }
 
 function isActionAllowedForWorkflow(condition: Condition, action: RecommendationAction) {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete"].includes(action);
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"].includes(action);
   if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"].includes(action);
   return ["Yes", "No", "Change"].includes(action);
 }
@@ -583,7 +595,7 @@ function shouldCreateSchedulingOutreach(
 ) {
   if (!isPrototypeCurrentYear(review, condition, settings)) return false;
   if (getUpcomingAppointmentsForReview(data, review).length > 0) return false;
-  if (action === "Yes" || action === "Change") return true;
+  if (action === "Send to Prospective" || action === "Yes" || action === "Change") return true;
   return action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence");
 }
 

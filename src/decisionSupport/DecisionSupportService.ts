@@ -24,6 +24,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const hierarchy = evaluateHierarchySuppression(condition, review, data);
     const contextualExclusion = evaluateContextualExclusion(condition);
     const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
+    const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
 
     const deleteSafety = evaluateDeleteSafety(condition, review, data);
     deleteSafety.supportingEvidenceIds.forEach((id) => supportingEvidenceIds.add(id));
@@ -79,6 +80,15 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
         message: "Conflicting or ambiguous current-year evidence exists. Escalate to manager or auditor review when needed.",
         severity: "warning",
         evidenceIds: deleteSafety.conflictingEvidenceIds
+      });
+    }
+
+    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesOnClaim" && !currentPrototypeYear) {
+      disabledActions.push({
+        action: "Send to Prospective",
+        reason: `Send to Prospective is available only for current calendar-year claims. This review is CY ${review.calendarYear}.`,
+        ruleId: "current-year-prospective-routing",
+        source: "rule-suppressed"
       });
     }
 
@@ -175,8 +185,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
   private getBaseRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (!isRiskAdjustmentCondition(condition)) return undefined;
-    if (condition.seededRecommendation) return condition.seededRecommendation;
     const claim = data.claims.find((item) => item.reviewId === review.id);
+    const hasConditionEvidence = condition.evidenceIds.some((id) =>
+      data.evidence.some((item) => item.id === id && item.conditionIds.includes(condition.id))
+    );
+    const evidenceDependentActions: RecommendationAction[] = ["Validate", "Add to Claim", "Yes", "Send to Prospective", "Change"];
+    if (condition.seededRecommendation && (!evidenceDependentActions.includes(condition.seededRecommendation.action) || hasConditionEvidence)) {
+      return condition.seededRecommendation;
+    }
     const riskEligibleSource =
       claim?.riskEligible !== false &&
       claim?.cptSourceEligible !== false &&
@@ -184,7 +200,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       claim?.faceToFace !== false &&
       claim?.providerSignatureValid !== false;
     const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
-
     if (!riskEligibleSource && condition.workflow !== "prospective") {
       return {
         action: "Disagree",
@@ -235,6 +250,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "prospective") {
+      if (!hasConditionEvidence) {
+        return {
+          action: "No",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so this prospective opportunity is not supported."
+        };
+      }
       const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
       if (condition.subtype === "recapture") {
         if (lookback.qualifies) {
@@ -266,7 +289,15 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "codesOnClaim") {
-      if (condition.hasSufficientMeat) {
+      if (!hasConditionEvidence) {
+        return {
+          action: "Delete",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Validate is not supported."
+        };
+      }
+      if (condition.hasSufficientMeat && hasConditionEvidence) {
         return {
           action: "Validate",
           confidence: "High",
@@ -274,7 +305,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "The code is on a risk-eligible claim and current documentation supports MEAT."
         };
       }
-      if (currentPrototypeYear && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
+      if (currentPrototypeYear && hasConditionEvidence && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
         return {
           action: "Send to Prospective",
           confidence: "Medium",
@@ -293,6 +324,14 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     }
 
     if (condition.workflow === "codesNotOnClaim") {
+      if (!hasConditionEvidence) {
+        return {
+          action: "Disagree",
+          confidence: "High",
+          source: "rules",
+          rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Add to Claim is not supported."
+        };
+      }
       if (condition.hasSufficientMeat) {
         return {
           action: "Add to Claim",
@@ -311,7 +350,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       }
     }
 
-    if (review.reviewType === "Prospective" && condition.hasClinicalIndicators) {
+    if (review.reviewType === "Prospective" && condition.hasClinicalIndicators && hasConditionEvidence) {
       return {
         action: "Yes",
         confidence: "Low",

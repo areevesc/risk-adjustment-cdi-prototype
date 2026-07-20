@@ -122,7 +122,7 @@ describe("seeded clinical content", () => {
     }
   });
 
-  it("keeps hypertension evidence diagnosis-specific and leaves unsupported conditions empty", () => {
+  it("keeps hypertension and diabetes evidence diagnosis-specific", () => {
     const hypertension = demoSeedData.conditions.find((item) => item.id === "cond-100-b")!;
     const evidence = demoSeedData.evidence.filter((item) => hypertension.evidenceIds.includes(item.id));
     const combinedText = evidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase();
@@ -134,9 +134,23 @@ describe("seeded clinical content", () => {
     expect(combinedText).not.toMatch(/a1c|hba1c|diabetes|bronchitis/);
     expect(evidence.some((item) => item.sourceType === "imagingImpression")).toBe(false);
 
-    expect(demoSeedData.conditions.find((item) => item.id === "cond-100-d")?.evidenceIds).toEqual([]);
+    const neuropathyEvidence = demoSeedData.evidence.filter((item) => item.conditionIds.includes("cond-100-d"));
+    expect(neuropathyEvidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceType: "planSentence", evidenceStrength: "assessmentWithPlan" })
+    ]));
+    expect(neuropathyEvidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase()).toContain("neuropathy");
+
+    const polyneuropathyEvidence = demoSeedData.evidence.filter((item) => item.conditionIds.includes("cond-100-e"));
+    expect(polyneuropathyEvidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceType: "planSentence", evidenceStrength: "assessmentWithPlan" })
+    ]));
+    expect(polyneuropathyEvidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase()).toContain("polyneuropathy");
+
     const angiopathyEvidence = demoSeedData.evidence.filter((item) => item.conditionIds.includes("cond-100-f"));
-    expect(angiopathyEvidence.map((item) => item.text).join(" ").toLowerCase()).not.toMatch(/retina|macular|ophthalm/);
+    const angiopathyText = angiopathyEvidence.map((item) => `${item.text} ${item.exactText ?? ""}`).join(" ").toLowerCase();
+    expect(angiopathyEvidence.length).toBeGreaterThan(0);
+    expect(angiopathyText).toContain("peripheral angiopathy");
+    expect(angiopathyText).not.toMatch(/retina|macular|ophthalm/);
   });
 
   it("uses coherent stage 4 CKD and severe-obesity facts throughout Victor Coleman's chart", () => {

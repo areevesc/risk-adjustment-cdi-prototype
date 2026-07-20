@@ -186,7 +186,7 @@ describe("ReviewPage evidence navigation", () => {
       </AppStateProvider>
     );
 
-    expect(await screen.findByText("Conditions And Actions")).toBeInTheDocument();
+    expect(await screen.findByText("Conditions & Actions")).toBeInTheDocument();
     const conditionName = await screen.findByText(/Chronic diastolic.*heart failure/i);
     const conditionCard = conditionName.closest("article");
     expect(conditionCard).not.toBeNull();
@@ -195,6 +195,54 @@ describe("ReviewPage evidence navigation", () => {
     expect(within(conditionCard!).getByRole("button", { name: "Delete for 2026" })).toBeDisabled();
     expect(within(conditionCard!.querySelector(".rule-evidence-links")!).getAllByRole("button")).not.toHaveLength(0);
     expect(screen.getByRole("button", { name: /Next Evidence/i })).toBeEnabled();
+  });
+
+  it("keeps workflow provenance available without crowding the primary condition actions", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ contentRevision: CURRENT_CONTENT_REVISION, currentUserId: "u-manager-1", settings, data: demoSeedData })
+    );
+
+    renderVictorReview();
+
+    expect(await screen.findByText("Documented HCCs that may need to be added to the claim.")).toBeInTheDocument();
+    const reviewDetails = screen.getAllByText("Review details");
+    expect(reviewDetails.length).toBeGreaterThan(0);
+    reviewDetails.forEach((summary) => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    expect(screen.queryByText("Eligible CPT / encounter type")).not.toBeInTheDocument();
+  });
+
+  it("offers the design-document current-year Send to Prospective action as a real condition decision", async () => {
+    const data = structuredClone(demoSeedData);
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    review.status = "In Progress";
+    review.lock = { lockedByUserId: "u-coder-1", lockedAt: "2026-07-20T12:00:00.000Z" };
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ contentRevision: CURRENT_CONTENT_REVISION, currentUserId: "u-coder-1", settings, data })
+    );
+    const user = userEvent.setup();
+
+    render(
+      <AppStateProvider>
+        <MemoryRouter initialEntries={["/review/rev-100"]}>
+          <Routes>
+            <Route path="/review/:reviewId" element={<ReviewPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AppStateProvider>
+    );
+
+    expect(await screen.findByText("Conditions & Actions")).toBeInTheDocument();
+    const conditionCode = screen.getAllByText("I50.33").find((element) => element.classList.contains("mono"))!;
+    const conditionCard = conditionCode.closest("article")!;
+    const action = within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2026" });
+    expect(action).toBeEnabled();
+
+    await user.click(action);
+
+    expect(await within(conditionCard).findByText("Draft: Send to Prospective for CY 2026")).toBeInTheDocument();
+    expect(action).toHaveAttribute("aria-pressed", "true");
   });
 
   it("stages an optional next-year prospective note independently from the claim decision", async () => {
@@ -222,6 +270,7 @@ describe("ReviewPage evidence navigation", () => {
     const conditionCode = screen.getAllByText("E11.22").find((element) => element.classList.contains("mono"))!;
     const conditionCard = conditionCode.closest("article")!;
     expect(within(conditionCard).getByRole("button", { name: "Validate for 2025" })).toBeEnabled();
+    expect(within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2025" })).toBeDisabled();
 
     await user.click(within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2026" }));
     const dialog = screen.getByRole("dialog", { name: "Send to Prospective for CY 2026" });

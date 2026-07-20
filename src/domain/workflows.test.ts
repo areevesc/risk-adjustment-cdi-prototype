@@ -67,7 +67,7 @@ function disposeRev100(data: SeedData, auditSampleRate: number) {
   let next = openReview(data, "rev-100", user(data, "u-coder-1"));
   next = setDisposition(next, "rev-100", "cond-100-a", user(data, "u-coder-1"), "Validate", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Delete", true, settings);
-  next = setDisposition(next, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Validate", false, settings);
+  next = setDisposition(next, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
   next = setDisposition(next, "rev-100", "cond-100-e", user(data, "u-coder-1"), "Disagree", true, settings, "Condition Resolved");
   next = setDisposition(next, "rev-100", "cond-100-f", user(data, "u-coder-1"), "Change", true, settings, undefined, "Use higher specificity", "E11.311");
@@ -527,6 +527,29 @@ describe("prototype workflow rules", () => {
     expect(next.conditions.find((item) => item.id === "cond-112-a")?.draftDisposition?.action).toBe("Delete");
   });
 
+  it("does not recommend capture when stale flags have no diagnosis-scoped evidence", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = {
+      ...data.conditions.find((item) => item.id === "cond-100-d")!,
+      evidenceIds: [],
+      hasSufficientMeat: true,
+      hasOtherSupportingEvidence: true,
+      hasClinicalIndicators: true,
+      seededRecommendation: {
+        action: "Add to Claim" as const,
+        confidence: "High" as const,
+        source: "seeded" as const,
+        rationale: "Stale recommendation that must not override missing evidence."
+      }
+    };
+
+    expect(decisionSupportService.getRecommendation(condition, review, data, settings)).toMatchObject({
+      action: "Disagree",
+      rationale: expect.stringContaining("No diagnosis-scoped evidence")
+    });
+  });
+
   it("preserves a quality condition as context without changing disposition summaries", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-b", user(data, "u-coder-1"), "Validate", false, settings);
@@ -535,21 +558,47 @@ describe("prototype workflow rules", () => {
     expect(getDispositionSummary(next, review).Validated.count).toBe(0);
   });
 
-  it("does not let a prospective handoff stand in for a claim-year decision", () => {
+  it("stages current-year Send to Prospective as a claim decision without replacing the independent next-year handoff", () => {
     const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
     const next = setDisposition(data, "rev-100", "cond-100-c", user(data, "u-coder-1"), "Send to Prospective", true, settings);
     const review = next.reviews.find((item) => item.id === "rev-100")!;
-    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftDisposition).toBeUndefined();
+    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftDisposition?.action).toBe("Send to Prospective");
+    expect(next.conditions.find((item) => item.id === "cond-100-c")?.draftProspectiveHandoff).toBeUndefined();
     expect(next.downstreamTasks).toHaveLength(0);
-    expect(getUnresolvedConditions(next, review).map((item) => item.id)).toContain("cond-100-c");
+    expect(getUnresolvedConditions(next, review).map((item) => item.id)).not.toContain("cond-100-c");
+
+    const completed = disposeRev100(cloneSeed(), 0).data;
+    expect(completed.downstreamTasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        conditionId: "cond-100-c",
+        type: "Prospective CDI Review",
+        queue: "Prospective Review Queue",
+        sourceCalendarYear: 2026,
+        targetCalendarYear: 2026
+      })
+    ]));
   });
 
-  it("does not calendar-year suppress the independent prospective handoff", () => {
+  it("disables the claim-year Send to Prospective decision outside the configured current year", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const review = data.reviews.find((item) => item.id === "rev-100")!;
+    const condition = data.conditions.find((item) => item.id === "cond-100-c")!;
+    const priorYearSettings = { ...settings, prototypeCurrentYear: 2025 };
+    const result = getRuleResult(condition, review, data, priorYearSettings);
+    const next = setDisposition(data, review.id, condition.id, user(data, "u-coder-1"), "Send to Prospective", true, priorYearSettings);
+
+    expect(result.disabledActions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: "Send to Prospective", ruleId: "current-year-prospective-routing" })
+    ]));
+    expect(next.conditions.find((item) => item.id === condition.id)?.draftDisposition).toBeUndefined();
+  });
+
+  it("keeps the independent next-year handoff available when the claim-year action is calendar-year disabled", () => {
     const data = openReview(cloneSeed(), "rev-102", user(seedData, "u-coder-3"));
     const review = data.reviews.find((item) => item.id === "rev-102")!;
     const condition = data.conditions.find((item) => item.id === "cond-102-a")!;
     const result = getRuleResult(condition, review, data, settings);
-    expect(result.disabledActions.some((item) => item.action === "Send to Prospective")).toBe(false);
+    expect(result.disabledActions.some((item) => item.action === "Send to Prospective")).toBe(true);
     const staged = stageProspectiveHandoff(data, review.id, condition.id, user(data, "u-coder-3"));
     expect(staged.conditions.find((item) => item.id === condition.id)?.draftProspectiveHandoff?.targetCalendarYear).toBe(2026);
   });

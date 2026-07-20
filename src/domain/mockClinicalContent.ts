@@ -109,10 +109,17 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
     };
   }
   if (diabetesText && (text.includes("neuropathy") || text.includes("polyneuropathy"))) {
+    const polyneuropathy = condition.icd10 === "E11.42";
     return {
-      hpi: "Patient reports burning and numbness in both feet, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration.",
-      plan: "Burning and numbness in both feet remain active. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
-      weakMention: "Diabetic neuropathy appears on the problem list and in prior podiatry records.",
+      hpi: polyneuropathy
+        ? "Patient reports bilateral burning and numbness in a stocking distribution, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration."
+        : "Patient reports burning and numbness in both feet, worse at night. Monofilament testing is reduced bilaterally and patient denies new foot ulceration.",
+      plan: polyneuropathy
+        ? "Diabetic polyneuropathy remains active with bilateral burning and numbness. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months."
+        : "Diabetic neuropathy remains active with burning and numbness in both feet. Continue gabapentin 300 mg three times daily, reinforce daily foot inspection, order podiatry follow-up, review fall precautions, and optimize glycemic control with repeat A1c in 3 months.",
+      weakMention: polyneuropathy
+        ? "Diabetic polyneuropathy appears on the problem list and in prior podiatry records."
+        : "Diabetic neuropathy appears on the problem list and in prior podiatry records.",
       labResults: [
         { component: "HbA1c", value: "8.1", unit: "%", referenceRange: "4.0-5.6", flag: "abnormal" },
         { component: "Vitamin B12", value: "388", unit: "pg/mL", referenceRange: "232-1245", flag: "normal" }
@@ -131,7 +138,7 @@ export function clinicalProfileForCondition(condition: Condition): ClinicalCondi
         note: "Protective sensation reduced bilaterally; nail care performed and diabetic footwear reviewed.",
         assessment: ["Diabetic peripheral neuropathy", "Continue foot surveillance"]
       },
-      pmh: "Type 2 diabetes with neuropathic symptoms in both feet.",
+      pmh: polyneuropathy ? "Type 2 diabetes with bilateral polyneuropathy symptoms." : "Type 2 diabetes with neuropathic symptoms in both feet.",
       ros: ["Neurologic: numbness and burning in both feet.", "Skin: no new ulcer or drainage.", "Endocrine: glucose variability reviewed."],
       exam: [
         { system: "Neurologic", text: "Diminished sensation to monofilament testing at bilateral plantar feet." },
