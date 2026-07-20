@@ -26,6 +26,7 @@ import {
   getConditionHccs,
   getConditionHierarchySuppression,
   getConditionMarginalScore,
+  getEffectiveDisposition,
   getOpportunityMarginalScore,
   getPatientYearRiskScores,
   isRiskAdjustmentCondition
@@ -99,7 +100,15 @@ export function getRuleResult(condition: Condition, review: PatientReview, data:
 }
 
 function isDeterministicRuleResolved(condition: Condition) {
-  return condition.ruleOutcome?.source === "rule-resolved" && condition.ruleOutcome.ruleId === "same-hcc-validation-threshold";
+  const outcome = condition.draftRuleOutcome ?? condition.ruleOutcome;
+  return outcome?.source === "rule-resolved" && outcome.ruleId === "same-hcc-validation-threshold";
+}
+
+function hasRequiredWorkflowDecision(condition: Condition) {
+  const action = getEffectiveDisposition(condition)?.action;
+  if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete";
+  if (condition.workflow === "codesNotOnClaim") return action === "Add to Claim" || action === "Disagree";
+  return action === "Yes" || action === "No" || action === "Change";
 }
 
 export function getUnresolvedConditions(data: SeedData, review: PatientReview) {
@@ -107,7 +116,7 @@ export function getUnresolvedConditions(data: SeedData, review: PatientReview) {
     (condition) =>
       isRiskAdjustmentCondition(condition) &&
       condition.actionable &&
-      !condition.disposition &&
+      !hasRequiredWorkflowDecision(condition) &&
       !isDeterministicRuleResolved(condition) &&
       !getConditionHierarchySuppression(condition, review, data).fullySuppressed
   );
@@ -157,11 +166,13 @@ export function getDispositionSummary(data: SeedData, review: PatientReview) {
 }
 
 export function getDispositionSummaryLabel(condition: Condition): DispositionSummaryLabel {
-  if (!condition.disposition && condition.ruleOutcome) {
-    if (isDeterministicRuleResolved(condition) && condition.ruleOutcome.action === "Validate") return "Validated";
+  const disposition = getEffectiveDisposition(condition);
+  const ruleOutcome = condition.draftRuleOutcome ?? condition.ruleOutcome;
+  if (!disposition && ruleOutcome) {
+    if (isDeterministicRuleResolved(condition) && ruleOutcome.action === "Validate") return "Validated";
     return "Unresolved";
   }
-  switch (condition.disposition?.action) {
+  switch (disposition?.action) {
     case "Validate":
       return "Validated";
     case "Delete":
@@ -170,7 +181,7 @@ export function getDispositionSummaryLabel(condition: Condition): DispositionSum
       return "Added to Claim";
     case "Send to Prospective":
     case "Disagree":
-      if (condition.disposition.action === "Disagree" && condition.disposition.reason === "Condition Resolved") return "Unresolved";
+      if (disposition.action === "Disagree" && disposition.reason === "Condition Resolved") return "Unresolved";
       return "Sent to Prospective";
     case "Yes":
       return "Prospective Yes";
@@ -189,6 +200,26 @@ export function getDownstreamTaskForCondition(data: SeedData, conditionId: strin
 
 export function getDownstreamTasksForCondition(data: SeedData, conditionId: string): DownstreamTask[] {
   return data.downstreamTasks.filter((task) => task.conditionId === conditionId && task.status !== "Cancelled");
+}
+
+export function getIncomingProspectiveHandoffs(data: SeedData, review: PatientReview) {
+  const sourceReviewById = new Map(
+    data.reviews.filter((item) => item.patientId === review.patientId).map((item) => [item.id, item])
+  );
+  const conditionById = new Map(data.conditions.map((condition) => [condition.id, condition]));
+  return data.downstreamTasks
+    .filter((task) => {
+      if (task.type !== "Prospective CDI Review" || task.status === "Cancelled" || task.reviewId === review.id) return false;
+      const sourceReview = sourceReviewById.get(task.reviewId);
+      if (!sourceReview) return false;
+      return (task.targetCalendarYear ?? sourceReview.calendarYear + 1) === review.calendarYear;
+    })
+    .flatMap((task) => {
+      const sourceReview = sourceReviewById.get(task.reviewId);
+      const condition = conditionById.get(task.conditionId);
+      return sourceReview && condition ? [{ task, sourceReview, condition }] : [];
+    })
+    .sort((left, right) => right.task.createdAt.localeCompare(left.task.createdAt));
 }
 
 export function getRafSummary(data: SeedData, review: PatientReview) {
@@ -240,7 +271,7 @@ function isOpenRiskOpportunity(condition: Condition, review: PatientReview, data
   return (
     isRiskAdjustmentCondition(condition) &&
     condition.actionable &&
-    !condition.disposition &&
+    !hasRequiredWorkflowDecision(condition) &&
     !isDeterministicRuleResolved(condition) &&
     !getConditionHierarchySuppression(condition, review, data).fullySuppressed
   );
@@ -373,7 +404,13 @@ export function getOutreachStatusForReview(data: SeedData, review: PatientReview
   const task = getSchedulingOutreachTaskForReview(data, review);
   const hasProspectiveNeed =
     review.reviewType === "Prospective" ||
-    data.downstreamTasks.some((item) => item.reviewId === review.id && item.type === "Prospective CDI Review" && item.status !== "Cancelled") ||
+    data.downstreamTasks.some(
+      (item) =>
+        item.reviewId === review.id &&
+        item.type === "Prospective CDI Review" &&
+        item.status !== "Cancelled" &&
+        (item.targetCalendarYear ?? review.calendarYear) === review.calendarYear
+    ) ||
     reviewConditions(data, review).some((condition) => {
       if (!condition.actionable) return false;
       if (condition.workflow === "prospective" && !condition.disposition) return true;

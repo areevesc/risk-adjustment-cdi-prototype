@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { demoSeedData } from "../data/seed";
 import { getConditionHierarchySuppression } from "./conditionRisk";
 import { getUnresolvedConditions } from "./selectors";
-import { openReview, setDisposition } from "./workflows";
+import { completeReview, openReview, setDisposition } from "./workflows";
 
 const settings = {
   recommendationMode: "simulated" as const,
@@ -50,6 +50,8 @@ describe("human-only V28 hierarchy state", () => {
       suppressedHccs: [expect.objectContaining({ lower: "HCC38", higher: "HCC37" })]
     });
     expect(getUnresolvedConditions(data, review).map((item) => item.id)).not.toContain(lowerAfter.id);
+    expect(data.history.some((entry) => entry.event === "Hierarchy lock applied")).toBe(false);
+    data = completeReview(data, review.id, reviewer, { ...settings, auditSampleRate: 0 }).data;
     expect(data.history).toEqual(expect.arrayContaining([
       expect.objectContaining({ event: "Hierarchy lock applied", conditionId: lowerAfter.id, detail: expect.stringContaining("HCC38") })
     ]));

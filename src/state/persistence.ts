@@ -1,7 +1,7 @@
 import type { AppSettings, Condition, PatientReview, SeedData } from "../domain/types";
 import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "../domain/cmsV28";
 
-export const CURRENT_CONTENT_REVISION = 4;
+export const CURRENT_CONTENT_REVISION = 8;
 
 export interface PersistedState {
   contentRevision: number;
@@ -15,7 +15,17 @@ export type StoredPersistedState = Omit<PersistedState, "contentRevision"> & {
 };
 
 const reviewWorkflowFields = ["status", "queue", "assignedUserId", "assignedAuditorId", "coverage", "lock", "auditReturn"] as const;
-const conditionWorkflowFields = ["disposition", "ruleOutcome", "auditorDisposition", "agreementWithAuditor", "documentationIssues", "disabledReason"] as const;
+const conditionWorkflowFields = [
+  "disposition",
+  "draftDisposition",
+  "draftProspectiveHandoff",
+  "ruleOutcome",
+  "draftRuleOutcome",
+  "auditorDisposition",
+  "agreementWithAuditor",
+  "documentationIssues",
+  "disabledReason"
+] as const;
 
 function overlayFields<T extends object, K extends keyof T>(current: T, persisted: T | undefined, fields: readonly K[]): T {
   if (!persisted) return current;

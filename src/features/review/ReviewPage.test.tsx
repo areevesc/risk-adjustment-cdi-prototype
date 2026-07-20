@@ -165,7 +165,7 @@ describe("ReviewPage evidence navigation", () => {
     expect(conditionCard).toHaveClass("active-condition");
   });
 
-  it("shows an official hierarchy lock without attaching unrelated sibling evidence", async () => {
+  it("hides a lower HCC after an official higher-HCC capture", async () => {
     localStorage.setItem(
       storageKey,
       JSON.stringify({
@@ -186,8 +186,45 @@ describe("ReviewPage evidence navigation", () => {
       </AppStateProvider>
     );
 
-    expect(await screen.findByText("Chronic diastolic (congestive) heart failure")).toBeInTheDocument();
-    expect(await screen.findByText(/HCC226 locked by captured HCC224/)).toBeInTheDocument();
+    expect(await screen.findByText("Conditions And Actions")).toBeInTheDocument();
+    expect(screen.queryByText("Chronic diastolic (congestive) heart failure")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Assessment with plan - Assessment and Plan treatment sentence/i })).not.toBeInTheDocument();
+  });
+
+  it("stages an optional next-year prospective note independently from the claim decision", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        contentRevision: CURRENT_CONTENT_REVISION,
+        currentUserId: "u-coder-3",
+        settings,
+        data: demoSeedData
+      })
+    );
+    const user = userEvent.setup();
+    render(
+      <AppStateProvider>
+        <MemoryRouter initialEntries={["/review/rev-102"]}>
+          <Routes>
+            <Route path="/review/:reviewId" element={<ReviewPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AppStateProvider>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Open chart" }));
+    const conditionCode = screen.getAllByText("E11.22").find((element) => element.classList.contains("mono"))!;
+    const conditionCard = conditionCode.closest("article")!;
+    expect(within(conditionCard).getByRole("button", { name: "Validate for 2025" })).toBeEnabled();
+
+    await user.click(within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2026" }));
+    const dialog = screen.getByRole("dialog", { name: "Send to Prospective for CY 2026" });
+    await user.type(within(dialog).getByLabelText(/Note for the prospective reviewer/i), "Recheck CKD at the next visit.");
+    await user.click(within(dialog).getByRole("button", { name: "Stage handoff for CY 2026" }));
+
+    expect(await within(conditionCard).findByText("Draft handoff for CY 2026")).toBeInTheDocument();
+    expect(within(conditionCard).getByText("Recheck CKD at the next visit.")).toBeInTheDocument();
+    expect(within(conditionCard).getByRole("button", { name: "Undo handoff" })).toBeEnabled();
+    expect(within(conditionCard).getByRole("button", { name: "Validate for 2025" })).toBeEnabled();
   });
 });

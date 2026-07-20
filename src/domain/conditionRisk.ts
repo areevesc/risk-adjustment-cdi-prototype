@@ -7,7 +7,7 @@ import {
   type CmsV28Hcc,
   type CmsV28ScoreBreakdown
 } from "./cmsV28";
-import type { Condition, Patient, PatientReview, SeedData } from "./types";
+import type { Condition, DraftDisposition, Patient, PatientReview, SeedData, UserDisposition } from "./types";
 
 const HUMAN_CAPTURE_ACTIONS = new Set(["Validate", "Add to Claim", "Change"]);
 
@@ -25,13 +25,19 @@ export function getConditionHccs(condition: Condition, patient?: Patient): CmsV2
 }
 
 export function getEffectiveDiagnosisCode(condition: Condition) {
-  return condition.disposition?.action === "Change" && condition.disposition.replacementCode
-    ? condition.disposition.replacementCode
+  const disposition = getEffectiveDisposition(condition);
+  return disposition?.action === "Change" && disposition.replacementCode
+    ? disposition.replacementCode
     : condition.icd10;
 }
 
+export function getEffectiveDisposition(condition: Condition): DraftDisposition | UserDisposition | undefined {
+  return condition.draftDisposition ?? condition.disposition;
+}
+
 export function isHumanCapturedCondition(condition: Condition) {
-  return Boolean(condition.disposition && HUMAN_CAPTURE_ACTIONS.has(condition.disposition.action));
+  const disposition = getEffectiveDisposition(condition);
+  return Boolean(disposition && HUMAN_CAPTURE_ACTIONS.has(disposition.action));
 }
 
 export interface HierarchySuppressionState {
@@ -146,7 +152,7 @@ function getCurrentClaimDiagnosisCodes(conditions: Condition[]) {
 function applyHumanDispositions(conditions: Condition[], initial: Set<string>, includeDeletes: boolean) {
   const diagnosisCodes = new Set(initial);
   conditions.forEach((condition) => {
-    const disposition = condition.disposition;
+    const disposition = getEffectiveDisposition(condition);
     if (!disposition) return;
     if (disposition.action === "Delete" && includeDeletes) diagnosisCodes.delete(condition.icd10);
     if (disposition.action === "Add to Claim" || disposition.action === "Validate") diagnosisCodes.add(condition.icd10);

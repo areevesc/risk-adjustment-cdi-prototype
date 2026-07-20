@@ -35,7 +35,7 @@ import {
 } from "./auth";
 import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions, getUpcomingAppointmentsForReview } from "./selectors";
 import { appendGeneratedChartForAssignee, GENERATED_CHART_CONTENT_REVISION } from "./generatedCharts";
-import { getConditionHierarchySuppression, isRiskAdjustmentCondition } from "./conditionRisk";
+import { getConditionHierarchySuppression, getEffectiveDisposition, isRiskAdjustmentCondition } from "./conditionRisk";
 
 function stamp() {
   return new Date().toISOString();
@@ -231,7 +231,33 @@ export function completeReview(data: SeedData, reviewId: string, user: User, set
   const unresolved = getUnresolvedConditions(data, review);
   if (unresolved.length > 0) return { data, unresolved };
 
-  let next = updateReview(data, reviewId, (item) => ({ ...item, status: "Completed", lock: undefined, auditReturn: undefined }));
+  let next = clearDraftRuleOutcomesForPatientYear(data, review);
+  const drafts = next.conditions.filter((condition) => condition.reviewId === reviewId && condition.draftDisposition);
+  drafts.forEach((condition) => {
+    const draft = condition.draftDisposition!;
+    const decisionUser = next.users.find((item) => item.id === draft.userId) ?? user;
+    next = commitDisposition(
+      next,
+      reviewId,
+      condition.id,
+      decisionUser,
+      draft.action,
+      draft.agreedWithRecommendation,
+      settings,
+      draft.reason,
+      draft.comments,
+      draft.replacementCode
+    );
+  });
+  const prospectiveHandoffDrafts = next.conditions.filter(
+    (condition) => condition.reviewId === reviewId && condition.draftProspectiveHandoff
+  );
+  prospectiveHandoffDrafts.forEach((condition) => {
+    const draft = condition.draftProspectiveHandoff!;
+    const handoffUser = next.users.find((item) => item.id === draft.userId) ?? user;
+    next = commitProspectiveHandoff(next, review, condition, handoffUser, draft.targetCalendarYear, draft.note);
+  });
+  next = updateReview(next, reviewId, (item) => ({ ...item, status: "Completed", lock: undefined, auditReturn: undefined }));
   next = addHistory(next, { reviewId, userId: user.id, event: "Review completed", detail: "All actionable conditions have a user-selected disposition or deterministic rule-derived outcome." });
   next = appendGeneratedChartForAssignee(next, review.assignedUserId, settings.prototypeCurrentYear, {
     completedReviewId: review.id,
@@ -318,10 +344,146 @@ export function setDisposition(
   if (!review || !conditionBefore || !isRiskAdjustmentCondition(conditionBefore) || !isActionAllowedForWorkflow(conditionBefore, action) || !canSetConditionDisposition(review, user)) return data;
   const ruleResult = getRuleResult(conditionBefore, review, data, settings);
   if (ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
+  if (conditionBefore.draftRuleOutcome?.source === "rule-suppressed" && conditionBefore.draftRuleOutcome.action === action) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
+  const stagedAt = stamp();
+  const next = updateCondition(data, conditionId, (condition) => ({
+    ...condition,
+    draftDisposition: {
+      action,
+      reason,
+      comments: comments?.trim() || undefined,
+      replacementCode,
+      userId: user.id,
+      stagedAt,
+      agreedWithRecommendation,
+      source: "user-selected"
+    }
+  }));
+  return refreshDraftRuleOutcomes(next, review, settings);
+}
+
+export function clearDispositionDraft(data: SeedData, reviewId: string, conditionId: string, user: User, settings: AppSettings): SeedData {
+  const review = data.reviews.find((item) => item.id === reviewId);
+  const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
+  if (!review || !condition?.draftDisposition || !canSetConditionDisposition(review, user)) return data;
+  const next = updateCondition(data, conditionId, (item) => ({ ...item, draftDisposition: undefined }));
+  return refreshDraftRuleOutcomes(next, review, settings);
+}
+
+export function stageProspectiveHandoff(
+  data: SeedData,
+  reviewId: string,
+  conditionId: string,
+  user: User,
+  note?: string
+): SeedData {
+  const review = data.reviews.find((item) => item.id === reviewId);
+  const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
+  if (!review || !condition || !isRiskAdjustmentCondition(condition) || !canSetConditionDisposition(review, user)) return data;
+  return updateCondition(data, conditionId, (item) => ({
+    ...item,
+    draftProspectiveHandoff: {
+      targetCalendarYear: review.calendarYear + 1,
+      note: note?.trim() || undefined,
+      userId: user.id,
+      stagedAt: stamp()
+    }
+  }));
+}
+
+export function clearProspectiveHandoffDraft(data: SeedData, reviewId: string, conditionId: string, user: User): SeedData {
+  const review = data.reviews.find((item) => item.id === reviewId);
+  const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
+  if (!review || !condition?.draftProspectiveHandoff || !canSetConditionDisposition(review, user)) return data;
+  return updateCondition(data, conditionId, (item) => ({ ...item, draftProspectiveHandoff: undefined }));
+}
+
+function commitProspectiveHandoff(
+  data: SeedData,
+  review: PatientReview,
+  condition: Condition,
+  user: User,
+  targetCalendarYear: number,
+  note?: string
+): SeedData {
+  const committedAt = stamp();
+  const existing = data.downstreamTasks.find(
+    (task) =>
+      task.reviewId === review.id &&
+      task.conditionId === condition.id &&
+      task.type === "Prospective CDI Review" &&
+      task.status !== "Cancelled" &&
+      (task.targetCalendarYear ?? review.calendarYear + 1) === targetCalendarYear
+  );
+  let next: SeedData = {
+    ...data,
+    conditions: data.conditions.map((item) =>
+      item.id === condition.id ? { ...item, draftProspectiveHandoff: undefined } : item
+    ),
+    downstreamTasks: existing
+      ? data.downstreamTasks.map((task) =>
+          task.id === existing.id
+            ? {
+                ...task,
+                comments: note?.trim() || undefined,
+                sourceCalendarYear: review.calendarYear,
+                targetCalendarYear,
+                assignedUserId: undefined,
+                updatedByUserId: user.id,
+                updatedAt: committedAt
+              }
+            : task
+        )
+      : [
+          {
+            id: uid("task"),
+            reviewId: review.id,
+            conditionId: condition.id,
+            type: "Prospective CDI Review",
+            status: "Open",
+            queue: "Prospective Review Queue",
+            createdByUserId: user.id,
+            createdAt: committedAt,
+            comments: note?.trim() || undefined,
+            sourceCalendarYear: review.calendarYear,
+            targetCalendarYear
+          },
+          ...data.downstreamTasks
+        ]
+  };
+  next = addHistory(next, {
+    reviewId: review.id,
+    conditionId: condition.id,
+    userId: user.id,
+    event: existing ? "Prospective handoff updated" : "Prospective handoff sent",
+    detail: `${condition.icd10} sent to the shared Prospective Review Queue for CY ${targetCalendarYear}${note?.trim() ? ` with note: ${note.trim()}` : "."}`
+  });
+  return next;
+}
+
+function commitDisposition(
+  data: SeedData,
+  reviewId: string,
+  conditionId: string,
+  user: User,
+  action: RecommendationAction,
+  agreedWithRecommendation: boolean | undefined,
+  settings: AppSettings,
+  reason?: DisagreeReason,
+  comments?: string,
+  replacementCode?: string
+): SeedData {
+  const review = data.reviews.find((item) => item.id === reviewId);
+  const conditionBefore = data.conditions.find((item) => item.id === conditionId);
+  if (!review || !conditionBefore) return data;
+  const hierarchyBefore = conditionBefore.draftDisposition
+    ? updateCondition(data, conditionId, (condition) => ({ ...condition, draftDisposition: undefined }))
+    : data;
   const decidedAt = stamp();
   let next = updateCondition(data, conditionId, (condition) => ({
     ...condition,
+    draftDisposition: undefined,
     disposition: {
       action,
       reason,
@@ -348,9 +510,10 @@ export function setDisposition(
   if (
     condition &&
     isPrototypeCurrentYear(review, condition, settings) &&
-    (action === "Send to Prospective" || (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")))
+    action === "Disagree" &&
+    (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")
   ) {
-    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, review.assignedUserId);
+    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
   }
   if (condition && shouldCreateSchedulingOutreach(next, review, condition, action, reason, settings)) {
     next = createDownstreamTask(
@@ -375,12 +538,12 @@ export function setDisposition(
     detail: reason ? `${action} - ${reason}` : action
   });
   return ["Validate", "Add to Claim", "Change"].includes(action)
-    ? addHierarchyLockHistory(data, next, review, user)
+    ? addHierarchyLockHistory(hierarchyBefore, next, review, user)
     : next;
 }
 
 function isActionAllowedForWorkflow(condition: Condition, action: RecommendationAction) {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"].includes(action);
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete"].includes(action);
   if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"].includes(action);
   return ["Yes", "No", "Change"].includes(action);
 }
@@ -420,8 +583,95 @@ function shouldCreateSchedulingOutreach(
 ) {
   if (!isPrototypeCurrentYear(review, condition, settings)) return false;
   if (getUpcomingAppointmentsForReview(data, review).length > 0) return false;
-  if (action === "Send to Prospective" || action === "Yes" || action === "Change") return true;
+  if (action === "Yes" || action === "Change") return true;
   return action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence");
+}
+
+function clearDraftRuleOutcomesForPatientYear(data: SeedData, review: PatientReview): SeedData {
+  const reviewIds = new Set(
+    data.reviews
+      .filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear)
+      .map((item) => item.id)
+  );
+  return {
+    ...data,
+    conditions: data.conditions.map((condition) =>
+      reviewIds.has(condition.reviewId) && condition.draftRuleOutcome
+        ? { ...condition, draftRuleOutcome: undefined }
+        : condition
+    )
+  };
+}
+
+function refreshDraftRuleOutcomes(data: SeedData, review: PatientReview, settings: AppSettings): SeedData {
+  let next = clearDraftRuleOutcomesForPatientYear(data, review);
+  const reviewIds = new Set(
+    next.reviews
+      .filter((item) => item.patientId === review.patientId && item.calendarYear === review.calendarYear)
+      .map((item) => item.id)
+  );
+  const patientYearConditions = next.conditions.filter((condition) => reviewIds.has(condition.reviewId));
+  const threshold = Math.max(1, Math.min(10, Math.trunc(Number.isFinite(settings.sameHccValidationThreshold) ? settings.sameHccValidationThreshold : 3)));
+  const validatedHccs = new Set(
+    patientYearConditions
+      .filter((condition) => condition.workflow === "codesOnClaim" && getEffectiveDisposition(condition)?.action === "Validate")
+      .map((condition) => condition.hcc)
+  );
+
+  validatedHccs.forEach((hcc) => {
+    const matching = getPatientCalendarYearHccGroup(next, review.patientId, review.calendarYear, hcc).filter(
+      (condition) => condition.workflow === "codesOnClaim"
+    );
+    if (matching.filter((condition) => getEffectiveDisposition(condition)?.action === "Validate").length < threshold) return;
+    matching.forEach((condition) => {
+      if (getEffectiveDisposition(condition) || condition.ruleOutcome || condition.auditorDisposition) return;
+      const explanation = `${hcc} has ${threshold} staged or completed reviewer validations for this patient and calendar year. This condition will be rule-resolved when the review is completed.`;
+      next = updateCondition(next, condition.id, (item) => ({
+        ...item,
+        draftRuleOutcome: {
+          source: "rule-resolved",
+          action: "Validate",
+          ruleId: "same-hcc-validation-threshold",
+          explanation,
+          supportingEvidenceIds: item.evidenceIds,
+          createdAt: stamp()
+        }
+      }));
+    });
+  });
+
+  const stagedAdditions = patientYearConditions.filter(
+    (condition) => condition.workflow === "codesNotOnClaim" && getEffectiveDisposition(condition)?.action === "Add to Claim"
+  );
+  stagedAdditions.forEach((selectedCondition) => {
+    getPatientCalendarYearHccGroup(next, review.patientId, review.calendarYear, selectedCondition.hcc)
+      .filter(
+        (condition) =>
+          condition.workflow === "codesNotOnClaim" &&
+          condition.id !== selectedCondition.id &&
+          !getEffectiveDisposition(condition) &&
+          !condition.ruleOutcome &&
+          !condition.auditorDisposition &&
+          !condition.draftRuleOutcome
+      )
+      .forEach((condition) => {
+        const explanation = `Add to Claim will be suppressed because ${selectedCondition.icd10} is staged for the same patient, calendar year, and ${selectedCondition.hcc}.`;
+        next = updateCondition(next, condition.id, (item) => ({
+          ...item,
+          draftRuleOutcome: {
+            source: "rule-suppressed",
+            action: "Add to Claim",
+            ruleId: "same-hcc-duplicate-add",
+            explanation,
+            selectedConditionId: selectedCondition.id,
+            supportingEvidenceIds: selectedCondition.evidenceIds,
+            createdAt: stamp()
+          }
+        }));
+      });
+  });
+
+  return next;
 }
 
 function applyThreeValidationRule(data: SeedData, reviewId: string, hcc: string, user: User, thresholdSetting: number): SeedData {
