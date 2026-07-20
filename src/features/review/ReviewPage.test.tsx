@@ -272,6 +272,10 @@ describe("ReviewPage evidence navigation", () => {
     expect(within(acuteCard).queryByText("Recapture")).not.toBeInTheDocument();
     expect(within(acuteCard).getByRole("button", { name: "Send to Prospective for CY 2026" })).toBeDisabled();
     expect(within(acuteCard).queryByRole("button", { name: "Send to Prospective for CY 2027" })).not.toBeInTheDocument();
+
+    await user.click(within(neuropathyCard).getByRole("button", { name: "Add to 2026 Claim" }));
+    expect(await within(neuropathyCard).findByText("Draft: Add to Claim for CY 2026")).toBeInTheDocument();
+    expect(screen.getByText("Conditions & Actions")).toBeInTheDocument();
   });
 
   it("stages an optional next-year prospective note independently from the claim decision", async () => {

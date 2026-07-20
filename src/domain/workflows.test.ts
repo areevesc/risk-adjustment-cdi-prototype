@@ -46,7 +46,7 @@ import {
   getRuleResult,
   getUnresolvedConditions
 } from "./selectors";
-import type { AppSettings, SeedData } from "./types";
+import type { AppSettings, RecommendationAction, SeedData } from "./types";
 
 const settings: AppSettings = {
   recommendationMode: "rules",
@@ -707,6 +707,56 @@ describe("prototype workflow rules", () => {
     expect(result.disabledActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "Add to Claim", ruleId: "hierarchy-trumping-suppression" })]));
     expect(blocked.conditions.find((item) => item.id === "cond-116-a")?.disposition).toBeUndefined();
     expect(changed.conditions.find((item) => item.id === "cond-116-a")?.disposition).toBeUndefined();
+  });
+
+  it("evaluates hierarchy safely while a higher-HCC capture is still a draft", () => {
+    const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+    const staged = setDisposition(data, "rev-100", "cond-100-d", user(data, "u-coder-1"), "Add to Claim", true, settings);
+    const review = staged.reviews.find((item) => item.id === "rev-100")!;
+    const lowerCondition = staged.conditions.find((item) => item.id === "cond-100-a")!;
+
+    expect(staged.conditions.find((item) => item.id === "cond-100-d")?.draftDisposition?.action).toBe("Add to Claim");
+    expect(() => getRuleResult(lowerCondition, review, staged, settings)).not.toThrow();
+  });
+
+  it("keeps the review render selectors stable after each primary claim decision", () => {
+    const scenarios: Array<{ conditionId: string; action: RecommendationAction; replacementCode?: string }> = [
+      { conditionId: "cond-100-a", action: "Validate" },
+      { conditionId: "cond-100-a", action: "Delete" },
+      { conditionId: "cond-100-a", action: "Send to Prospective" },
+      { conditionId: "cond-100-c", action: "Validate" },
+      { conditionId: "cond-100-c", action: "Delete" },
+      { conditionId: "cond-100-d", action: "Add to Claim" },
+      { conditionId: "cond-100-d", action: "Disagree" },
+      { conditionId: "cond-100-e", action: "Add to Claim" },
+      { conditionId: "cond-100-e", action: "Disagree" },
+      { conditionId: "cond-100-f", action: "Yes" },
+      { conditionId: "cond-100-f", action: "No" },
+      { conditionId: "cond-100-f", action: "Change", replacementCode: "E11.311" }
+    ];
+
+    scenarios.forEach(({ conditionId, action, replacementCode }) => {
+      const data = openReview(cloneSeed(), "rev-100", user(seedData, "u-coder-1"));
+      const staged = setDisposition(
+        data,
+        "rev-100",
+        conditionId,
+        user(data, "u-coder-1"),
+        action,
+        true,
+        settings,
+        action === "Disagree" ? "Not Enough MEAT" : undefined,
+        action === "Change" ? "Use the supported specificity" : undefined,
+        replacementCode
+      );
+      const review = staged.reviews.find((item) => item.id === "rev-100")!;
+      const selected = staged.conditions.find((item) => item.id === conditionId)!;
+
+      expect(selected.draftDisposition?.action, `${conditionId} should stage ${action}`).toBe(action);
+      expect(() => staged.conditions.filter((item) => item.reviewId === review.id).forEach((condition) => getRuleResult(condition, review, staged, settings))).not.toThrow();
+      expect(() => getDispositionSummary(staged, review)).not.toThrow();
+      expect(() => getRafSummary(staged, review)).not.toThrow();
+    });
   });
 
   it("does not apply hierarchy from an AI recommendation or obsolete specificity flag", () => {

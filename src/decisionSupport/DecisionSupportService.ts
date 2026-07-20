@@ -1,5 +1,5 @@
 import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
-import { getConditionHccs, getConditionHierarchySuppression, isAcuteCondition, isRiskAdjustmentCondition } from "../domain/conditionRisk";
+import { getConditionHccs, getConditionHierarchySuppression, getEffectiveDisposition, isAcuteCondition, isRiskAdjustmentCondition } from "../domain/conditionRisk";
 import type { CmsV28Hcc } from "../domain/cmsV28";
 
 export interface DecisionSupportService {
@@ -442,13 +442,19 @@ function evaluateHierarchySuppression(condition: Condition, review: PatientRevie
     };
   }
   const suppression = state.suppressedHccs[0];
-  const disposition = suppression.capturedCondition.disposition!;
-  const user = data.users.find((candidate) => candidate.id === disposition.userId);
+  const disposition = getEffectiveDisposition(suppression.capturedCondition);
+  const user = disposition ? data.users.find((candidate) => candidate.id === disposition.userId) : undefined;
+  const action = disposition?.action ?? "a capture action";
+  const selectedAt = disposition
+    ? "decidedAt" in disposition
+      ? disposition.decidedAt
+      : disposition.stagedAt
+    : "an unknown time";
   return {
     applies: true,
     disabledActions,
     evidenceIds: [...condition.evidenceIds, ...suppression.capturedCondition.evidenceIds],
-    reason: `${suppression.lower} remains visible but direct capture is locked because ${suppression.higher} was captured through ${suppression.capturedCondition.icd10} by ${user?.name ?? "a CDI/coder"} using ${disposition.action} on ${disposition.decidedAt}.`,
+    reason: `${suppression.lower} remains visible but direct capture is locked because ${suppression.higher} was selected through ${suppression.capturedCondition.icd10} by ${user?.name ?? "a CDI/coder"} using ${action} on ${selectedAt}.`,
     warning: "",
     replacementCode: suppression.capturedCondition.icd10
   };
