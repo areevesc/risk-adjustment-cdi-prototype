@@ -32,8 +32,10 @@ export function AuditPage() {
   const patient = maps.patients.get(selected.patientId)!;
   const audit = getAuditForReview(data, selected.id);
   const conditions = reviewConditions(data, selected);
+  const auditInProgress = audit?.status === "In Progress";
   const auditComplete = audit?.status === "Complete";
-  const canAct = selected.status === "Under Audit" && !auditComplete;
+  const canStart = !audit || audit.status === "Not Started" || audit.status === "Returned";
+  const canAct = selected.status === "Under Audit" && auditInProgress;
 
   function returnForCorrection() {
     if (!comments.trim()) return;
@@ -83,24 +85,43 @@ export function AuditPage() {
                   </p>
                 ) : null}
               </div>
-              <div className="header-actions">
-                <Button disabled={auditComplete} onClick={() => actions.startAudit(selected.id)}>
+              {auditInProgress ? (
+                <StatusChip tone="purple">
+                  <FileCheck2 size={14} />
+                  Audit in progress
+                </StatusChip>
+              ) : auditComplete ? (
+                <StatusChip tone="good">
+                  <FileCheck2 size={14} />
+                  Audit complete
+                </StatusChip>
+              ) : (
+                <StatusChip>Audit not started</StatusChip>
+              )}
+            </div>
+            <div className="audit-action-bar">
+              {canStart ? (
+                <Button variant="primary" onClick={() => actions.startAudit(selected.id)}>
                   <FileCheck2 size={15} />
                   Start audit
                 </Button>
-                {auditComplete ? (
-                  <Button onClick={() => actions.reopenAudit(selected.id)}>
-                    <RotateCcw size={15} />
-                    Reopen audit
-                  </Button>
-                ) : null}
-                <Button disabled={!canAct || !comments.trim()} onClick={returnForCorrection}>
+              ) : null}
+              {auditComplete ? (
+                <Button onClick={() => actions.reopenAudit(selected.id)}>
                   <RotateCcw size={15} />
-                  Return
+                  Reopen audit
                 </Button>
-                <Button disabled={!canAct} variant="primary" onClick={() => actions.completeAudit(selected.id, "Agree", comments)}>Agree complete</Button>
-                <Button disabled={!canAct} variant="danger" onClick={() => actions.completeAudit(selected.id, "Disagree", comments)}>Disagree complete</Button>
-              </div>
+              ) : null}
+              {canAct ? (
+                <>
+                  <Button disabled={!comments.trim()} onClick={returnForCorrection}>
+                    <RotateCcw size={15} />
+                    Return
+                  </Button>
+                  <Button variant="primary" onClick={() => actions.completeAudit(selected.id, "Agree", comments)}>Agree complete</Button>
+                  <Button variant="danger" onClick={() => actions.completeAudit(selected.id, "Disagree", comments)}>Disagree complete</Button>
+                </>
+              ) : null}
             </div>
             {auditComplete ? <div className="read-only-banner">Audit complete. Use Reopen audit before making another audit decision.</div> : null}
             {selected.auditReturn ? <div className="warning-banner">Returned for correction: {selected.auditReturn.comments}</div> : null}

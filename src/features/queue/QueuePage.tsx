@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createColumnHelper, flexRender, getCoreRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table";
-import { ArrowUpDown, Lock, Play, Search, UserPlus } from "lucide-react";
+import { ArrowUpDown, Info, Lock, Play, Search, UserPlus } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import {
   byId,
@@ -54,10 +54,12 @@ export function QueuePage() {
   const [teamMemberFilter, setTeamMemberFilter] = useState(canUseCdiCoverageFilter ? "Mine" : "All");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [visitFilter, setVisitFilter] = useState("All");
+  const [nextPatientMessage, setNextPatientMessage] = useState("");
   const canFilterByTeamMember = canAssignReviews(currentUser) || canUseCdiCoverageFilter;
 
   useEffect(() => {
     setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
+    setNextPatientMessage("");
   }, [canUseCdiCoverageFilter, currentUser.id]);
 
   const maps = useMemo(
@@ -144,6 +146,7 @@ export function QueuePage() {
     if (canFilterByTeamMember) setTeamMemberFilter(canUseCdiCoverageFilter ? "Mine" : "All");
     setCategoryFilter("All");
     setVisitFilter("All");
+    setNextPatientMessage("");
   }
 
   function open(reviewId: string) {
@@ -153,7 +156,16 @@ export function QueuePage() {
 
   function nextPatient() {
     const next = filteredRows.find((row) => canOpenReview(data, row.review, currentUser) && !row.review.lock && ["Available", "Pended"].includes(row.review.status));
-    if (next) open(next.review.id);
+    if (next) {
+      setNextPatientMessage("");
+      open(next.review.id);
+      return;
+    }
+    setNextPatientMessage(
+      filteredRows.length === 0
+        ? "No charts match the current filters. Clear or adjust the filters to continue."
+        : "No eligible next chart is available. The visible charts are locked, completed, or unavailable for your role."
+    );
   }
 
   const columns = [
@@ -252,25 +264,59 @@ export function QueuePage() {
           </Button>
         }
       >
+        {nextPatientMessage ? (
+          <div className="warning-banner queue-action-feedback" role="status" aria-live="polite">
+            <Info size={17} aria-hidden="true" />
+            {nextPatientMessage}
+          </div>
+        ) : null}
         <div className="filter-bar">
           <label className="search-box">
             <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients, member ID, payer, or provider" />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setNextPatientMessage("");
+              }}
+              placeholder="Search patients, member ID, payer, or provider"
+            />
           </label>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Workflow status">
+          <select
+            value={statusFilter}
+            onChange={(event) => {
+              setStatusFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Workflow status"
+          >
             <option value="All">All statuses</option>
             {statusOptions.map((status) => (
               <option key={status}>{status}</option>
             ))}
           </select>
-          <select value={reviewTypeFilter} onChange={(event) => setReviewTypeFilter(event.target.value)} aria-label="Review type">
+          <select
+            value={reviewTypeFilter}
+            onChange={(event) => {
+              setReviewTypeFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Review type"
+          >
             <option value="All">All review types</option>
             <option>Retrospective</option>
             <option>Concurrent</option>
             <option>Prospective</option>
           </select>
           {canAssignReviews(currentUser) ? (
-            <select value={teamMemberFilter} onChange={(event) => setTeamMemberFilter(event.target.value)} aria-label="Team member">
+            <select
+              value={teamMemberFilter}
+              onChange={(event) => {
+                setTeamMemberFilter(event.target.value);
+                setNextPatientMessage("");
+              }}
+              aria-label="Team member"
+            >
               <option value="All">All team members</option>
               {teamMemberOptions.map((user) => (
                 <option key={user.id} value={user.id}>
@@ -279,14 +325,28 @@ export function QueuePage() {
               ))}
             </select>
           ) : null}
-          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Category">
+          <select
+            value={categoryFilter}
+            onChange={(event) => {
+              setCategoryFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Category"
+          >
             <option value="All">All categories</option>
             <option value="validated">Validated</option>
             <option value="potentialDelete">Potential Delete</option>
             <option value="potentialAddition">Potential Addition</option>
             <option value="prospective">CDI Recapture/Suspect</option>
           </select>
-          <select value={visitFilter} onChange={(event) => setVisitFilter(event.target.value)} aria-label="Visit timing">
+          <select
+            value={visitFilter}
+            onChange={(event) => {
+              setVisitFilter(event.target.value);
+              setNextPatientMessage("");
+            }}
+            aria-label="Visit timing"
+          >
             <option value="All">All visits</option>
             <option value="Upcoming">Upcoming visits</option>
             <option value="No upcoming visit">No upcoming visit</option>

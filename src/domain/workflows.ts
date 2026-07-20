@@ -788,7 +788,7 @@ export function startAudit(data: SeedData, reviewId: string, user: User, sampled
   const review = data.reviews.find((item) => item.id === reviewId);
   if (!review || (!sampled && !canStartAudit(review, user))) return data;
   const existing = data.audits.find((audit) => audit.reviewId === reviewId);
-  if (existing?.status === "Complete") return data;
+  if (existing?.status === "In Progress" || existing?.status === "Complete") return data;
   const sampleProfile = getAuditSamplingProfile(data, review, sampleRate);
   const sampledAt = sampled ? stamp() : undefined;
   let next = updateReview(data, reviewId, (item) => ({

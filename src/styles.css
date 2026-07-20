@@ -554,6 +554,10 @@ label {
   margin-bottom: 14px;
 }
 
+.queue-action-feedback {
+  margin-bottom: 14px;
+}
+
 .patient-queue-row {
   background: #ffffff;
   border: 1px solid var(--border);
@@ -2528,6 +2532,13 @@ tr.chart-row.has-evidence td {
 .audit-detail {
   display: grid;
   gap: 14px;
+}
+
+.audit-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .audit-condition-list {

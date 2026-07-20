@@ -833,6 +833,15 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(audit.sampleRate).toBeUndefined();
   });
 
+  it("does not restart an audit that is already in progress", () => {
+    const data = cloneSeed();
+    const historyCount = data.history.length;
+    const next = startAudit(data, "rev-105", user(data, "u-auditor-1"));
+    expect(next).toBe(data);
+    expect(next.history).toHaveLength(historyCount);
+    expect(next.history.filter((entry) => entry.reviewId === "rev-105" && entry.event === "Audit started")).toHaveLength(1);
+  });
+
   it("returns audit work to original reviewer as Rework Required", () => {
     const data = cloneSeed();
     const next = completeAudit(data, "rev-105", user(data, "u-auditor-1"), "Return for Correction", "Fix MEAT support");
