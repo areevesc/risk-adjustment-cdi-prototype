@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { demoSeedData as seedData } from "../data/seed";
-import type { AppSettings, AssignmentMode, DocumentationIssue, DownstreamTaskStatus, PatientReview, QueueType, RecommendationAction, Role, SeedData, User } from "../domain/types";
+import type { AppSettings, AssignmentMode, Condition, ConditionDecision, DocumentationIssue, DownstreamTaskStatus, PatientReview, QueueType, RecommendationAction, Role, RoutingOutcome, SeedData, User } from "../domain/types";
 import {
   assignReview,
   clearDispositionDraft,
@@ -22,7 +22,7 @@ import {
   takeCoverage,
   updateDownstreamTaskStatus
 } from "../domain/workflows";
-import { getCurrentUser } from "../domain/selectors";
+import { getCurrentUser, getUnresolvedConditions } from "../domain/selectors";
 import type { DisagreeReason, RecommendationMode } from "../domain/types";
 import {
   CURRENT_CONTENT_REVISION,
@@ -177,6 +177,12 @@ export function normalizeSeedData(rawData: SeedData): SeedData {
       draftProspectiveHandoff: condition.draftProspectiveHandoff
         ? { ...condition.draftProspectiveHandoff, userId: normalizeUserId(condition.draftProspectiveHandoff.userId) ?? "u-coder-1" }
         : undefined,
+      decision: condition.decision ? { ...condition.decision, userId: normalizeUserId(condition.decision.userId) ?? "u-coder-1" } : undefined,
+      draftDecision: condition.draftDecision ? { ...condition.draftDecision, userId: normalizeUserId(condition.draftDecision.userId) ?? "u-coder-1" } : undefined,
+      routingOutcome: condition.routingOutcome ? { ...condition.routingOutcome, userId: normalizeUserId(condition.routingOutcome.userId) ?? "u-coder-1" } : undefined,
+      draftRoutingOutcome: condition.draftRoutingOutcome
+        ? { ...condition.draftRoutingOutcome, userId: normalizeUserId(condition.draftRoutingOutcome.userId) ?? "u-coder-1" }
+        : undefined,
       auditorDisposition: condition.auditorDisposition ? { ...condition.auditorDisposition, auditorId: normalizeUserId(condition.auditorDisposition.auditorId) ?? "u-auditor-1" } : undefined,
       documentationIssues: condition.documentationIssues.map((issue) => ({ ...issue, userId: normalizeUserId(issue.userId) ?? "u-coder-1" })),
       ruleOutcome: condition.ruleOutcome?.ruleId === "same-hcc-duplicate-add" ? undefined : condition.ruleOutcome,
@@ -201,7 +207,8 @@ export function migratePersistedState(parsed: StoredPersistedState): PersistedSt
   const mergedData = { ...seedData, ...parsed.data, downstreamTasks: parsed.data.downstreamTasks ?? [] };
   const refreshedData = previousRevision < CURRENT_CONTENT_REVISION ? refreshSeedClinicalBundles(mergedData, seedData) : mergedData;
   const normalizedData = normalizeSeedData(refreshedData);
-  const data = previousRevision < CURRENT_CONTENT_REVISION ? migrateLegacyImmediateDecisions(normalizedData) : normalizedData;
+  const legacyMigrated = previousRevision < CURRENT_CONTENT_REVISION ? migrateLegacyImmediateDecisions(normalizedData) : normalizedData;
+  const data = previousRevision < 11 ? migrateVisitBasedWorkflow(legacyMigrated) : legacyMigrated;
   const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
   return {
     contentRevision: Math.max(previousRevision, CURRENT_CONTENT_REVISION),
@@ -209,6 +216,119 @@ export function migratePersistedState(parsed: StoredPersistedState): PersistedSt
     settings: { ...defaultSettings, ...parsed.settings },
     data
   };
+}
+
+function decisionForMigratedAction(action: RecommendationAction | undefined, scheduled: boolean): ConditionDecision | undefined {
+  if (action === "Validate") return "validate";
+  if (action === "Delete") return "delete";
+  if (action === "Add to Claim") return "addToClaim";
+  if (action === "Disagree" || action === "No") return "dismiss";
+  if (action === "Change") return "changeCode";
+  if (action === "Yes" && scheduled) return "prepareProviderQuery";
+  return undefined;
+}
+
+function routeForMigratedCondition(condition: Condition, scheduled: boolean): Exclude<RoutingOutcome, "none"> | undefined {
+  const action = condition.draftDisposition?.action ?? condition.disposition?.action;
+  const reason = condition.draftDisposition?.reason ?? condition.disposition?.reason;
+  if (action === "Add to Claim") return "additionExport";
+  if (action === "Delete") return "deletionExport";
+  if (action === "Yes" || action === "Send to Prospective" || condition.draftProspectiveHandoff) {
+    return scheduled ? "providerQueryTask" : "prospectiveHold";
+  }
+  if (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")) {
+    return scheduled ? "providerQueryTask" : "prospectiveHold";
+  }
+  if (action === "Disagree" && reason === "Other") return "exceptionRouting";
+  return undefined;
+}
+
+function migrateVisitBasedWorkflow(data: SeedData): SeedData {
+  const seedAngelaReview = seedData.reviews.find((review) => review.id === "rev-108")!;
+  const seedAngelaConditions = new Map(seedData.conditions.filter((condition) => condition.reviewId === "rev-108").map((condition) => [condition.id, condition]));
+  const reviewById = new Map(data.reviews.map((review) => [review.id, review]));
+  const appointmentIds = new Set(data.appointments.map((appointment) => appointment.id));
+  const migratedConditions = data.conditions.map((condition) => {
+    if (condition.reviewId === "rev-108") return structuredClone(seedAngelaConditions.get(condition.id) ?? condition);
+    const review = reviewById.get(condition.reviewId);
+    const scheduled = Boolean(review?.appointmentId && appointmentIds.has(review.appointmentId));
+    const committed = condition.disposition;
+    const draft = condition.draftDisposition;
+    const decision = decisionForMigratedAction(committed?.action, scheduled);
+    const draftDecision = decisionForMigratedAction(draft?.action, scheduled);
+    const route = routeForMigratedCondition(condition, scheduled);
+    return {
+      ...condition,
+      decision: condition.decision ?? (decision && committed
+        ? {
+            decision,
+            reason: committed.reason,
+            replacementCode: committed.replacementCode,
+            comments: committed.comments,
+            userId: committed.userId,
+            decidedAt: committed.decidedAt
+          }
+        : undefined),
+      draftDecision: condition.draftDecision ?? (draftDecision && draft
+        ? {
+            decision: draftDecision,
+            reason: draft.reason,
+            replacementCode: draft.replacementCode,
+            comments: draft.comments,
+            userId: draft.userId,
+            stagedAt: draft.stagedAt
+          }
+        : undefined),
+      routingOutcome: condition.routingOutcome ?? (route && committed
+        ? {
+            outcome: route,
+            userId: committed.userId,
+            routedAt: committed.decidedAt,
+            appointmentId: route === "providerQueryTask" ? review?.appointmentId : undefined,
+            comments: committed.comments
+          }
+        : undefined),
+      draftRoutingOutcome: condition.draftRoutingOutcome ?? (route && (draft || condition.draftProspectiveHandoff)
+        ? {
+            outcome: route,
+            userId: draft?.userId ?? condition.draftProspectiveHandoff!.userId,
+            stagedAt: draft?.stagedAt ?? condition.draftProspectiveHandoff!.stagedAt,
+            appointmentId: route === "providerQueryTask" ? review?.appointmentId : undefined,
+            comments: draft?.comments ?? condition.draftProspectiveHandoff?.note
+          }
+        : undefined)
+    };
+  });
+  let migrated: SeedData = {
+    ...data,
+    conditions: migratedConditions,
+    reviews: data.reviews.map((review) =>
+      review.id === "rev-108"
+        ? { ...review, ...seedAngelaReview, lock: seedAngelaReview.lock ? { ...seedAngelaReview.lock } : undefined }
+        : ["Completed", "Under Audit", "Audit Complete"].includes(review.status)
+          ? { ...review, lock: undefined }
+          : review
+    ),
+    downstreamTasks: data.downstreamTasks.map((task) => {
+      if (task.type !== "Prospective CDI Review") return task;
+      const review = reviewById.get(task.reviewId);
+      const scheduled = Boolean(review?.appointmentId && appointmentIds.has(review.appointmentId));
+      return scheduled
+        ? { ...task, type: "Provider Query", queue: "Provider Query Queue", appointmentId: review?.appointmentId }
+        : { ...task, appointmentId: undefined };
+    })
+  };
+
+  migrated = {
+    ...migrated,
+    reviews: migrated.reviews.map((review) => {
+      if (review.id === "rev-108" || !["Completed", "Under Audit", "Audit Complete"].includes(review.status)) return review;
+      return getUnresolvedConditions(migrated, review).length > 0
+        ? { ...review, status: "Available", queue: "CDI/Coder Queue", lock: undefined }
+        : { ...review, lock: undefined };
+    })
+  };
+  return migrated;
 }
 
 function migrateLegacyImmediateDecisions(data: SeedData): SeedData {
@@ -224,7 +344,7 @@ function migrateLegacyImmediateDecisions(data: SeedData): SeedData {
       )
       .map((condition) => condition.id)
   );
-  const actionTaskTypes = new Set(["Addition to Claim", "Deletion", "Prospective CDI Review", "Scheduling Outreach"]);
+  const actionTaskTypes = new Set(["Addition to Claim", "Deletion", "Provider Query", "Prospective CDI Review", "Scheduling Outreach"]);
   const draftHistoryEvents = new Set(["Action selected", "Hierarchy lock applied", "Rule-resolved condition", "Rule-suppressed condition"]);
 
   return {

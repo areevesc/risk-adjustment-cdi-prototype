@@ -105,6 +105,10 @@ function isDeterministicRuleResolved(condition: Condition) {
 }
 
 function hasRequiredWorkflowDecision(condition: Condition) {
+  const decision = condition.draftDecision?.decision ?? condition.decision?.decision;
+  if (["validate", "delete", "addToClaim", "dismiss", "changeCode", "prepareProviderQuery"].includes(decision ?? "")) return true;
+  const route = condition.draftRoutingOutcome?.outcome ?? condition.routingOutcome?.outcome;
+  if (route && route !== "none") return true;
   const action = getEffectiveDisposition(condition)?.action;
   if (condition.workflow === "codesOnClaim") return action === "Validate" || action === "Delete" || action === "Send to Prospective";
   if (condition.workflow === "codesNotOnClaim") return action === "Add to Claim" || action === "Disagree";
@@ -336,7 +340,16 @@ export function getProspectiveCounts(data: SeedData, review: PatientReview) {
 
 export function getEvidenceForCondition(data: SeedData, condition: Condition): EvidencePassage[] {
   const evidenceMap = byId(data.evidence);
-  return condition.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
+  const evidence = condition.evidenceIds.map((id) => evidenceMap.get(id)).filter(Boolean) as EvidencePassage[];
+  return evidence.sort((left, right) => {
+    const usefulness = (item: EvidencePassage) => {
+      if (item.currentYearSupport && ["assessmentHeading", "planSentence"].includes(item.sourceType ?? "")) return 0;
+      if (item.currentYearSupport && ["treatmentEvidence", "monitoringEvidence", "evaluationEvidence"].includes(item.evidenceStrength ?? "")) return 1;
+      if (item.sourceType === "claimLine" || item.historicalOnly) return 3;
+      return 2;
+    };
+    return usefulness(left) - usefulness(right) || right.date.localeCompare(left.date);
+  });
 }
 
 export function getActiveConditionEvidence(data: SeedData, relatedEvidence: EvidencePassage[], activeConditionId?: string): EvidencePassage[] {

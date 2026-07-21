@@ -230,9 +230,10 @@ export const reviews: PatientReview[] = [
     reviewType: "Concurrent",
     clinicId: "clinic-river",
     providerId: "prov-ana",
-    status: "Completed",
+    status: "In Progress",
     queue: "CDI/Coder Queue",
-    assignedUserId: "u-coder-6",
+    assignedUserId: "u-coder-1",
+    lock: { lockedByUserId: "u-coder-1", lockedAt: "2026-06-24T09:00:00.000Z" },
     appointmentId: "appt-108",
     conditionIds: ["cond-108-a", "cond-108-b", "cond-108-c"]
   },
@@ -600,15 +601,20 @@ export const evidence: EvidencePassage[] = reviews.flatMap((review) => [
     id: `ev-${review.id}-b`,
     reviewId: review.id,
     documentId: `doc-${review.id}-note`,
-    anchorId: `sec-${review.id}-note-2`,
-    sectionId: `sec-${review.id}-note-2`,
+    anchorId: `sec-${review.id}-note-${review.id === "rev-110" ? "3" : "2"}`,
+    sectionId: `sec-${review.id}-note-${review.id === "rev-110" ? "3" : "2"}`,
     text: "Patient reports dyspnea on exertion and intermittent ankle edema. Daily weights fluctuate by 2 to 3 lb with higher sodium intake; no chest pain reported today.",
     exactText: "dyspnea on exertion and intermittent ankle edema",
     date: `${review.calendarYear}-04-12`,
     category: "prospective",
     subtype: "recapture",
+    ownership: review.id === "rev-110" ? "structured" : "inferred",
     conditionIds: review.conditionIds.slice(2, 3),
-    summary: "HPI mentions symptoms/history without a complete current A&P plan."
+    summary: "HPI mentions symptoms/history without a complete current A&P plan.",
+    sourceType: review.id === "rev-110" ? "planSentence" : undefined,
+    chartAnchor: review.id === "rev-110"
+      ? { tab: "encounters", itemId: `chart-${review.id}-encounter-current`, sectionId: "assessmentPlan" }
+      : undefined
   },
   {
     id: `ev-${review.id}-c`,
@@ -950,6 +956,68 @@ const disposed = (action: "Validate" | "Add to Claim" | "Yes" | "Delete", userId
 });
 
 const explicitConditionReviewIds = new Set(["rev-100", "rev-110", "rev-111", "rev-111-support", "rev-112", "rev-113", "rev-114", "rev-115", "rev-116"]);
+
+interface GeneratedConditionScenario {
+  workflow: Condition["workflow"];
+  category: Condition["category"];
+  subtype?: Condition["subtype"];
+  icd10: string;
+  description: string;
+  claimStatus: Condition["claimStatus"];
+  hasSufficientMeat: boolean;
+  hasOtherSupportingEvidence: boolean;
+  hadPriorCapture: boolean;
+  hasCurrentYearCapture: boolean;
+  hasClinicalIndicators: boolean;
+  sourceYearOffset?: number;
+  disposition?: Condition["disposition"];
+  resolvedFlag?: boolean;
+  conflictingEvidence?: boolean;
+  acuteCondition?: boolean;
+  documentationIssues?: Condition["documentationIssues"];
+}
+
+const generatedConditionScenarios: Record<string, GeneratedConditionScenario[]> = {
+  "rev-101": [
+    { workflow: "codesOnClaim", category: "potentialDelete", icd10: "N18.4", description: "Chronic kidney disease, stage 4", claimStatus: "On claim", hasSufficientMeat: false, hasOtherSupportingEvidence: false, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "codesNotOnClaim", category: "potentialAddition", icd10: "E66.01", description: "Morbid obesity due to excess calories", claimStatus: "Not on claim", hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: false, hasCurrentYearCapture: false, hasClinicalIndicators: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "J44.9", description: "Chronic obstructive pulmonary disease", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true }
+  ],
+  "rev-102": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "E11.22", description: "Type 2 diabetes mellitus with diabetic chronic kidney disease", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "I50.32", description: "Chronic diastolic heart failure", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true }
+  ],
+  "rev-103": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "N18.4", description: "Chronic kidney disease, stage 4", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "codesNotOnClaim", category: "potentialAddition", icd10: "E66.01", description: "Morbid obesity due to excess calories", claimStatus: "Not on claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: false, hasCurrentYearCapture: false, hasClinicalIndicators: true, resolvedFlag: true, documentationIssues: [{ issue: "Provider education", comments: "Clarify specificity for future encounter.", userId: "u-cdi-4", createdAt: now }] }
+  ],
+  "rev-104": [
+    { workflow: "codesOnClaim", category: "potentialDelete", icd10: "E11.22", description: "Type 2 diabetes mellitus with diabetic chronic kidney disease", claimStatus: "On claim", hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true, disposition: disposed("Delete") },
+    { workflow: "prospective", category: "prospective", subtype: "suspect", icd10: "I50.32", description: "Chronic diastolic heart failure", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true, disposition: disposed("Yes", "u-cdi-1") }
+  ],
+  "rev-105": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "N18.4", description: "Chronic kidney disease, stage 4", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: false, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true, disposition: disposed("Validate") },
+    { workflow: "codesNotOnClaim", category: "potentialAddition", icd10: "E66.01", description: "Morbid obesity due to excess calories", claimStatus: "Not on claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: false, hasCurrentYearCapture: false, hasClinicalIndicators: true, disposition: disposed("Add to Claim", "u-cdi-1") }
+  ],
+  "rev-106": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "E11.22", description: "Type 2 diabetes mellitus with diabetic chronic kidney disease", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "I50.32", description: "Chronic diastolic heart failure", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true }
+  ],
+  "rev-107": [
+    { workflow: "codesOnClaim", category: "potentialDelete", icd10: "N18.4", description: "Chronic kidney disease, stage 4", claimStatus: "On claim", hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "codesNotOnClaim", category: "potentialAddition", icd10: "E66.01", description: "Morbid obesity due to excess calories", claimStatus: "Not on claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: false, hasCurrentYearCapture: false, hasClinicalIndicators: true, acuteCondition: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "J44.9", description: "Chronic obstructive pulmonary disease", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true }
+  ],
+  "rev-108": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "E11.22", description: "Type 2 diabetes mellitus with diabetic chronic kidney disease", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "I50.32", description: "Chronic diastolic heart failure", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true },
+    { workflow: "prospective", category: "prospective", subtype: "recapture", icd10: "J44.9", description: "Chronic obstructive pulmonary disease", claimStatus: "Historical", sourceYearOffset: -1, hasSufficientMeat: false, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: false, hasClinicalIndicators: true }
+  ],
+  "rev-109": [
+    { workflow: "codesOnClaim", category: "validated", icd10: "N18.4", description: "Chronic kidney disease, stage 4", claimStatus: "On claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: true, hasCurrentYearCapture: true, hasClinicalIndicators: true, disposition: disposed("Validate") },
+    { workflow: "codesNotOnClaim", category: "potentialAddition", icd10: "E66.01", description: "Morbid obesity due to excess calories", claimStatus: "Not on claim", hasSufficientMeat: true, hasOtherSupportingEvidence: true, hadPriorCapture: false, hasCurrentYearCapture: false, hasClinicalIndicators: true, disposition: disposed("Add to Claim", "u-cdi-1") }
+  ]
+};
 
 export const conditions: Condition[] = [
   {
@@ -1361,87 +1429,37 @@ export const conditions: Condition[] = [
   },
   ...reviews
     .filter((review) => !explicitConditionReviewIds.has(review.id))
-    .flatMap((review, index) => {
-      const base: Condition[] = [
-        {
-          id: review.conditionIds[0],
-          reviewId: review.id,
-          workflow: "codesOnClaim",
-          category: index % 3 === 0 ? "potentialDelete" : "validated",
-          icd10: index % 2 === 0 ? "N18.4" : "E11.22",
-          description: index % 2 === 0 ? "Chronic kidney disease, stage 4" : "Type 2 DM with diabetic chronic kidney disease",
-          hcc: "HCC 328",
-          raf: 0.289 + index * 0.01,
-          claimStatus: "On claim",
-          sourceDate: `${review.calendarYear}-04-12`,
-          evidenceIds: [`ev-${review.id}-a`, `ev-${review.id}-e`],
-          actionable: true,
-          currentYear: review.calendarYear === 2026,
-          hasSufficientMeat: index % 3 !== 0,
-          hasOtherSupportingEvidence: index % 4 !== 0,
-          hadPriorCapture: true,
-          hasCurrentYearCapture: true,
-          hasClinicalIndicators: true,
-          disposition: review.status === "Completed" || review.status === "Under Audit" || review.status === "Audit Complete" ? disposed(index % 3 === 0 ? "Delete" : "Validate") : undefined,
-          documentationIssues: []
-        },
-        {
-          id: review.conditionIds[1],
-          reviewId: review.id,
-          workflow: index % 2 === 0 ? "codesNotOnClaim" : "prospective",
-          category: index % 2 === 0 ? "potentialAddition" : "prospective",
-          subtype: index % 2 === 0 ? undefined : index % 3 === 0 ? "suspect" : "recapture",
-          icd10: index % 2 === 0 ? "E66.01" : "I50.32",
-          description: index % 2 === 0 ? "Morbid obesity due to excess calories" : "Chronic diastolic heart failure",
-          hcc: index % 2 === 0 ? "HCC 48" : "HCC 222",
-          raf: 0.186 + index * 0.012,
-          claimStatus: index % 2 === 0 ? "Not on claim" : "Historical",
-          sourceDate: `${review.calendarYear}-03-05`,
-          evidenceIds: [`ev-${review.id}-d`, `ev-${review.id}-f`],
-          actionable: true,
-          currentYear: review.calendarYear === 2026,
-          hasSufficientMeat: index % 5 !== 0,
-          hasOtherSupportingEvidence: true,
-          hadPriorCapture: index % 2 !== 0,
-          hasCurrentYearCapture: false,
-          hasClinicalIndicators: true,
-          acuteCondition: review.id === "rev-107",
-          qualityExclusionCode: review.id === "rev-109",
-          resolvedFlag: review.id === "rev-103",
-          disposition: review.status === "Completed" || review.status === "Under Audit" || review.status === "Audit Complete" ? disposed(index % 2 === 0 ? "Add to Claim" : "Yes", "u-cdi-1") : undefined,
-          documentationIssues: review.id === "rev-103" ? [{ issue: "Provider education", comments: "Clarify specificity for future encounter.", userId: "u-cdi-4", createdAt: now }] : []
-        }
-      ];
-      const extraIds = review.conditionIds.slice(2);
-      return [
-        ...base,
-        ...extraIds.map((id, extraIndex): Condition => ({
-          id,
-          reviewId: review.id,
-          workflow: "prospective",
-          category: "prospective",
-          subtype: extraIndex % 2 === 0 ? "recapture" : "suspect",
-          icd10: extraIndex % 2 === 0 ? "J44.9" : "E11.621",
-          description: extraIndex % 2 === 0 ? "Chronic obstructive pulmonary disease" : "Type 2 DM with foot ulcer",
-          hcc: extraIndex % 2 === 0 ? "HCC 280" : "HCC 37",
-          raf: 0.214 + extraIndex * 0.06,
-          claimStatus: extraIndex % 2 === 0 ? "Historical" : "Registry",
-          sourceDate: `${review.calendarYear - 1}-10-20`,
-          evidenceIds: [`ev-${review.id}-b`, `ev-${review.id}-f`],
-          actionable: true,
-          currentYear: review.calendarYear === 2026,
-          hasSufficientMeat: false,
-          hasOtherSupportingEvidence: true,
-          hadPriorCapture: extraIndex % 2 === 0,
-          hasCurrentYearCapture: false,
-          hasClinicalIndicators: true,
-          trumpedByCode: review.id === "rev-106" ? "J44.89" : undefined,
-          seededRecommendation: extraIndex % 2 === 1
-            ? { action: "Yes", confidence: "Medium", source: "seeded", rationale: "Registry and specialist pattern support physician-facing suspect review." }
-            : undefined,
-          documentationIssues: []
-        }))
-      ];
+    .flatMap((review) => {
+      const scenarios = generatedConditionScenarios[review.id];
+      if (!scenarios || scenarios.length !== review.conditionIds.length) {
+        throw new Error(`Missing coherent condition scenario for ${review.id}.`);
+      }
+      return scenarios.map((scenario, index): Condition => ({
+        id: review.conditionIds[index],
+        reviewId: review.id,
+        workflow: scenario.workflow,
+        category: scenario.category,
+        subtype: scenario.subtype,
+        icd10: scenario.icd10,
+        description: scenario.description,
+        hcc: "",
+        raf: 0,
+        claimStatus: scenario.claimStatus,
+        sourceDate: `${review.calendarYear + (scenario.sourceYearOffset ?? 0)}-${scenario.claimStatus === "Historical" ? "10-20" : "04-12"}`,
+        evidenceIds: [],
+        actionable: true,
+        currentYear: review.calendarYear === 2026,
+        hasSufficientMeat: scenario.hasSufficientMeat,
+        hasOtherSupportingEvidence: scenario.hasOtherSupportingEvidence,
+        hadPriorCapture: scenario.hadPriorCapture,
+        hasCurrentYearCapture: scenario.hasCurrentYearCapture,
+        hasClinicalIndicators: scenario.hasClinicalIndicators,
+        resolvedFlag: scenario.resolvedFlag,
+        conflictingEvidence: scenario.conflictingEvidence,
+        acuteCondition: scenario.acuteCondition,
+        disposition: scenario.disposition,
+        documentationIssues: scenario.documentationIssues ?? []
+      }));
     })
 ];
 
@@ -1457,7 +1475,7 @@ export const claims: Claim[] = reviews.flatMap((review) => {
     cptSourceEligible: review.id !== "rev-103",
     providerTypeEligible: review.id !== "rev-106",
     faceToFace: review.id !== "rev-107",
-    providerSignatureValid: review.id !== "rev-108",
+    providerSignatureValid: true,
     icd10Codes: currentCodes
   };
   const historicalClaim: Claim | undefined = historicalCodes.length
@@ -1810,7 +1828,8 @@ function scopeEvidenceToDiagnoses(seedEvidence: EvidencePassage[], seedCondition
       ...item,
       conditionIds: item.conditionIds.filter((conditionId) => {
         const condition = conditionMap.get(conditionId);
-        return condition ? evidenceIsRelevantToDiagnosis(item, condition) : false;
+        if (!condition || condition.reviewId !== item.reviewId) return false;
+        return item.ownership === "structured" || evidenceIsRelevantToDiagnosis(item, condition);
       })
     }))
     .filter((item) => item.conditionIds.length > 0);
@@ -1889,6 +1908,7 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
     date: `${review.calendarYear}-04-12`,
     category: condition.category,
     subtype: condition.subtype,
+    ownership: "structured",
     conditionIds: [condition.id],
     summary: condition.hasSufficientMeat ? "Current assessment and plan documentation." : "Current interval history documentation.",
     sourceType: primarySourceType,
@@ -1907,6 +1927,7 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
         date: `${review.calendarYear}-04-12`,
         category: condition.category,
         subtype: condition.subtype,
+        ownership: "structured",
         conditionIds: [condition.id],
         summary: "Condition-specific vital measurement.",
         sourceType: "vitalRow",
@@ -1924,6 +1945,7 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
           date: `${review.calendarYear}-03-05`,
           category: condition.category,
           subtype: condition.subtype,
+          ownership: "structured",
           conditionIds: [condition.id],
           summary: "Condition-specific laboratory measurement.",
           sourceType: "labResultRow",
@@ -1942,6 +1964,7 @@ function generatedEvidenceForCondition(condition: Condition): EvidencePassage[] 
     date: `${review.calendarYear - 1}-10-20`,
     category: condition.category,
     subtype: condition.subtype,
+    ownership: "structured",
     conditionIds: [condition.id],
     summary: "Claim-line context for the selected condition.",
     sourceType: "claimLine",

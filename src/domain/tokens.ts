@@ -64,19 +64,19 @@ export const dispositionTokens: Record<DispositionSummaryLabel, { label: string;
     border: "#fdba74"
   },
   "Prospective Yes": {
-    label: "Prospective Yes",
+    label: "Routed Opportunity",
     color: "#b45309",
     bg: "#ffedd5",
     border: "#fdba74"
   },
   "Prospective No": {
-    label: "Prospective No",
+    label: "Dismissed Opportunity",
     color: "#8a5a00",
     bg: "#fff5dd",
     border: "#f2c46d"
   },
   Changed: {
-    label: "Changed",
+    label: "Code Change",
     color: "#1264b3",
     bg: "#eaf4ff",
     border: "#9ccbf3"

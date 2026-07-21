@@ -13,7 +13,7 @@ import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
 import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens } from "../../domain/tokens";
-import { canAssignReviews, canOpenReview, canTakeCoverage, getVisibleReviews, hasAnyRole } from "../../domain/auth";
+import { canAssignReviews, canOpenReview, canTakeCoverage, getActiveQueueReviews, hasAnyRole } from "../../domain/auth";
 
 interface QueueRow {
   review: PatientReview;
@@ -75,7 +75,7 @@ export function QueuePage() {
   );
 
   const rows = useMemo<QueueRow[]>(() => {
-    return getVisibleReviews(data, currentUser).map((review) => {
+    return getActiveQueueReviews(data, currentUser).map((review) => {
       const patient = maps.patients.get(review.patientId)!;
       const assignedUsers = [review.assignedUserId, review.assignedAuditorId]
         .map((id) => (id ? maps.users.get(id)?.name : undefined))

@@ -1,6 +1,7 @@
 import type { AppSettings, Condition, PatientReview, Recommendation, RecommendationAction, RuleActionSuppression, RuleResult, SeedData } from "../domain/types";
 import { getConditionHccs, getConditionHierarchySuppression, getEffectiveDisposition, isAcuteCondition, isRiskAdjustmentCondition } from "../domain/conditionRisk";
 import type { CmsV28Hcc } from "../domain/cmsV28";
+import { getConditionEvidenceEligibility } from "../domain/evidenceEligibility";
 
 export interface DecisionSupportService {
   getRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined;
@@ -185,10 +186,8 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
 
   private getBaseRecommendation(condition: Condition, review: PatientReview, data: SeedData, settings: AppSettings): Recommendation | undefined {
     if (!isRiskAdjustmentCondition(condition)) return undefined;
-    const claim = data.claims.find((item) => item.reviewId === review.id);
-    const hasConditionEvidence = condition.evidenceIds.some((id) =>
-      data.evidence.some((item) => item.id === id && item.conditionIds.includes(condition.id))
-    );
+    const evidenceEligibility = getConditionEvidenceEligibility(condition, review, data);
+    const hasConditionEvidence = evidenceEligibility.hasOwnedEvidence;
     if (isAcuteCondition(condition) && condition.workflow === "codesOnClaim") {
       return {
         action: "Delete",
@@ -201,19 +200,28 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     if (condition.seededRecommendation && (!evidenceDependentActions.includes(condition.seededRecommendation.action) || hasConditionEvidence)) {
       return condition.seededRecommendation;
     }
-    const riskEligibleSource =
-      claim?.riskEligible !== false &&
-      claim?.cptSourceEligible !== false &&
-      claim?.providerTypeEligible !== false &&
-      claim?.faceToFace !== false &&
-      claim?.providerSignatureValid !== false;
+    if (!hasConditionEvidence && condition.workflow !== "prospective") {
+      return {
+        action: condition.workflow === "codesOnClaim" ? "Delete" : "Disagree",
+        confidence: "High",
+        source: "rules",
+        rationale: `No diagnosis-scoped evidence was found in the prototype chart, so ${condition.workflow === "codesOnClaim" ? "Validate" : "Add to Claim"} is not supported.`
+      };
+    }
+    const directActionSourceEligible =
+      condition.workflow === "codesOnClaim"
+        ? evidenceEligibility.hasEligibleClaimForAction
+        : evidenceEligibility.hasEligibleCurrentClinicalSupport;
     const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
-    if (!riskEligibleSource && condition.workflow !== "prospective") {
+    if (!directActionSourceEligible && condition.workflow !== "prospective") {
       return {
         action: "Disagree",
         confidence: "High",
         source: "rules",
-        rationale: "The structured prototype source indicators mark this evidence as not risk eligible for direct claim action."
+        rationale:
+          condition.workflow === "codesOnClaim"
+            ? "The condition is not present on an eligible claim source for direct claim action."
+            : "No eligible current encounter source supports direct claim action for this condition."
       };
     }
 
@@ -305,7 +313,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "No diagnosis-scoped evidence was found in the prototype chart, so Validate is not supported."
         };
       }
-      if (condition.hasSufficientMeat && hasConditionEvidence) {
+      if (condition.hasSufficientMeat && evidenceEligibility.hasEligibleCurrentClinicalSupport) {
         return {
           action: "Validate",
           confidence: "High",
@@ -313,7 +321,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: "The code is on a risk-eligible claim and current documentation supports MEAT."
         };
       }
-      if (currentPrototypeYear && hasConditionEvidence && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
+      if (currentPrototypeYear && evidenceEligibility.hasEligibleCurrentClinicalSupport && (condition.hasOtherSupportingEvidence || evaluateDeleteSafety(condition, review, data).supportingEvidenceIds.length > 0)) {
         return {
           action: "Send to Prospective",
           confidence: "Medium",
@@ -350,7 +358,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
           rationale: `${moreSpecificCandidate.icd10} is supported by diagnosis-specific documentation and is more specific than ${condition.icd10}. Both conditions remain available for reviewer judgment; review the more specific option before adding the unspecified code.`
         };
       }
-      if (condition.hasSufficientMeat) {
+      if (condition.hasSufficientMeat && evidenceEligibility.hasEligibleCurrentClinicalSupport) {
         return {
           action: "Add to Claim",
           confidence: "High",

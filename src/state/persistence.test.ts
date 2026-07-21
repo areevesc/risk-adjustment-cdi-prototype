@@ -30,6 +30,81 @@ function generatedSnapshot(data: SeedData) {
 }
 
 describe("persisted clinical-content migration", () => {
+  it("migrates revision 10 workflow state to visit-based decisions and routes", () => {
+    const legacy = structuredClone(demoSeedData);
+    legacy.reviews.find((item) => item.id === "rev-113")!.status = "Completed";
+    const scheduled = legacy.conditions.find((item) => item.id === "cond-113-a")!;
+    scheduled.disposition = { action: "Yes", userId: "u-coder-4", decidedAt: "2026-07-20T10:00:00.000Z", source: "user-selected" };
+    legacy.downstreamTasks.push({
+      id: "legacy-scheduled-handoff",
+      reviewId: "rev-113",
+      conditionId: scheduled.id,
+      type: "Prospective CDI Review",
+      status: "Open",
+      queue: "Prospective Review Queue",
+      createdByUserId: "u-coder-4",
+      createdAt: "2026-07-20T10:00:00.000Z",
+      sourceCalendarYear: 2026,
+      targetCalendarYear: 2027
+    });
+    const unscheduled = legacy.conditions.find((item) => item.id === "cond-107-c")!;
+    unscheduled.draftDisposition = {
+      action: "No",
+      reason: "Condition Resolved",
+      comments: "Resolved after review",
+      userId: "u-coder-4",
+      stagedAt: "2026-07-20T11:00:00.000Z",
+      source: "user-selected"
+    };
+
+    const migrated = migratePersistedState({ contentRevision: 10, currentUserId: "u-coder-1", settings, data: legacy });
+    expect(migrated.data.conditions.find((item) => item.id === scheduled.id)).toMatchObject({
+      decision: { decision: "prepareProviderQuery" },
+      routingOutcome: { outcome: "providerQueryTask", appointmentId: "appt-113" }
+    });
+    expect(migrated.data.downstreamTasks.find((item) => item.id === "legacy-scheduled-handoff")).toMatchObject({
+      type: "Provider Query",
+      queue: "Provider Query Queue",
+      appointmentId: "appt-113",
+      sourceCalendarYear: 2026,
+      targetCalendarYear: 2027
+    });
+    expect(migrated.data.conditions.find((item) => item.id === unscheduled.id)?.draftDecision).toMatchObject({
+      decision: "dismiss",
+      reason: "Condition Resolved",
+      comments: "Resolved after review"
+    });
+  });
+
+  it("resets Angela and reopens other final reviews that contain unresolved work", () => {
+    const legacy = structuredClone(demoSeedData);
+    const angelaReview = legacy.reviews.find((item) => item.id === "rev-108")!;
+    angelaReview.status = "Completed";
+    angelaReview.lock = { lockedByUserId: "u-manager-1", lockedAt: "2026-07-20T10:00:00.000Z" };
+    legacy.conditions.find((item) => item.id === "cond-108-a")!.disposition = {
+      action: "Validate",
+      userId: "u-coder-1",
+      decidedAt: "2026-07-20T10:05:00.000Z"
+    };
+    const otherReview = legacy.reviews.find((item) => item.id === "rev-104")!;
+    otherReview.status = "Completed";
+    legacy.conditions.find((item) => item.id === "cond-104-b")!.disposition = undefined;
+
+    const migrated = migratePersistedState({ contentRevision: 10, currentUserId: "u-coder-1", settings, data: legacy });
+    expect(migrated.data.reviews.find((item) => item.id === "rev-108")).toMatchObject({
+      status: "In Progress",
+      assignedUserId: "u-coder-1",
+      lock: { lockedByUserId: "u-coder-1" }
+    });
+    expect(migrated.data.conditions.find((item) => item.id === "cond-108-a")?.disposition).toBeUndefined();
+    expect(migrated.data.reviews.find((item) => item.id === "rev-104")).toMatchObject({
+      status: "Available",
+      queue: "CDI/Coder Queue",
+      lock: undefined
+    });
+    expect(migrated.data.conditions.find((item) => item.id === "cond-104-a")?.disposition?.action).toBe("Delete");
+  });
+
   it("atomically refreshes seed bundles while preserving workflow progress and generated charts", () => {
     const reviewId = "rev-109";
     const patientId = "pat-109";
