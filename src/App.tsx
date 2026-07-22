@@ -1,17 +1,18 @@
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import type { ElementType, ReactNode } from "react";
 import { BarChart3, ClipboardList, Database, FileCheck2, LineChart, Settings, ShieldCheck, Users } from "lucide-react";
 import { useAppState } from "./state/AppState";
-import { LoginPage } from "./features/login/LoginPage";
-import { QueuePage } from "./features/queue/QueuePage";
-import { MyStatsPage } from "./features/stats/MyStatsPage";
-import { ReviewPage } from "./features/review/ReviewPage";
-import { AuditPage } from "./features/audit/AuditPage";
-import { ManagerPage } from "./features/dashboard/ManagerPage";
-import { AdminPage } from "./features/admin/AdminPage";
 import { Button, StatusChip } from "./ui/Primitives";
 import { canAccessRoute, getFirstPermittedRoute, getRouteDenialMessage, routePathByKey, type AppRouteKey } from "./domain/auth";
+
+const LoginPage = lazy(() => import("./features/login/LoginPage").then((module) => ({ default: module.LoginPage })));
+const QueuePage = lazy(() => import("./features/queue/QueuePage").then((module) => ({ default: module.QueuePage })));
+const MyStatsPage = lazy(() => import("./features/stats/MyStatsPage").then((module) => ({ default: module.MyStatsPage })));
+const ReviewPage = lazy(() => import("./features/review/ReviewPage").then((module) => ({ default: module.ReviewPage })));
+const AuditPage = lazy(() => import("./features/audit/AuditPage").then((module) => ({ default: module.AuditPage })));
+const ManagerPage = lazy(() => import("./features/dashboard/ManagerPage").then((module) => ({ default: module.ManagerPage })));
+const AdminPage = lazy(() => import("./features/admin/AdminPage").then((module) => ({ default: module.AdminPage })));
 
 const navItems: { route: AppRouteKey; label: string; icon: ElementType }[] = [
   { route: "login", label: "Login", icon: ShieldCheck },
@@ -78,7 +79,8 @@ export function App() {
           </div>
         </header>
         {state?.authMessage ? <div className="auth-banner">{state.authMessage}</div> : null}
-        <Routes>
+        <Suspense fallback={<div className="route-loading" role="status">Loading workspace…</div>}>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/queue"
@@ -129,7 +131,8 @@ export function App() {
             }
           />
           <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

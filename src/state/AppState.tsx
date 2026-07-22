@@ -208,7 +208,8 @@ export function migratePersistedState(parsed: StoredPersistedState): PersistedSt
   const refreshedData = previousRevision < CURRENT_CONTENT_REVISION ? refreshSeedClinicalBundles(mergedData, seedData) : mergedData;
   const normalizedData = normalizeSeedData(refreshedData);
   const legacyMigrated = previousRevision < CURRENT_CONTENT_REVISION ? migrateLegacyImmediateDecisions(normalizedData) : normalizedData;
-  const data = previousRevision < 11 ? migrateVisitBasedWorkflow(legacyMigrated) : legacyMigrated;
+  const visitMigrated = previousRevision < 11 ? migrateVisitBasedWorkflow(legacyMigrated) : legacyMigrated;
+  const data = previousRevision < 12 ? migrateDocumentActionContract(visitMigrated) : visitMigrated;
   const currentUser = data.users.find((user) => user.id === parsed.currentUserId) ?? data.users.find((user) => user.id === initialState.currentUserId) ?? data.users[0];
   return {
     contentRevision: Math.max(previousRevision, CURRENT_CONTENT_REVISION),
@@ -218,13 +219,63 @@ export function migratePersistedState(parsed: StoredPersistedState): PersistedSt
   };
 }
 
-function decisionForMigratedAction(action: RecommendationAction | undefined, scheduled: boolean): ConditionDecision | undefined {
+function migrateDocumentActionContract(data: SeedData): SeedData {
+  const reviewById = new Map(data.reviews.map((review) => [review.id, review]));
+  const appointmentIds = new Set(data.appointments.map((appointment) => appointment.id));
+  return {
+    ...data,
+    conditions: data.conditions.map((condition) => {
+      const review = reviewById.get(condition.reviewId);
+      const scheduled = Boolean(review?.appointmentId && appointmentIds.has(review.appointmentId));
+      const committed = condition.disposition;
+      const draft = condition.draftDisposition;
+      const decision = decisionForMigratedAction(committed?.action, scheduled);
+      const draftDecision = decisionForMigratedAction(draft?.action, scheduled);
+      const route = routeForMigratedCondition(condition, scheduled);
+      return {
+        ...condition,
+        decision: condition.decision ?? (decision && committed ? {
+          decision,
+          reason: committed.reason,
+          replacementCode: committed.replacementCode,
+          comments: committed.comments,
+          userId: committed.userId,
+          decidedAt: committed.decidedAt
+        } : undefined),
+        draftDecision: condition.draftDecision ?? (draftDecision && draft ? {
+          decision: draftDecision,
+          reason: draft.reason,
+          replacementCode: draft.replacementCode,
+          comments: draft.comments,
+          userId: draft.userId,
+          stagedAt: draft.stagedAt
+        } : undefined),
+        routingOutcome: condition.routingOutcome ?? (route && committed ? {
+          outcome: route,
+          userId: committed.userId,
+          routedAt: committed.decidedAt,
+          appointmentId: route === "providerQueryTask" ? review?.appointmentId : undefined,
+          comments: committed.comments
+        } : undefined),
+        draftRoutingOutcome: condition.draftRoutingOutcome ?? (route && draft ? {
+          outcome: route,
+          userId: draft.userId,
+          stagedAt: draft.stagedAt,
+          appointmentId: route === "providerQueryTask" ? review?.appointmentId : undefined,
+          comments: draft.comments
+        } : undefined)
+      };
+    })
+  };
+}
+
+function decisionForMigratedAction(action: RecommendationAction | undefined, _scheduled: boolean): ConditionDecision | undefined {
   if (action === "Validate") return "validate";
   if (action === "Delete") return "delete";
   if (action === "Add to Claim") return "addToClaim";
   if (action === "Disagree" || action === "No") return "dismiss";
   if (action === "Change") return "changeCode";
-  if (action === "Yes" && scheduled) return "prepareProviderQuery";
+  if (action === "Yes") return "prepareProviderQuery";
   return undefined;
 }
 
@@ -236,6 +287,7 @@ function routeForMigratedCondition(condition: Condition, scheduled: boolean): Ex
   if (action === "Yes" || action === "Send to Prospective" || condition.draftProspectiveHandoff) {
     return scheduled ? "providerQueryTask" : "prospectiveHold";
   }
+  if (action === "Change" && condition.workflow === "prospective") return scheduled ? "providerQueryTask" : "prospectiveHold";
   if (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")) {
     return scheduled ? "providerQueryTask" : "prospectiveHold";
   }

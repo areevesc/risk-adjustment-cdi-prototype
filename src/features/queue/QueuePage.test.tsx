@@ -54,6 +54,6 @@ describe("QueuePage lifecycle filtering", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "No charts match the current filters. Clear or adjust the filters to continue."
     );
-    expect(screen.getByText("0 chart(s)")).toBeInTheDocument();
+    expect(screen.getByText(/0 of 0 charts/)).toBeInTheDocument();
   });
 });

@@ -30,6 +30,27 @@ function generatedSnapshot(data: SeedData) {
 }
 
 describe("persisted clinical-content migration", () => {
+  it("preserves an unscheduled revision 11 Yes draft as a prospective decision and hold", () => {
+    const legacy = structuredClone(demoSeedData);
+    const condition = legacy.conditions.find((item) => item.id === "cond-107-c")!;
+    condition.draftDecision = undefined;
+    condition.draftRoutingOutcome = undefined;
+    condition.draftDisposition = {
+      action: "Yes",
+      comments: "Hold for the next visit",
+      userId: "u-coder-4",
+      stagedAt: "2026-07-20T11:00:00.000Z",
+      source: "user-selected"
+    };
+
+    const migrated = migratePersistedState({ contentRevision: 11, currentUserId: "u-coder-4", settings, data: legacy });
+    expect(migrated.data.conditions.find((item) => item.id === condition.id)).toMatchObject({
+      draftDisposition: { action: "Yes", comments: "Hold for the next visit" },
+      draftDecision: { decision: "prepareProviderQuery" },
+      draftRoutingOutcome: { outcome: "prospectiveHold" }
+    });
+  });
+
   it("migrates revision 10 workflow state to visit-based decisions and routes", () => {
     const legacy = structuredClone(demoSeedData);
     legacy.reviews.find((item) => item.id === "rev-113")!.status = "Completed";
