@@ -2,6 +2,12 @@ import type { PatientReview, Role, SeedData, User } from "./types";
 
 export type AppRouteKey = "login" | "queue" | "stats" | "review" | "audit" | "manager" | "admin";
 
+const finalReviewStatuses = new Set<PatientReview["status"]>(["Completed", "Under Audit", "Audit Complete"]);
+
+export function isFinalReviewStatus(review: PatientReview) {
+  return finalReviewStatuses.has(review.status);
+}
+
 export const routePathByKey: Record<AppRouteKey, string> = {
   login: "/login",
   queue: "/queue",
@@ -89,6 +95,7 @@ export function canViewReview(data: SeedData, review: PatientReview, user: User)
 
 export function canOpenReview(data: SeedData, review: PatientReview, user: User) {
   if (!canViewReview(data, review, user)) return false;
+  if (isFinalReviewStatus(review)) return false;
   if (hasAnyRole(user, ["Administrator", "Manager"])) return true;
   if (user.roles.includes("Auditor")) return review.assignedAuditorId === user.id || review.queue === "Auditor Queue";
   if (user.roles.includes("CDI/Coder")) {
@@ -102,6 +109,7 @@ export function canOpenReview(data: SeedData, review: PatientReview, user: User)
 }
 
 export function canMutateReview(review: PatientReview, user: User) {
+  if (isFinalReviewStatus(review)) return false;
   if (user.roles.includes("Auditor") && !hasAnyRole(user, ["Administrator", "Manager"])) return false;
   return isReviewLockOwner(review, user);
 }
@@ -111,7 +119,7 @@ export function canReleaseReviewLock(review: PatientReview, user: User) {
 }
 
 export function canOverrideLock(review: PatientReview, user: User, reason: string) {
-  return canManageLocks(user) && hasDifferentLockOwner(review, user) && reason.trim().length > 0;
+  return !isFinalReviewStatus(review) && canManageLocks(user) && hasDifferentLockOwner(review, user) && reason.trim().length > 0;
 }
 
 export function canRouteWholeReview(review: PatientReview, user: User) {
@@ -161,4 +169,8 @@ export function canViewCoverageQueue(data: SeedData, review: PatientReview, user
 
 export function getVisibleReviews(data: SeedData, user: User) {
   return data.reviews.filter((review) => canViewReview(data, review, user) || canViewCoverageQueue(data, review, user));
+}
+
+export function getActiveQueueReviews(data: SeedData, user: User) {
+  return getVisibleReviews(data, user).filter((review) => !isFinalReviewStatus(review));
 }

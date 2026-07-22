@@ -26,8 +26,8 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe("QueuePage next-patient control", () => {
-  it("explains when the visible queue has no eligible next chart", async () => {
+describe("QueuePage lifecycle filtering", () => {
+  it("excludes final reviews from the active queue", async () => {
     const data: SeedData = structuredClone(demoSeedData);
     data.reviews = data.reviews.map((review) => ({
       ...review,
@@ -52,7 +52,8 @@ describe("QueuePage next-patient control", () => {
 
     await user.click(await screen.findByRole("button", { name: /Next Patient Chart/i }));
     expect(screen.getByRole("status")).toHaveTextContent(
-      "No eligible next chart is available. The visible charts are locked, completed, or unavailable for your role."
+      "No charts match the current filters. Clear or adjust the filters to continue."
     );
+    expect(screen.getByText("0 chart(s)")).toBeInTheDocument();
   });
 });

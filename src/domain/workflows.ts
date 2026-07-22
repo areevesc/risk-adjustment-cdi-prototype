@@ -4,6 +4,7 @@ import type {
   AssignmentMode,
   Audit,
   Condition,
+  ConditionDecision,
   DisagreeReason,
   DocumentationIssue,
   DownstreamTask,
@@ -12,6 +13,7 @@ import type {
   DownstreamTaskType,
   PatientReview,
   RecommendationAction,
+  RoutingOutcome,
   SeedData,
   User
 } from "./types";
@@ -29,13 +31,14 @@ import {
   canSetConditionDisposition,
   canStartAudit,
   canTakeCoverage,
-  getVisibleReviews,
+  getActiveQueueReviews,
   hasAnyRole,
   isReviewLockOwner
 } from "./auth";
-import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions, getUpcomingAppointmentsForReview } from "./selectors";
+import { getAuditSamplingProfile, getPatientCalendarYearHccGroup, getRuleResult, getUnresolvedConditions } from "./selectors";
 import { appendGeneratedChartForAssignee, GENERATED_CHART_CONTENT_REVISION } from "./generatedCharts";
 import { getConditionHierarchySuppression, getEffectiveDisposition, isRiskAdjustmentCondition } from "./conditionRisk";
+import { deriveConditionReviewModel, deriveReviewContext, routingOutcomeForTask } from "./conditionReviewModel";
 
 function stamp() {
   return new Date().toISOString();
@@ -82,6 +85,7 @@ function updateClinicAssignment(data: SeedData, clinicId: string, assignedUser: 
 }
 
 function taskQueue(type: DownstreamTaskType): DownstreamTaskQueue {
+  if (type === "Provider Query") return "Provider Query Queue";
   if (type === "Prospective CDI Review") return "Prospective Review Queue";
   if (type === "Provider Education") return "Provider Education Queue";
   if (type === "Auditor Exception") return "Auditor Queue";
@@ -98,7 +102,8 @@ function createDownstreamTask(
   user: User,
   comments?: string,
   assignedUserId?: string,
-  targetCalendarYear?: number
+  targetCalendarYear?: number,
+  appointmentId?: string
 ): SeedData {
   const reviewCalendarYear = data.reviews.find((review) => review.id === reviewId)?.calendarYear;
   const existing = data.downstreamTasks.find(
@@ -121,13 +126,29 @@ function createDownstreamTask(
     createdByUserId: user.id,
     createdAt: stamp(),
     comments: comments?.trim() || undefined,
+    appointmentId,
     sourceCalendarYear: targetCalendarYear === undefined ? undefined : reviewCalendarYear,
     targetCalendarYear
   };
-  return {
+  const next = {
     ...data,
     downstreamTasks: [task, ...data.downstreamTasks]
   };
+  const outcome = routingOutcomeForTask(task);
+  return outcome === "none"
+    ? next
+    : updateCondition(next, conditionId, (condition) => ({
+        ...condition,
+        draftRoutingOutcome: undefined,
+        routingOutcome: {
+          outcome,
+          userId: user.id,
+          routedAt: task.createdAt,
+          appointmentId,
+          taskId: task.id,
+          comments: task.comments
+        }
+      }));
 }
 
 function isPrototypeCurrentYear(review: PatientReview, condition: Condition, settings: AppSettings) {
@@ -164,7 +185,7 @@ export function openReview(data: SeedData, reviewId: string, user: User): SeedDa
 }
 
 export function findNextEligibleReview(data: SeedData, currentReviewId: string, user: User, excludeCurrent = false): PatientReview | undefined {
-  const visibleReviews = getVisibleReviews(data, user).filter((review) => canOpenReview(data, review, user));
+  const visibleReviews = getActiveQueueReviews(data, user).filter((review) => canOpenReview(data, review, user));
   const currentIndex = visibleReviews.findIndex((review) => review.id === currentReviewId);
   const orderedReviews =
     currentIndex >= 0
@@ -336,6 +357,32 @@ export function takeCoverage(data: SeedData, reviewId: string, user: User): Seed
   return addHistory(next, { reviewId, userId: user.id, event: "Coverage assignment taken", detail: `${user.name} took temporary coverage from ${originalAssignee}.` });
 }
 
+function decisionForLegacyAction(action: RecommendationAction, reviewContext: ReturnType<typeof deriveReviewContext>): ConditionDecision | undefined {
+  if (action === "Validate") return "validate";
+  if (action === "Delete") return "delete";
+  if (action === "Add to Claim") return "addToClaim";
+  if (action === "Disagree" || action === "No") return "dismiss";
+  if (action === "Change") return "changeCode";
+  if (action === "Yes" && reviewContext === "scheduledUpcomingVisit") return "prepareProviderQuery";
+  return undefined;
+}
+
+function stagedRouteForLegacyAction(
+  action: RecommendationAction,
+  reviewContext: ReturnType<typeof deriveReviewContext>,
+  reason?: DisagreeReason
+): Exclude<RoutingOutcome, "none"> | undefined {
+  if (action === "Add to Claim") return "additionExport";
+  if (action === "Delete") return "deletionExport";
+  if (action === "Yes") return reviewContext === "scheduledUpcomingVisit" ? "providerQueryTask" : "prospectiveHold";
+  if (action === "Send to Prospective") return "prospectiveHold";
+  if (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")) {
+    return reviewContext === "scheduledUpcomingVisit" ? "providerQueryTask" : "prospectiveHold";
+  }
+  if (action === "Disagree" && reason === "Other") return "exceptionRouting";
+  return undefined;
+}
+
 export function setDisposition(
   data: SeedData,
   reviewId: string,
@@ -356,8 +403,30 @@ export function setDisposition(
   if (conditionBefore.draftRuleOutcome?.source === "rule-suppressed" && conditionBefore.draftRuleOutcome.action === action) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
   const stagedAt = stamp();
+  const reviewContext = deriveReviewContext(review, data, settings);
+  const decision = decisionForLegacyAction(action, reviewContext);
+  const route = stagedRouteForLegacyAction(action, reviewContext, reason);
   const next = updateCondition(data, conditionId, (condition) => ({
     ...condition,
+    draftDecision: decision
+      ? {
+          decision,
+          reason,
+          comments: comments?.trim() || undefined,
+          replacementCode,
+          userId: user.id,
+          stagedAt
+        }
+      : undefined,
+    draftRoutingOutcome: route
+      ? {
+          outcome: route,
+          userId: user.id,
+          stagedAt,
+          appointmentId: route === "providerQueryTask" ? review.appointmentId : undefined,
+          comments: comments?.trim() || undefined
+        }
+      : undefined,
     draftDisposition: {
       action,
       reason,
@@ -376,7 +445,7 @@ export function clearDispositionDraft(data: SeedData, reviewId: string, conditio
   const review = data.reviews.find((item) => item.id === reviewId);
   const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
   if (!review || !condition?.draftDisposition || !canSetConditionDisposition(review, user)) return data;
-  const next = updateCondition(data, conditionId, (item) => ({ ...item, draftDisposition: undefined }));
+  const next = updateCondition(data, conditionId, (item) => ({ ...item, draftDisposition: undefined, draftDecision: undefined, draftRoutingOutcome: undefined }));
   return refreshDraftRuleOutcomes(next, review, settings);
 }
 
@@ -390,8 +459,20 @@ export function stageProspectiveHandoff(
   const review = data.reviews.find((item) => item.id === reviewId);
   const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
   if (!review || !condition || !isRiskAdjustmentCondition(condition) || !canSetConditionDisposition(review, user)) return data;
+  const currentDataYear = Math.max(...data.reviews.map((item) => item.calendarYear));
+  if (review.calendarYear < currentDataYear) return data;
+  const appointmentId = review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId)
+    ? review.appointmentId
+    : undefined;
   return updateCondition(data, conditionId, (item) => ({
     ...item,
+    draftRoutingOutcome: {
+      outcome: appointmentId ? "providerQueryTask" : "prospectiveHold",
+      userId: user.id,
+      stagedAt: stamp(),
+      appointmentId,
+      comments: note?.trim() || undefined
+    },
     draftProspectiveHandoff: {
       targetCalendarYear: review.calendarYear + 1,
       note: note?.trim() || undefined,
@@ -405,7 +486,7 @@ export function clearProspectiveHandoffDraft(data: SeedData, reviewId: string, c
   const review = data.reviews.find((item) => item.id === reviewId);
   const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
   if (!review || !condition?.draftProspectiveHandoff || !canSetConditionDisposition(review, user)) return data;
-  return updateCondition(data, conditionId, (item) => ({ ...item, draftProspectiveHandoff: undefined }));
+  return updateCondition(data, conditionId, (item) => ({ ...item, draftProspectiveHandoff: undefined, draftRoutingOutcome: undefined }));
 }
 
 function commitProspectiveHandoff(
@@ -417,6 +498,20 @@ function commitProspectiveHandoff(
   note?: string
 ): SeedData {
   const committedAt = stamp();
+  const appointmentId = review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId)
+    ? review.appointmentId
+    : undefined;
+  if (appointmentId) {
+    let next = updateCondition(data, condition.id, (item) => ({ ...item, draftProspectiveHandoff: undefined, draftRoutingOutcome: undefined }));
+    next = createDownstreamTask(next, review.id, condition.id, "Provider Query", user, note, review.assignedUserId, undefined, appointmentId);
+    return addHistory(next, {
+      reviewId: review.id,
+      conditionId: condition.id,
+      userId: user.id,
+      event: "Provider query prepared",
+      detail: `${condition.icd10} routed to appointment ${appointmentId}${note?.trim() ? ` with note: ${note.trim()}` : "."}`
+    });
+  }
   const existing = data.downstreamTasks.find(
     (task) =>
       task.reviewId === review.id &&
@@ -428,7 +523,7 @@ function commitProspectiveHandoff(
   let next: SeedData = {
     ...data,
     conditions: data.conditions.map((item) =>
-      item.id === condition.id ? { ...item, draftProspectiveHandoff: undefined } : item
+      item.id === condition.id ? { ...item, draftProspectiveHandoff: undefined, draftRoutingOutcome: undefined } : item
     ),
     downstreamTasks: existing
       ? data.downstreamTasks.map((task) =>
@@ -490,9 +585,23 @@ function commitDisposition(
     ? updateCondition(data, conditionId, (condition) => ({ ...condition, draftDisposition: undefined }))
     : data;
   const decidedAt = stamp();
+  const reviewContext = deriveReviewContext(review, data, settings);
+  const decision = decisionForLegacyAction(action, reviewContext);
   let next = updateCondition(data, conditionId, (condition) => ({
     ...condition,
     draftDisposition: undefined,
+    draftDecision: undefined,
+    draftRoutingOutcome: undefined,
+    decision: decision
+      ? {
+          decision,
+          reason,
+          comments: comments?.trim() || undefined,
+          replacementCode,
+          userId: user.id,
+          decidedAt
+        }
+      : condition.decision,
     disposition: {
       action,
       reason,
@@ -515,8 +624,10 @@ function commitDisposition(
   if (condition && action === "Delete") {
     next = createDownstreamTask(next, reviewId, conditionId, "Deletion", user, comments);
   }
-  if (condition && action === "Send to Prospective" && isPrototypeCurrentYear(review, condition, settings)) {
-    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, undefined, review.calendarYear);
+  if (condition && (action === "Yes" || action === "Send to Prospective") && isPrototypeCurrentYear(review, condition, settings)) {
+    next = reviewContext === "scheduledUpcomingVisit"
+      ? createDownstreamTask(next, reviewId, conditionId, "Provider Query", user, comments, review.assignedUserId, undefined, review.appointmentId)
+      : createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
   }
   if (
     condition &&
@@ -524,18 +635,9 @@ function commitDisposition(
     action === "Disagree" &&
     (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")
   ) {
-    next = createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments, undefined, review.calendarYear);
-  }
-  if (condition && shouldCreateSchedulingOutreach(next, review, condition, action, reason, settings)) {
-    next = createDownstreamTask(
-      next,
-      reviewId,
-      conditionId,
-      "Scheduling Outreach",
-      user,
-      "No same-patient appointment is available in the prototype schedule for this current-year prospective opportunity.",
-      review.assignedUserId
-    );
+    next = reviewContext === "scheduledUpcomingVisit"
+      ? createDownstreamTask(next, reviewId, conditionId, "Provider Query", user, comments, review.assignedUserId, undefined, review.appointmentId)
+      : createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
   }
   if (condition && action === "Disagree" && reason === "Other") {
     next = createDownstreamTask(next, reviewId, conditionId, "Manager Exception", user, comments);
@@ -554,8 +656,8 @@ function commitDisposition(
 }
 
 function isActionAllowedForWorkflow(condition: Condition, action: RecommendationAction) {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"].includes(action);
-  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"].includes(action);
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Change", "Yes", "Send to Prospective"].includes(action);
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree", "Change", "Yes", "No"].includes(action);
   return ["Yes", "No", "Change"].includes(action);
 }
 
@@ -582,20 +684,6 @@ function addHierarchyLockHistory(before: SeedData, after: SeedData, review: Pati
         detail
       });
     }, after);
-}
-
-function shouldCreateSchedulingOutreach(
-  data: SeedData,
-  review: PatientReview,
-  condition: Condition,
-  action: RecommendationAction,
-  reason: DisagreeReason | undefined,
-  settings: AppSettings
-) {
-  if (!isPrototypeCurrentYear(review, condition, settings)) return false;
-  if (getUpcomingAppointmentsForReview(data, review).length > 0) return false;
-  if (action === "Send to Prospective" || action === "Yes" || action === "Change") return true;
-  return action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence");
 }
 
 function clearDraftRuleOutcomesForPatientYear(data: SeedData, review: PatientReview): SeedData {

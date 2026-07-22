@@ -192,8 +192,8 @@ describe("ReviewPage evidence navigation", () => {
     const conditionCard = conditionName!.closest("article");
     expect(conditionCard).not.toBeNull();
     expect(within(conditionCard!).getByText(/HCC226 locked by captured HCC224/i)).toBeInTheDocument();
-    expect(within(conditionCard!).getByRole("button", { name: "Validate for 2026" })).toBeDisabled();
-    expect(within(conditionCard!).getByRole("button", { name: "Delete for 2026" })).toBeDisabled();
+    expect(within(conditionCard!).getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(within(conditionCard!).getByRole("button", { name: "Change Code" })).toBeDisabled();
     expect(within(conditionCard!.querySelector(".rule-evidence-links")!).getAllByRole("button")).not.toHaveLength(0);
     expect(screen.getByRole("button", { name: /Next Evidence/i })).toBeEnabled();
   });
@@ -248,8 +248,7 @@ describe("ReviewPage evidence navigation", () => {
     const neuropathy = data.conditions.find((item) => item.id === "cond-100-d")!;
     const neuropathyEvidence = getActiveConditionEvidence(data, data.evidence.filter((item) => item.reviewId === review.id), neuropathy.id);
     const neuropathyPlan = neuropathyEvidence.find((item) => item.id === "ev-cond-100-d-plan")!;
-    expect(within(neuropathyCard).getByText(/AI recommends Disagree/i)).toBeInTheDocument();
-    expect(within(neuropathyCard).getByText(/More specific option: E11.42/i)).toBeInTheDocument();
+    expect(within(neuropathyCard).getByText(/AI recommendation: Prepare Provider Query/i)).toBeInTheDocument();
     expect(within(neuropathyCard).queryByText("No evidence found.")).not.toBeInTheDocument();
     await user.click(within(neuropathyCard).getByRole("button", { name: new RegExp(neuropathyPlan.summary, "i") }));
     await expectEvidenceSelection(neuropathyPlan, neuropathyEvidence.indexOf(neuropathyPlan) + 1, neuropathyEvidence.length);
@@ -259,8 +258,8 @@ describe("ReviewPage evidence navigation", () => {
     const angiopathyEvidence = getActiveConditionEvidence(data, data.evidence.filter((item) => item.reviewId === review.id), angiopathy.id);
     const angiopathyAbi = angiopathyEvidence.find((item) => item.id === "ev-cond-100-f-abi")!;
     expect(angiopathyEvidence).toHaveLength(1);
-    expect(within(angiopathyCard).getByText(/AI recommends Yes/i)).toBeInTheDocument();
-    expect(within(angiopathyCard).getByText(/abnormal bilateral resting ABI values/i)).toBeInTheDocument();
+    expect(within(angiopathyCard).getByText(/AI recommendation: Prepare Provider Query/i)).toBeInTheDocument();
+    expect(within(angiopathyCard).getAllByText(/abnormal bilateral ABI/i).length).toBeGreaterThan(0);
     expect(within(angiopathyCard).queryByText(/payer data|HIE and SDoH/i)).not.toBeInTheDocument();
     expect(within(angiopathyCard).queryByText("No evidence found.")).not.toBeInTheDocument();
     await user.click(within(angiopathyCard).getByRole("button", { name: new RegExp(angiopathyAbi.summary, "i") }));
@@ -269,7 +268,7 @@ describe("ReviewPage evidence navigation", () => {
     const hypertensionCard = screen.getAllByText("I10").find((element) => element.classList.contains("mono"))!.closest("article")!;
     expect(within(hypertensionCard).getByText("Non-HCC context")).toBeInTheDocument();
     expect(within(hypertensionCard).queryByText("Potential Delete")).not.toBeInTheDocument();
-    expect(within(hypertensionCard).getByText(/Evidence: Blood-pressure measurement/i)).toBeInTheDocument();
+    expect(within(hypertensionCard).getAllByText(/Current assessment and treatment plan supports essential hypertension/i).length).toBeGreaterThan(0);
     const flagButton = within(hypertensionCard).getByRole("button", { name: "Flag issue" });
     expect(flagButton).toBeEnabled();
     await user.click(flagButton);
@@ -280,29 +279,26 @@ describe("ReviewPage evidence navigation", () => {
     expect(await within(hypertensionCard).findByText("Other documentation issue")).toBeInTheDocument();
 
     const acuteCard = screen.getAllByText("I50.33").find((element) => element.classList.contains("mono"))!.closest("article")!;
-    expect(within(acuteCard).getByText(/AI recommends Delete/i)).toBeInTheDocument();
+    expect(within(acuteCard).getByText(/AI recommendation: Prepare Provider Query/i)).toBeInTheDocument();
     expect(within(acuteCard).getByText("Potential Delete")).toBeInTheDocument();
     expect(within(acuteCard).queryByText("Recapture")).not.toBeInTheDocument();
-    expect(within(acuteCard).getByRole("button", { name: "Send to Prospective for CY 2026" })).toBeDisabled();
-    expect(within(acuteCard).queryByRole("button", { name: "Send to Prospective for CY 2027" })).not.toBeInTheDocument();
+    expect(within(acuteCard).getByRole("button", { name: "Prepare Provider Query" })).toBeEnabled();
+    expect(within(acuteCard).queryByRole("button", { name: /Send to Prospective/i })).not.toBeInTheDocument();
 
-    await user.click(within(neuropathyCard).getByRole("button", { name: "Add to 2026 Claim" }));
-    expect(await within(neuropathyCard).findByText("Draft: Add to Claim for CY 2026")).toBeInTheDocument();
+    await user.click(within(neuropathyCard).getByRole("button", { name: "Prepare Provider Query" }));
+    expect(await within(neuropathyCard).findByText("Draft: Prepare Provider Query")).toBeInTheDocument();
+    expect(within(neuropathyCard).getByText("Draft route: Prepare Provider Query")).toBeInTheDocument();
     const polyneuropathyCard = screen.getAllByText("E11.42").find((element) => element.classList.contains("mono"))!.closest("article")!;
-    const polyneuropathyAdd = within(polyneuropathyCard).getByRole("button", { name: "Add to 2026 Claim" });
-    expect(polyneuropathyAdd).toBeEnabled();
-    await user.click(polyneuropathyAdd);
-    expect(await within(polyneuropathyCard).findByText("Draft: Add to Claim for CY 2026")).toBeInTheDocument();
-    expect(within(neuropathyCard).getByRole("button", { name: "Add to 2026 Claim" })).toBeEnabled();
+    const polyneuropathyQuery = within(polyneuropathyCard).getByRole("button", { name: "Prepare Provider Query" });
+    expect(polyneuropathyQuery).toBeEnabled();
+    await user.click(polyneuropathyQuery);
+    expect(await within(polyneuropathyCard).findByText("Draft: Prepare Provider Query")).toBeInTheDocument();
+    expect(within(neuropathyCard).getByRole("button", { name: "Prepare Provider Query" })).toBeEnabled();
 
-    const trumpedHyperglycemia = diabetesGroup.querySelector('[data-condition-code="E11.65"] details.trumped-condition-card');
-    expect(trumpedHyperglycemia).not.toBeNull();
-    expect(trumpedHyperglycemia).not.toHaveAttribute("open");
-    expect(within(trumpedHyperglycemia as HTMLElement).getByText(/HCC38 is below selected HCC37/i)).toBeInTheDocument();
     expect(screen.getByText("Conditions & Actions")).toBeInTheDocument();
   });
 
-  it("stages an optional next-year prospective note independently from the claim decision", async () => {
+  it("exposes only year-applicable decisions during prior-year reconciliation", async () => {
     localStorage.setItem(
       storageKey,
       JSON.stringify({
@@ -326,17 +322,76 @@ describe("ReviewPage evidence navigation", () => {
     await user.click(await screen.findByRole("button", { name: "Open chart" }));
     const conditionCode = screen.getAllByText("E11.22").find((element) => element.classList.contains("mono"))!;
     const conditionCard = conditionCode.closest("article")!;
-    expect(within(conditionCard).getByRole("button", { name: "Validate for 2025" })).toBeEnabled();
-    expect(within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2025" })).toBeDisabled();
+    expect(within(conditionCard).getByRole("button", { name: "Validate" })).toBeEnabled();
+    expect(within(conditionCard).queryByRole("button", { name: /Send to Prospective/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Optional next-year follow-up/i)).not.toBeInTheDocument();
 
-    await user.click(within(conditionCard).getByRole("button", { name: "Send to Prospective for CY 2026" }));
-    const dialog = screen.getByRole("dialog", { name: "Send to Prospective for CY 2026" });
-    await user.type(within(dialog).getByLabelText(/Note for the prospective reviewer/i), "Recheck CKD at the next visit.");
-    await user.click(within(dialog).getByRole("button", { name: "Stage handoff for CY 2026" }));
+    await user.click(within(conditionCard).getByRole("button", { name: "Validate" }));
+    expect(await within(conditionCard).findByText("Draft: Validate")).toBeInTheDocument();
+  });
 
-    expect(await within(conditionCard).findByText("Draft handoff for CY 2026")).toBeInTheDocument();
-    expect(within(conditionCard).getByText("Recheck CKD at the next visit.")).toBeInTheDocument();
-    expect(within(conditionCard).getByRole("button", { name: "Undo handoff" })).toBeEnabled();
-    expect(within(conditionCard).getByRole("button", { name: "Validate for 2025" })).toBeEnabled();
+  it("shows Angela's supported E11.22 validation and visit-tied provider query actions", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ contentRevision: CURRENT_CONTENT_REVISION, currentUserId: "u-coder-1", settings, data: demoSeedData })
+    );
+
+    render(
+      <AppStateProvider>
+        <MemoryRouter initialEntries={["/review/rev-108"]}>
+          <Routes>
+            <Route path="/review/:reviewId" element={<ReviewPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AppStateProvider>
+    );
+
+    expect(await screen.findByText("Angela Rossi")).toBeInTheDocument();
+    expect(screen.getByText("Upcoming Visit Opportunities")).toBeInTheDocument();
+
+    const diabetesCard = screen.getAllByText("E11.22").find((element) => element.classList.contains("mono"))!.closest("article")!;
+    expect(within(diabetesCard).getByText(/AI recommendation: Validate · High confidence/i)).toBeInTheDocument();
+    expect(within(diabetesCard).getByRole("button", { name: "Validate" })).toBeEnabled();
+    expect(within(diabetesCard).queryByRole("button", { name: /Prepare Provider Query/i })).not.toBeInTheDocument();
+    expect(within(diabetesCard).queryByRole("button", { name: /Send to Prospective/i })).not.toBeInTheDocument();
+    const firstEvidence = diabetesCard.querySelector(".evidence-list button")!;
+    expect(firstEvidence).toHaveTextContent("Assessment with plan");
+    expect(firstEvidence).toHaveTextContent("Assessment and Plan");
+
+    for (const code of ["I50.32", "J44.9"]) {
+      const card = screen.getAllByText(code).find((element) => element.classList.contains("mono"))!.closest("article")!;
+      expect(within(card).getByText(/AI recommendation: Prepare Provider Query/i)).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Prepare Provider Query" })).toBeEnabled();
+      expect(within(card).queryByRole("button", { name: /Send to Prospective/i })).not.toBeInTheDocument();
+    }
+
+    expect(screen.queryByText(/Prospective CDI question/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Optional next-year follow-up/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Send to Prospective CY/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a visitless opportunity as a prospective hold without a target year", async () => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ contentRevision: CURRENT_CONTENT_REVISION, currentUserId: "u-coder-4", settings, data: demoSeedData })
+    );
+    const user = userEvent.setup();
+
+    render(
+      <AppStateProvider>
+        <MemoryRouter initialEntries={["/review/rev-107"]}>
+          <Routes>
+            <Route path="/review/:reviewId" element={<ReviewPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AppStateProvider>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Open chart" }));
+    expect(screen.getByText("Prospective Holds")).toBeInTheDocument();
+    const copdCard = screen.getAllByText("J44.9").find((element) => element.classList.contains("mono"))!.closest("article")!;
+    expect(within(copdCard).getByRole("button", { name: "Send to Prospective" })).toBeEnabled();
+    expect(within(copdCard).queryByText(/CY 2027|target year/i)).not.toBeInTheDocument();
+    expect(within(copdCard).queryByRole("button", { name: "Prepare Provider Query" })).not.toBeInTheDocument();
   });
 });

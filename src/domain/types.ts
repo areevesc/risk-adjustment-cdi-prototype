@@ -18,6 +18,16 @@ export type Category = "validated" | "potentialDelete" | "potentialAddition" | "
 export type ProspectiveSubtype = "recapture" | "suspect";
 export type ConditionWorkflow = "codesOnClaim" | "codesNotOnClaim" | "prospective";
 export type ConditionPersistence = "chronic" | "acute" | "resolved" | "historical" | "unknown";
+export type ReviewContext = "retrospective" | "scheduledUpcomingVisit" | "noUpcomingVisit";
+export type ConditionDecision = "validate" | "delete" | "addToClaim" | "dismiss" | "changeCode" | "prepareProviderQuery";
+export type RoutingOutcome =
+  | "none"
+  | "providerQueryTask"
+  | "prospectiveHold"
+  | "additionExport"
+  | "deletionExport"
+  | "exceptionRouting";
+export type ConditionResolutionState = "open" | "staged" | "resolved";
 export type RecommendationMode = "simulated" | "rules" | "hidden";
 export type RecommendationSource = "rules" | "seeded";
 export type RecommendationAction =
@@ -45,6 +55,7 @@ export type DocumentationIssue =
   | "Provider education"
   | "Other documentation issue";
 export type DownstreamTaskType =
+  | "Provider Query"
   | "Prospective CDI Review"
   | "Addition to Claim"
   | "Deletion"
@@ -54,6 +65,7 @@ export type DownstreamTaskType =
   | "Scheduling Outreach";
 export type DownstreamTaskStatus = "Open" | "In Progress" | "Completed" | "Cancelled";
 export type DownstreamTaskQueue =
+  | "Provider Query Queue"
   | "Prospective Review Queue"
   | "Auditor Queue"
   | "Manager Review Queue"
@@ -344,6 +356,12 @@ export interface EvidencePassage {
   date: string;
   category: Category;
   subtype?: ProspectiveSubtype;
+  /**
+   * Structured ownership is assigned by the scenario/chart generator and is the
+   * source of truth. Inferred ownership is retained only for legacy seed facts
+   * whose diagnosis relationship must still be quality-checked from text.
+   */
+  ownership?: "structured" | "inferred";
   conditionIds: string[];
   summary: string;
   sourceType?: EvidenceSourceType;
@@ -443,6 +461,54 @@ export interface DraftProspectiveHandoff {
   stagedAt: string;
 }
 
+export interface ConditionDecisionRecord {
+  decision: ConditionDecision;
+  userId: string;
+  decidedAt: string;
+  reason?: DisagreeReason;
+  replacementCode?: string;
+  comments?: string;
+}
+
+export interface DraftConditionDecision extends Omit<ConditionDecisionRecord, "decidedAt"> {
+  stagedAt: string;
+}
+
+export interface RoutingOutcomeRecord {
+  outcome: RoutingOutcome;
+  userId: string;
+  routedAt: string;
+  appointmentId?: string;
+  taskId?: string;
+  comments?: string;
+}
+
+export interface DraftRoutingOutcome extends Omit<RoutingOutcomeRecord, "routedAt" | "taskId"> {
+  stagedAt: string;
+}
+
+export interface ConditionReviewModel {
+  reviewContext: ReviewContext;
+  captureState: "currentYearClaim" | "priorCapture" | "uncaptured";
+  evidenceState: {
+    hasOwnedEvidence: boolean;
+    hasEligibleCurrentClinicalSupport: boolean;
+    hasEligibleClaimForAction: boolean;
+  };
+  resolutionState: ConditionResolutionState;
+  resolvedLabel?: string;
+  recommendation?: {
+    decision?: ConditionDecision;
+    route?: Exclude<RoutingOutcome, "none">;
+    confidence: "High" | "Medium" | "Low";
+    rationale: string;
+  };
+  availableDecisions: ConditionDecision[];
+  availableRoutes: Exclude<RoutingOutcome, "none">[];
+  downstreamRoute: RoutingOutcome;
+  appointmentId?: string;
+}
+
 export interface AuditorDisposition {
   outcome: "Agree" | "Disagree" | "Return for Correction";
   comments?: string;
@@ -495,6 +561,10 @@ export interface Condition {
   disposition?: UserDisposition;
   draftDisposition?: DraftDisposition;
   draftProspectiveHandoff?: DraftProspectiveHandoff;
+  decision?: ConditionDecisionRecord;
+  draftDecision?: DraftConditionDecision;
+  routingOutcome?: RoutingOutcomeRecord;
+  draftRoutingOutcome?: DraftRoutingOutcome;
   ruleOutcome?: RuleGeneratedOutcome;
   draftRuleOutcome?: RuleGeneratedOutcome;
   auditorDisposition?: AuditorDisposition;
@@ -581,6 +651,7 @@ export interface DownstreamTask {
   createdByUserId: string;
   createdAt: string;
   comments?: string;
+  appointmentId?: string;
   sourceCalendarYear?: number;
   targetCalendarYear?: number;
   updatedByUserId?: string;

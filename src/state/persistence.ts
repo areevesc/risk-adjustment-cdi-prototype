@@ -1,7 +1,7 @@
 import type { AppSettings, Condition, PatientReview, SeedData } from "../domain/types";
 import { getCmsV28Diagnosis, getCmsV28DisplayHccs, getCmsV28StandaloneFactor, scoreCmsV28CommunityNa } from "../domain/cmsV28";
 
-export const CURRENT_CONTENT_REVISION = 10;
+export const CURRENT_CONTENT_REVISION = 11;
 
 export interface PersistedState {
   contentRevision: number;
@@ -19,6 +19,10 @@ const conditionWorkflowFields = [
   "disposition",
   "draftDisposition",
   "draftProspectiveHandoff",
+  "decision",
+  "draftDecision",
+  "routingOutcome",
+  "draftRoutingOutcome",
   "ruleOutcome",
   "draftRuleOutcome",
   "auditorDisposition",

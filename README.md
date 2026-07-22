@@ -26,14 +26,17 @@ This is a local prototype only. It uses synthetic data, deterministic decision-s
 ## Implemented Prototype Rules
 
 - Audit sampling uses a deterministic percentage setting and records whether an audit was manually started or selected by the prototype sample.
-- Scheduling outreach is derived from same-patient calendar-year appointments and current-year prospective-review decisions. When no appointment exists, selected `Yes` or `Change` decisions can create a Scheduling Outreach downstream task.
+- Condition evidence is owned structurally by the condition. Narrative text matching can detect weak demo content, but it cannot delete an otherwise valid condition-to-evidence link.
+- Claim eligibility controls claim actions, while encounter and note eligibility determine whether clinical documentation supports validation.
+- Completed, Under Audit, and Audit Complete reviews are read-only and do not appear in a CDI/coder's active queue.
 
-## Prospective Handoff Decision Record
+## Visit-Based Workflow Decision Record
 
-- A claim-year decision and a prospective handoff are independent. A reviewer can validate a condition for CY 2025 and also stage `Send to Prospective for CY 2026` on the same condition.
-- The handoff targets the next calendar year and is not blocked merely because the source review is retrospective or prior-year. Normal chart-lock and role permissions still apply.
-- The optional note is an internal CDI note for the shared `Prospective Review Queue`; it is not assigned to one specific prospective coder and it is not a provider query.
-- Handoffs remain reversible drafts through Pend and create a persisted queue/ledger entry only when the review is completed.
-- Open handoffs surface on a same-patient review for the target calendar year. If no such review or upcoming visit exists yet, the handoff remains in the shared queue ledger until that future workflow exists.
+- Review context is derived as retrospective, scheduled upcoming visit, or no upcoming visit. The reporting label (`Concurrent`, `Prospective`, or `Retrospective`) does not independently choose the available actions.
+- An eligible current-year claim with eligible signed assessment-and-plan support recommends `Validate`. Once committed, it displays as `Captured for <year>` and exposes no provider-query or prospective action.
+- A supported uncaptured opportunity with an attached appointment exposes `Prepare Provider Query`. Completion creates a Provider Query task tied to that appointment.
+- The same opportunity without an attached appointment exposes `Send to Prospective`. This is an unscheduled hold for the patient's next review and does not display a target calendar year.
+- Prior-year reconciliation exposes only the applicable validate, delete, add, dismiss, and change-code decisions for that year. It does not create a generic next-year handoff.
+- Decisions and routes are separate audit concepts. Drafts remain reversible through Pend and downstream tasks are persisted when the review is completed.
 
-Product direction still to confirm with CDI leadership: whether provider-query authoring should later be modeled as a separate step after prospective review. If that direction changes, keep the independent internal handoff but add or revise the provider-facing query workflow separately.
+`Prepare Provider Query` currently creates the routed task and appointment reference. A full provider-facing query composer remains outside this prototype pass.

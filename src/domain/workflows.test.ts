@@ -9,7 +9,6 @@ import { normalizeSeedData } from "../state/AppState";
 import {
   assignReview,
   clearDispositionDraft,
-  clearProspectiveHandoffDraft,
   completeAudit,
   completeReview,
   flagDocumentationIssue,
@@ -25,8 +24,7 @@ import {
   stageProspectiveHandoff,
   shouldSampleReviewForAudit,
   startAudit,
-  takeCoverage,
-  updateDownstreamTaskStatus
+  takeCoverage
 } from "./workflows";
 import {
   getActionTotals,
@@ -35,7 +33,6 @@ import {
   getDispositionSummary,
   getEvidenceCycleTarget,
   getGeneratedExports,
-  getIncomingProspectiveHandoffs,
   getOutreachStatusForReview,
   getPatientCalendarYearHccGroup,
   getPersonalStats,
@@ -146,6 +143,18 @@ describe("prototype workflow rules", () => {
     expect(released.reviews.find((item) => item.id === "rev-100")?.lock?.lockedByUserId).toBe("u-coder-1");
   });
 
+  it("keeps final reviews read-only and prevents reacquiring a lock", () => {
+    const data = cloneSeed();
+    const review = data.reviews.find((item) => item.id === "rev-104")!;
+    const reviewer = user(data, "u-coder-1");
+
+    expect(review.status).toBe("Completed");
+    expect(openReview(data, review.id, reviewer)).toBe(data);
+    expect(setDisposition(data, review.id, "cond-104-a", reviewer, "Delete", true, settings)).toBe(data);
+    expect(routeReview(data, review.id, reviewer, "Manager Review Queue")).toBe(data);
+    expect(completeReview(data, review.id, reviewer, settings).data).toBe(data);
+  });
+
   it("requires explicit manager override reason and records prior owner", () => {
     const data = cloneSeed();
     const locked = openReview(data, "rev-100", user(data, "u-coder-1"));
@@ -185,7 +194,7 @@ describe("prototype workflow rules", () => {
     expect(getRafSummary(undone, review).projectedRaf).toBeCloseTo(before);
   });
 
-  it("stages an independent next-year prospective handoff and commits it to the shared queue", () => {
+  it("does not attach a generic next-year handoff to prior-year reconciliation", () => {
     let data = openReview(cloneSeed(), "rev-102", user(seedData, "u-coder-3"));
     const review = data.reviews.find((item) => item.id === "rev-102")!;
     const historyCount = data.history.length;
@@ -194,38 +203,16 @@ describe("prototype workflow rules", () => {
     data = setDisposition(data, review.id, "cond-102-b", user(data, "u-coder-3"), "Yes", true, settings);
     data = stageProspectiveHandoff(data, review.id, "cond-102-a", user(data, "u-coder-3"), "Reconsider CKD documentation at the next visit.");
 
-    expect(data.conditions.find((item) => item.id === "cond-102-a")).toMatchObject({
-      draftDisposition: { action: "Validate" },
-      draftProspectiveHandoff: { targetCalendarYear: 2026, note: "Reconsider CKD documentation at the next visit." }
-    });
+    expect(data.conditions.find((item) => item.id === "cond-102-a")).toMatchObject({ draftDisposition: { action: "Validate" } });
+    expect(data.conditions.find((item) => item.id === "cond-102-a")?.draftProspectiveHandoff).toBeUndefined();
     expect(data.downstreamTasks).toHaveLength(0);
     expect(data.history).toHaveLength(historyCount);
 
-    const undone = clearProspectiveHandoffDraft(data, review.id, "cond-102-a", user(data, "u-coder-3"));
-    expect(undone.conditions.find((item) => item.id === "cond-102-a")?.draftProspectiveHandoff).toBeUndefined();
-    data = stageProspectiveHandoff(undone, review.id, "cond-102-a", user(data, "u-coder-3"), "Reconsider CKD documentation at the next visit.");
-
     const completed = completeReview(data, review.id, user(data, "u-coder-3"), { ...settings, auditSampleRate: 0 }).data;
-    const task = completed.downstreamTasks.find((item) => item.type === "Prospective CDI Review" && item.conditionId === "cond-102-a");
-    expect(task).toMatchObject({
-      queue: "Prospective Review Queue",
-      status: "Open",
-      sourceCalendarYear: 2025,
-      targetCalendarYear: 2026,
-      comments: "Reconsider CKD documentation at the next visit."
-    });
-    expect(task?.assignedUserId).toBeUndefined();
+    expect(completed.downstreamTasks.some((item) => item.conditionId === "cond-102-a")).toBe(false);
     expect(completed.conditions.find((item) => item.id === "cond-102-a")?.disposition?.action).toBe("Validate");
-    expect(completed.conditions.find((item) => item.id === "cond-102-a")?.draftProspectiveHandoff).toBeUndefined();
-    expect(completed.history).toEqual(expect.arrayContaining([
-      expect.objectContaining({ event: "Prospective handoff sent", conditionId: "cond-102-a", detail: expect.stringContaining("CY 2026") })
-    ]));
+    expect(completed.history.some((entry) => entry.conditionId === "cond-102-a" && entry.event === "Prospective handoff sent")).toBe(false);
 
-    const destinationReview = { ...review, id: "rev-102-next", calendarYear: 2026, reviewType: "Prospective" as const, conditionIds: [], lock: undefined };
-    const withDestination = { ...completed, reviews: [...completed.reviews, destinationReview] };
-    expect(getIncomingProspectiveHandoffs(withDestination, destinationReview)).toEqual([
-      expect.objectContaining({ task: expect.objectContaining({ id: task?.id }), condition: expect.objectContaining({ id: "cond-102-a" }) })
-    ]);
   });
 
   it("keeps whole-review routing as a patient-level queue change", () => {
@@ -605,14 +592,14 @@ describe("prototype workflow rules", () => {
     expect(next.conditions.find((item) => item.id === condition.id)?.draftDisposition).toBeUndefined();
   });
 
-  it("keeps the independent next-year handoff available when the claim-year action is calendar-year disabled", () => {
+  it("suppresses the independent handoff when prior-year routing is disabled", () => {
     const data = openReview(cloneSeed(), "rev-102", user(seedData, "u-coder-3"));
     const review = data.reviews.find((item) => item.id === "rev-102")!;
     const condition = data.conditions.find((item) => item.id === "cond-102-a")!;
     const result = getRuleResult(condition, review, data, settings);
     expect(result.disabledActions.some((item) => item.action === "Send to Prospective")).toBe(true);
     const staged = stageProspectiveHandoff(data, review.id, condition.id, user(data, "u-coder-3"));
-    expect(staged.conditions.find((item) => item.id === condition.id)?.draftProspectiveHandoff?.targetCalendarYear).toBe(2026);
+    expect(staged.conditions.find((item) => item.id === condition.id)?.draftProspectiveHandoff).toBeUndefined();
   });
 
   it("returns structured three-year lookback recapture results from curated evidence", () => {
@@ -993,20 +980,17 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     expect(rafSummary.validatedCapturedRaf).toBeCloseTo(0.638);
   });
 
-  it("creates and advances scheduling outreach when a prospective action has no same-year appointment", () => {
+  it("creates a prospective hold when an opportunity has no appointment", () => {
     let data = cloneSeed();
     data.appointments = data.appointments.filter((appointment) => appointment.patientId !== "pat-113");
     data = openReview(data, "rev-113", user(data, "u-coder-4"));
     data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
     expect(data.downstreamTasks.some((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")).toBe(false);
     data = completeReview(data, "rev-113", user(data, "u-coder-4"), { ...settings, auditSampleRate: 0 }).data;
-    const outreach = data.downstreamTasks.find((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")!;
-    expect(outreach).toMatchObject({ status: "Open", queue: "Scheduling Outreach Queue", assignedUserId: "u-coder-4" });
-    expect(getOutreachStatusForReview(data, data.reviews.find((item) => item.id === "rev-113")!)).toMatchObject({ status: "Open" });
+    const outreach = data.downstreamTasks.find((task) => task.reviewId === "rev-113" && task.type === "Prospective CDI Review")!;
+    expect(outreach).toMatchObject({ status: "Open", queue: "Prospective Review Queue" });
+    expect(outreach.targetCalendarYear).toBeUndefined();
 
-    data = updateDownstreamTaskStatus(data, outreach.id, user(data, "u-coder-4"), "In Progress");
-    expect(data.downstreamTasks.find((task) => task.id === outreach.id)?.status).toBe("In Progress");
-    expect(data.history[0]).toMatchObject({ event: "Downstream task updated", conditionId: "cond-113-a" });
   });
 
   it("does not create scheduling outreach when a same-patient appointment exists", () => {
@@ -1014,6 +998,7 @@ describe("RAF, audit, assignment, stats, and exports", () => {
     data = setDisposition(data, "rev-113", "cond-113-a", user(data, "u-coder-4"), "Yes", true, settings);
     data = completeReview(data, "rev-113", user(data, "u-coder-4"), { ...settings, auditSampleRate: 0 }).data;
     expect(data.downstreamTasks.some((task) => task.reviewId === "rev-113" && task.type === "Scheduling Outreach")).toBe(false);
+    expect(data.downstreamTasks.find((task) => task.reviewId === "rev-113" && task.type === "Provider Query")).toMatchObject({ appointmentId: "appt-113" });
     expect(getOutreachStatusForReview(data, data.reviews.find((item) => item.id === "rev-113")!)).toMatchObject({ status: "Scheduled" });
   });
 
