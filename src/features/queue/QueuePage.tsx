@@ -11,7 +11,7 @@ import {
 } from "../../domain/selectors";
 import type { PatientReview, WorkflowStatus } from "../../domain/types";
 import { formatDate } from "../../domain/format";
-import { Button, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
+import { Button, EmptyState, IconForStatus, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens } from "../../domain/tokens";
 import { canAssignReviews, canOpenReview, canTakeCoverage, getActiveQueueReviews, hasAnyRole } from "../../domain/auth";
 
@@ -253,6 +253,7 @@ export function QueuePage() {
   const sortedRows = table.getRowModel().rows.map((row) => row.original);
   const priorityRows = sortedRows.filter((row) => !row.noVisit);
   const lowPriorityRows = sortedRows.filter((row) => row.noVisit);
+  const activeFilterCount = [query.trim(), statusFilter !== "All", reviewTypeFilter !== "All", canFilterByTeamMember && teamMemberFilter !== "All", categoryFilter !== "All", visitFilter !== "All"].filter(Boolean).length;
   return (
     <div className={`page-stack ${canAssignReviews(currentUser) ? "manager-queue-page" : "cdi-queue-page"}`}>
       <Panel
@@ -357,10 +358,13 @@ export function QueuePage() {
         </div>
         <div className="queue-list-meta">
           <CategoryLegend />
-          <div className="queue-count">{filteredRows.length} chart(s)</div>
+          <div className="queue-count" aria-live="polite">{filteredRows.length} of {rows.length} charts · {activeFilterCount} active filter{activeFilterCount === 1 ? "" : "s"}</div>
         </div>
+        {!filteredRows.length ? <EmptyState title="No matching charts" body="Adjust or clear the active filters to return to the work queue." /> : null}
         <PatientQueueSection title="Upcoming Visits" rows={priorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} />
         <PatientQueueSection title="Low Priority - No Upcoming Visit" rows={lowPriorityRows} data={data} currentUser={currentUser} onOpen={open} onCover={actions.takeCoverage} lowPriority />
+        {canAssignReviews(currentUser) ? <details className="manager-detail-table">
+          <summary>Detailed queue table <span>{filteredRows.length} rows</span></summary>
         <div className="table-wrap queue-table-wrap legacy-queue-table" aria-label="Detailed desktop work queue">
           <table className="data-table queue-table">
             <colgroup>
@@ -403,6 +407,7 @@ export function QueuePage() {
             </tbody>
           </table>
         </div>
+        </details> : null}
       </Panel>
     </div>
   );

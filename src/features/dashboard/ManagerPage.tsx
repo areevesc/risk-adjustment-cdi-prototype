@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Download, LockKeyhole, UserCheck } from "lucide-react";
 import { useAppState } from "../../state/AppState";
 import { byId, canManageLocks, getActionTotals, getGeneratedExports, getPopulationRafSummary, getReviewStatusTotals, getTeamStats } from "../../domain/selectors";
 import { formatRaf } from "../../domain/format";
-import { Button, CloseDialogButton, Panel, StatusChip } from "../../ui/Primitives";
+import { Button, Dialog, Panel, StatusChip } from "../../ui/Primitives";
 import type { AssignmentMode, PatientReview, User } from "../../domain/types";
 
 const chartColors = ["#1264b3", "#087f5b", "#b42318", "#6d55d8", "#8a5a00", "#64748b"];
@@ -62,63 +63,27 @@ export function ManagerPage() {
           </ResponsiveContainer>
         </Panel>
         <Panel title="RAF Reporting">
-          <div className="stat-grid">
-            <div className="stat">
-              <span>Patients</span>
-              <strong>{populationRaf.patientCount}</strong>
-            </div>
-            <div className="stat">
-              <span>Reviews</span>
-              <strong>{populationRaf.reviewCount}</strong>
-            </div>
-            <div className="stat">
-              <span>Total demographic RAF</span>
-              <strong>{formatRaf(populationRaf.totals.demographicRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg demographic RAF</span>
-              <strong>{formatRaf(populationRaf.averages.demographicRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Total captured RAF</span>
-              <strong>{formatRaf(populationRaf.totals.capturedRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg captured RAF</span>
-              <strong>{formatRaf(populationRaf.averages.capturedRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Total open RAF</span>
-              <strong>{formatRaf(populationRaf.totals.openRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg open RAF</span>
-              <strong>{formatRaf(populationRaf.averages.openRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Total prospective RAF</span>
-              <strong>{formatRaf(populationRaf.totals.prospectiveRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg prospective RAF</span>
-              <strong>{formatRaf(populationRaf.averages.prospectiveRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Total deletion RAF</span>
-              <strong>{formatRaf(populationRaf.totals.deletionRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg deletion RAF</span>
-              <strong>{formatRaf(populationRaf.averages.deletionRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Total projected RAF</span>
-              <strong>{formatRaf(populationRaf.totals.projectedRaf)}</strong>
-            </div>
-            <div className="stat">
-              <span>Avg projected RAF</span>
-              <strong>{formatRaf(populationRaf.averages.projectedRaf)}</strong>
-            </div>
+          <div className="metric-sections compact-metric-sections">
+            <ManagerMetricSection title="Population">
+              <RafStat label="Patients" value={populationRaf.patientCount} />
+              <RafStat label="Reviews" value={populationRaf.reviewCount} />
+            </ManagerMetricSection>
+            <ManagerMetricSection title="Population totals">
+              <RafStat label="Demographic RAF" value={formatRaf(populationRaf.totals.demographicRaf)} />
+              <RafStat label="Captured RAF" value={formatRaf(populationRaf.totals.capturedRaf)} />
+              <RafStat label="Open RAF" value={formatRaf(populationRaf.totals.openRaf)} />
+              <RafStat label="Prospective RAF" value={formatRaf(populationRaf.totals.prospectiveRaf)} />
+              <RafStat label="Deletion RAF" value={formatRaf(populationRaf.totals.deletionRaf)} />
+              <RafStat label="Projected RAF" value={formatRaf(populationRaf.totals.projectedRaf)} />
+            </ManagerMetricSection>
+            <ManagerMetricSection title="Per-patient averages">
+              <RafStat label="Demographic RAF" value={formatRaf(populationRaf.averages.demographicRaf)} />
+              <RafStat label="Captured RAF" value={formatRaf(populationRaf.averages.capturedRaf)} />
+              <RafStat label="Open RAF" value={formatRaf(populationRaf.averages.openRaf)} />
+              <RafStat label="Prospective RAF" value={formatRaf(populationRaf.averages.prospectiveRaf)} />
+              <RafStat label="Deletion RAF" value={formatRaf(populationRaf.averages.deletionRaf)} />
+              <RafStat label="Projected RAF" value={formatRaf(populationRaf.averages.projectedRaf)} />
+            </ManagerMetricSection>
           </div>
           <p className="raf-note">RAF reporting uses predetermined synthetic values and transparent prototype calculations.</p>
         </Panel>
@@ -218,6 +183,14 @@ export function ManagerPage() {
   );
 }
 
+function ManagerMetricSection({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="metric-section"><h3>{title}</h3><div className="stat-grid">{children}</div></section>;
+}
+
+function RafStat({ label, value }: { label: string; value: string | number }) {
+  return <div className="stat"><span>{label}</span><strong>{value}</strong></div>;
+}
+
 function ManagerExportButton({
   label,
   filename,
@@ -274,13 +247,7 @@ function AssignmentDialog({
   const [mode, setMode] = useState<AssignmentMode>("Coverage");
   const [reason, setReason] = useState("");
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Assignment dialog">
-      <div className="modal">
-        <header>
-          <h2>Assign Review</h2>
-          <CloseDialogButton onClick={onClose} />
-        </header>
-        <div className="modal-body">
+    <Dialog title="Assign Review" ariaLabel="Assignment dialog" onClose={onClose}>
           <div className="assignment-context">
             <span>Current assignee: {maps.users.get(review.assignedUserId)?.name ?? "Unassigned"}</span>
             <span>Clinic default: {clinic ? maps.users.get(clinic.defaultAssigneeId)?.name : "None"}</span>
@@ -312,22 +279,14 @@ function AssignmentDialog({
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button variant="primary" onClick={() => onAssign(assignedUserId, mode, reason)}>Save assignment</Button>
           </div>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
 
 function OverrideDialog({ onOverride, onClose }: { onOverride: (reason: string) => void; onClose: () => void }) {
   const [reason, setReason] = useState("");
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Override lock dialog">
-      <div className="modal">
-        <header>
-          <h2>Override Lock</h2>
-          <CloseDialogButton onClick={onClose} />
-        </header>
-        <div className="modal-body">
+    <Dialog title="Override Lock" ariaLabel="Override lock dialog" onClose={onClose}>
           <label>
             Override reason
             <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Required lock override reason" />
@@ -336,8 +295,6 @@ function OverrideDialog({ onOverride, onClose }: { onOverride: (reason: string) 
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button variant="primary" disabled={!reason.trim()} onClick={() => onOverride(reason)}>Confirm override</Button>
           </div>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

@@ -151,10 +151,6 @@ function createDownstreamTask(
       }));
 }
 
-function isPrototypeCurrentYear(review: PatientReview, condition: Condition, settings: AppSettings) {
-  return review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
-}
-
 function clampAuditRate(rate: number) {
   return Math.max(0, Math.min(100, Number.isFinite(rate) ? rate : 0));
 }
@@ -357,13 +353,13 @@ export function takeCoverage(data: SeedData, reviewId: string, user: User): Seed
   return addHistory(next, { reviewId, userId: user.id, event: "Coverage assignment taken", detail: `${user.name} took temporary coverage from ${originalAssignee}.` });
 }
 
-function decisionForLegacyAction(action: RecommendationAction, reviewContext: ReturnType<typeof deriveReviewContext>): ConditionDecision | undefined {
+function decisionForLegacyAction(action: RecommendationAction, _reviewContext: ReturnType<typeof deriveReviewContext>): ConditionDecision | undefined {
   if (action === "Validate") return "validate";
   if (action === "Delete") return "delete";
   if (action === "Add to Claim") return "addToClaim";
   if (action === "Disagree" || action === "No") return "dismiss";
   if (action === "Change") return "changeCode";
-  if (action === "Yes" && reviewContext === "scheduledUpcomingVisit") return "prepareProviderQuery";
+  if (action === "Yes") return "prepareProviderQuery";
   return undefined;
 }
 
@@ -375,7 +371,7 @@ function stagedRouteForLegacyAction(
   if (action === "Add to Claim") return "additionExport";
   if (action === "Delete") return "deletionExport";
   if (action === "Yes") return reviewContext === "scheduledUpcomingVisit" ? "providerQueryTask" : "prospectiveHold";
-  if (action === "Send to Prospective") return "prospectiveHold";
+  if (action === "Send to Prospective" || action === "Change") return reviewContext === "scheduledUpcomingVisit" ? "providerQueryTask" : "prospectiveHold";
   if (action === "Disagree" && (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")) {
     return reviewContext === "scheduledUpcomingVisit" ? "providerQueryTask" : "prospectiveHold";
   }
@@ -401,7 +397,10 @@ export function setDisposition(
   const ruleResult = getRuleResult(conditionBefore, review, data, settings);
   if (ruleResult.disabledActions.some((disabledAction) => disabledAction.action === action)) return data;
   if (conditionBefore.draftRuleOutcome?.source === "rule-suppressed" && conditionBefore.draftRuleOutcome.action === action) return data;
+  if (action === "Disagree" && !reason) return data;
   if (action === "Disagree" && reason === "Other" && !comments?.trim()) return data;
+  if (action === "Change" && (!replacementCode?.trim() || !comments?.trim())) return data;
+  if (agreedWithRecommendation === false && action !== "Disagree" && !comments?.trim()) return data;
   const stagedAt = stamp();
   const reviewContext = deriveReviewContext(review, data, settings);
   const decision = decisionForLegacyAction(action, reviewContext);
@@ -459,8 +458,6 @@ export function stageProspectiveHandoff(
   const review = data.reviews.find((item) => item.id === reviewId);
   const condition = data.conditions.find((item) => item.id === conditionId && item.reviewId === reviewId);
   if (!review || !condition || !isRiskAdjustmentCondition(condition) || !canSetConditionDisposition(review, user)) return data;
-  const currentDataYear = Math.max(...data.reviews.map((item) => item.calendarYear));
-  if (review.calendarYear < currentDataYear) return data;
   const appointmentId = review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId)
     ? review.appointmentId
     : undefined;
@@ -624,20 +621,25 @@ function commitDisposition(
   if (condition && action === "Delete") {
     next = createDownstreamTask(next, reviewId, conditionId, "Deletion", user, comments);
   }
-  if (condition && (action === "Yes" || action === "Send to Prospective") && isPrototypeCurrentYear(review, condition, settings)) {
+  if (condition && (action === "Yes" || action === "Send to Prospective")) {
     next = reviewContext === "scheduledUpcomingVisit"
       ? createDownstreamTask(next, reviewId, conditionId, "Provider Query", user, comments, review.assignedUserId, undefined, review.appointmentId)
       : createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
   }
   if (
     condition &&
-    isPrototypeCurrentYear(review, condition, settings) &&
     action === "Disagree" &&
     (reason === "Not Enough MEAT" || reason === "Conflicting Evidence")
   ) {
     next = reviewContext === "scheduledUpcomingVisit"
       ? createDownstreamTask(next, reviewId, conditionId, "Provider Query", user, comments, review.assignedUserId, undefined, review.appointmentId)
       : createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, comments);
+  }
+  if (condition && action === "Change") {
+    const changeComments = `Replacement code ${replacementCode?.trim()}. ${comments?.trim()}`;
+    next = reviewContext === "scheduledUpcomingVisit"
+      ? createDownstreamTask(next, reviewId, conditionId, "Provider Query", user, changeComments, review.assignedUserId, undefined, review.appointmentId)
+      : createDownstreamTask(next, reviewId, conditionId, "Prospective CDI Review", user, changeComments);
   }
   if (condition && action === "Disagree" && reason === "Other") {
     next = createDownstreamTask(next, reviewId, conditionId, "Manager Exception", user, comments);
@@ -656,8 +658,8 @@ function commitDisposition(
 }
 
 function isActionAllowedForWorkflow(condition: Condition, action: RecommendationAction) {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Change", "Yes", "Send to Prospective"].includes(action);
-  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree", "Change", "Yes", "No"].includes(action);
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"].includes(action);
+  if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"].includes(action);
   return ["Yes", "No", "Change"].includes(action);
 }
 

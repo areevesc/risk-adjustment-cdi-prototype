@@ -15,13 +15,11 @@ import type {
 } from "./types";
 
 export function deriveReviewContext(review: PatientReview, data: SeedData, settings: AppSettings): ReviewContext {
-  if (review.calendarYear < settings.prototypeCurrentYear) return "retrospective";
-  return review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId)
-    ? "scheduledUpcomingVisit"
-    : "noUpcomingVisit";
+  if (review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId)) return "scheduledUpcomingVisit";
+  return review.calendarYear < settings.prototypeCurrentYear ? "retrospective" : "noUpcomingVisit";
 }
 
-function legacyDecision(action: RecommendationAction | undefined, context: ReviewContext): ConditionDecision | undefined {
+function legacyDecision(action: RecommendationAction | undefined): ConditionDecision | undefined {
   switch (action) {
     case "Validate":
       return "validate";
@@ -35,7 +33,7 @@ function legacyDecision(action: RecommendationAction | undefined, context: Revie
     case "Change":
       return "changeCode";
     case "Yes":
-      return context === "scheduledUpcomingVisit" ? "prepareProviderQuery" : undefined;
+      return "prepareProviderQuery";
     default:
       return undefined;
   }
@@ -63,29 +61,22 @@ function activeConditionTask(data: SeedData, conditionId: string) {
   return data.downstreamTasks.find((task) => task.conditionId === conditionId && task.status !== "Cancelled");
 }
 
-function retrospectiveActions(condition: Condition): ConditionDecision[] {
-  if (condition.workflow === "codesOnClaim") return ["validate", "delete", "changeCode"];
-  if (condition.workflow === "codesNotOnClaim") return ["addToClaim", "dismiss", "changeCode"];
-  return ["dismiss", "changeCode"];
-}
-
-function prospectiveActions(condition: Condition, context: ReviewContext, hasSupport: boolean) {
-  if (condition.workflow === "codesOnClaim" && condition.hasSufficientMeat && hasSupport) {
-    return { decisions: ["validate", "delete", "changeCode"] as ConditionDecision[], routes: [] as Exclude<RoutingOutcome, "none">[] };
-  }
-  if (context === "scheduledUpcomingVisit") {
+function actionsForWorkflow(condition: Condition) {
+  if (condition.workflow === "codesOnClaim") {
     return {
-      decisions: condition.workflow === "codesOnClaim"
-        ? ["prepareProviderQuery", "delete", "changeCode"] as ConditionDecision[]
-        : ["prepareProviderQuery", "dismiss", "changeCode"] as ConditionDecision[],
-      routes: ["providerQueryTask"] as Exclude<RoutingOutcome, "none">[]
+      decisions: ["validate", "delete"] as ConditionDecision[],
+      routes: ["prospectiveHold"] as Exclude<RoutingOutcome, "none">[]
+    };
+  }
+  if (condition.workflow === "codesNotOnClaim") {
+    return {
+      decisions: ["addToClaim", "dismiss"] as ConditionDecision[],
+      routes: [] as Exclude<RoutingOutcome, "none">[]
     };
   }
   return {
-    decisions: condition.workflow === "codesOnClaim"
-      ? ["delete", "changeCode"] as ConditionDecision[]
-      : ["dismiss", "changeCode"] as ConditionDecision[],
-    routes: ["prospectiveHold"] as Exclude<RoutingOutcome, "none">[]
+    decisions: ["prepareProviderQuery", "dismiss", "changeCode"] as ConditionDecision[],
+    routes: [] as Exclude<RoutingOutcome, "none">[]
   };
 }
 
@@ -102,8 +93,8 @@ export function deriveConditionReviewModel(
   const taskRoute = routingOutcomeForTask(task);
   const downstreamRoute = condition.routingOutcome?.outcome ?? condition.draftRoutingOutcome?.outcome ?? taskRoute;
   const disposition = getEffectiveDisposition(condition);
-  const decision = condition.decision?.decision ?? condition.draftDecision?.decision ?? legacyDecision(disposition?.action, reviewContext);
-  const captured = decision === "validate" || decision === "addToClaim" || decision === "changeCode";
+  const decision = condition.decision?.decision ?? condition.draftDecision?.decision ?? legacyDecision(disposition?.action);
+  const captured = decision === "validate" || decision === "addToClaim";
   const resolved = Boolean(condition.decision || condition.disposition || condition.ruleOutcome || taskRoute !== "none");
   const staged = !resolved && Boolean(condition.draftDecision || condition.draftDisposition || condition.draftRoutingOutcome || condition.draftProspectiveHandoff);
   const resolutionState = resolved ? "resolved" : staged ? "staged" : "open";
@@ -131,39 +122,22 @@ export function deriveConditionReviewModel(
     };
   }
 
-  const available = reviewContext === "retrospective"
-    ? { decisions: retrospectiveActions(condition), routes: [] as Exclude<RoutingOutcome, "none">[] }
-    : prospectiveActions(condition, reviewContext, evidence.hasEligibleCurrentClinicalSupport);
+  const available = actionsForWorkflow(condition);
   const legacyRecommendation = decisionSupportService.getRecommendation(condition, review, data, settings);
   let recommendation: ConditionReviewModel["recommendation"];
 
-  if (reviewContext === "retrospective") {
-    const legacy = legacyDecision(legacyRecommendation?.action, reviewContext);
-    if (legacy && available.decisions.includes(legacy)) {
-      recommendation = {
-        decision: legacy,
-        confidence: legacyRecommendation?.confidence ?? "Medium",
-        rationale: legacyRecommendation?.rationale ?? "Prior-year reconciliation requires reviewer confirmation."
-      };
-    }
-  } else if (condition.workflow === "codesOnClaim" && condition.hasSufficientMeat && evidence.hasEligibleCurrentClinicalSupport && evidence.hasEligibleClaimForAction) {
+  const recommendedDecision = legacyDecision(legacyRecommendation?.action);
+  if (recommendedDecision && available.decisions.includes(recommendedDecision)) {
     recommendation = {
-      decision: "validate",
-      confidence: "High",
-      rationale: "The diagnosis is on an eligible current-year claim and an eligible signed encounter documents MEAT."
+      decision: recommendedDecision,
+      confidence: legacyRecommendation?.confidence ?? "Medium",
+      rationale: legacyRecommendation?.rationale ?? "Review the diagnosis-scoped evidence before selecting an action."
     };
-  } else if (reviewContext === "scheduledUpcomingVisit") {
-    recommendation = {
-      decision: "prepareProviderQuery",
-      route: "providerQueryTask",
-      confidence: evidence.hasOwnedEvidence ? "High" : "Medium",
-      rationale: "The opportunity requires provider confirmation and is tied to the attached appointment."
-    };
-  } else {
+  } else if (legacyRecommendation?.action === "Send to Prospective" && available.routes.includes("prospectiveHold")) {
     recommendation = {
       route: "prospectiveHold",
-      confidence: evidence.hasOwnedEvidence ? "High" : "Medium",
-      rationale: "No appointment is attached, so the opportunity should be held for the next review."
+      confidence: legacyRecommendation.confidence,
+      rationale: legacyRecommendation.rationale
     };
   }
 

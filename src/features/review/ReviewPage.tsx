@@ -48,7 +48,7 @@ import { evidenceStrengthLabel } from "../../domain/mockClinicalContent";
 import { buildChartSearchResults, normalizeChartSearchQuery } from "../../domain/chartSearch";
 import type { ChartSearchResult } from "../../domain/chartSearch";
 import { formatDate, formatDateTime, formatRaf } from "../../domain/format";
-import { Button, CategoryBadge, CloseDialogButton, EmptyState, Panel, StatusChip } from "../../ui/Primitives";
+import { Button, CategoryBadge, Dialog, EmptyState, Panel, StatusChip } from "../../ui/Primitives";
 import { categoryTokens, dispositionTokens, subtypeTokens } from "../../domain/tokens";
 import { canOpenReview, canOverrideLock, canReleaseReviewLock, canTakeCoverage, canViewReview, getFirstPermittedRoute, isFinalReviewStatus } from "../../domain/auth";
 import {
@@ -1466,12 +1466,17 @@ const conditionDecisionLabels: Record<ConditionDecision, string> = {
   delete: "Delete",
   addToClaim: "Add to Claim",
   dismiss: "Dismiss",
-  changeCode: "Change Code",
-  prepareProviderQuery: "Prepare Provider Query"
+  changeCode: "Change",
+  prepareProviderQuery: "Yes"
 };
 
+function conditionDecisionLabel(decision: ConditionDecision, condition: Condition) {
+  if (decision === "dismiss") return condition.workflow === "prospective" ? "No" : "Disagree";
+  return conditionDecisionLabels[decision];
+}
+
 const routeLabels: Record<Exclude<RoutingOutcome, "none">, string> = {
-  providerQueryTask: "Prepare Provider Query",
+  providerQueryTask: "Provider Query",
   prospectiveHold: "Send to Prospective",
   additionExport: "Addition Export",
   deletionExport: "Deletion Export",
@@ -1498,6 +1503,7 @@ function ConditionCard({
   const reviewModel = deriveConditionReviewModel(condition, review, data, settings);
   const ruleResult = getRuleResult(condition, review, data, settings);
   const disabled = !editable;
+  const [overrideAction, setOverrideAction] = useState<RecommendationAction | null>(null);
   const downstreamTask = getDownstreamTaskForCondition(data, condition.id);
   const downstreamTasks = getDownstreamTasksForCondition(data, condition.id);
   const prospectiveHandoffTasks = downstreamTasks.filter((task) => task.type === "Prospective CDI Review" || task.type === "Provider Query");
@@ -1515,13 +1521,21 @@ function ConditionCard({
     riskAdjustment &&
     reviewModel.resolutionState !== "resolved";
 
+  function stageAction(action: RecommendationAction, comments?: string) {
+    const agreed = legacyRecommendation ? legacyRecommendation.action === action : undefined;
+    actions.setDisposition(review.id, condition.id, action, agreed, undefined, comments);
+  }
+
   function act(action: RecommendationAction) {
     if (action === "Delete" && hasDeleteSafetyWarning(ruleResult)) {
       onDeleteSafety(condition);
       return;
     }
-    const agreed = legacyRecommendation ? legacyRecommendation.action === action : undefined;
-    actions.setDisposition(review.id, condition.id, action, agreed);
+    if (legacyRecommendation && legacyRecommendation.action !== action) {
+      setOverrideAction(action);
+      return;
+    }
+    stageAction(action);
   }
 
   function actDecision(decision: ConditionDecision) {
@@ -1606,7 +1620,7 @@ function ConditionCard({
             <ClipboardList size={16} />
             <strong>
               AI recommendation: {reviewModel.recommendation.decision
-                ? conditionDecisionLabels[reviewModel.recommendation.decision]
+                ? conditionDecisionLabel(reviewModel.recommendation.decision, condition)
                 : routeLabels[reviewModel.recommendation.route!]}
               {` · ${reviewModel.recommendation.confidence} confidence`}
             </strong>
@@ -1630,9 +1644,9 @@ function ConditionCard({
         <summary>Review details</summary>
         <div className="condition-history">
           <span>{riskAdjustment ? `Originally presented as: ${categoryTokens[condition.originalCategory ?? condition.category].label}` : "Original context: Non-payment clinical context"}</span>
-          <span>Recommendation: {reviewModel.recommendation?.decision ? conditionDecisionLabels[reviewModel.recommendation.decision] : reviewModel.recommendation?.route ? routeLabels[reviewModel.recommendation.route] : "None"}</span>
-          <span>Draft decision: {condition.draftDecision ? conditionDecisionLabels[condition.draftDecision.decision] : condition.draftDisposition?.action ?? "None"}</span>
-          <span>Committed decision: {condition.decision ? conditionDecisionLabels[condition.decision.decision] : condition.disposition?.action ?? "None"}</span>
+          <span>Recommendation: {reviewModel.recommendation?.decision ? conditionDecisionLabel(reviewModel.recommendation.decision, condition) : reviewModel.recommendation?.route ? routeLabels[reviewModel.recommendation.route] : "None"}</span>
+          <span>Draft decision: {condition.draftDecision ? conditionDecisionLabel(condition.draftDecision.decision, condition) : condition.draftDisposition?.action ?? "None"}</span>
+          <span>Committed decision: {condition.decision ? conditionDecisionLabel(condition.decision.decision, condition) : condition.disposition?.action ?? "None"}</span>
           <span>Routing: {condition.draftRoutingOutcome ? `Draft ${routeLabels[condition.draftRoutingOutcome.outcome as Exclude<RoutingOutcome, "none">]}` : reviewModel.downstreamRoute !== "none" ? routeLabels[reviewModel.downstreamRoute] : "None"}</span>
           <span>Rule outcome: {condition.draftRuleOutcome ? `Draft ${condition.draftRuleOutcome.source} - ${condition.draftRuleOutcome.action ?? "No action"}` : condition.ruleOutcome ? `${condition.ruleOutcome.source} - ${condition.ruleOutcome.action ?? "No action"}` : "None"}</span>
           <span>Downstream task: {downstreamTasks.length ? downstreamTasks.map((task) => `${task.type} - ${task.status}`).join("; ") : downstreamTask ? `${downstreamTask.type} - ${downstreamTask.status}` : "None"}</span>
@@ -1670,7 +1684,7 @@ function ConditionCard({
         <div className="disposition-row draft-disposition-row">
           <StatusChip tone="info">
             <Check size={14} />
-            Draft: {condition.draftDecision ? conditionDecisionLabels[condition.draftDecision.decision] : condition.draftDisposition?.action}
+            Draft: {condition.draftDecision ? conditionDecisionLabel(condition.draftDecision.decision, condition) : condition.draftDisposition?.action}
           </StatusChip>
           {(condition.draftDecision?.reason ?? condition.draftDisposition?.reason) ? <span>{condition.draftDecision?.reason ?? condition.draftDisposition?.reason}</span> : null}
           {(condition.draftDecision?.replacementCode ?? condition.draftDisposition?.replacementCode) ? <span className="mono">{condition.draftDecision?.replacementCode ?? condition.draftDisposition?.replacementCode}</span> : null}
@@ -1745,45 +1759,53 @@ function ConditionCard({
       {showActionControls ? (
         <div className="condition-decision-controls">
           <strong className="decision-year-label">
-            {reviewModel.reviewContext === "retrospective"
-              ? `CY ${review.calendarYear} reconciliation`
-              : reviewModel.reviewContext === "scheduledUpcomingVisit"
-                ? "Upcoming visit action"
-                : "Prospective hold action"}
+            {condition.workflow === "codesOnClaim"
+              ? "Code on claim"
+              : condition.workflow === "codesNotOnClaim"
+                ? "Code not on claim"
+                : "Prospective recapture / suspect"}
           </strong>
+          {condition.workflow === "codesOnClaim" || condition.workflow === "prospective" ? (
+            <span className="action-routing-note">
+              {reviewModel.appointmentId
+                ? `${condition.workflow === "codesOnClaim" ? "Send to Prospective" : "Yes or Change"} will prepare a Provider Query for the attached appointment.`
+                : `${condition.workflow === "codesOnClaim" ? "Send to Prospective" : "Yes or Change"} will place the opportunity in the Prospective Review Queue until a future visit is available.`}
+            </span>
+          ) : null}
           <div className="action-row">
-            {reviewModel.availableRoutes.includes("prospectiveHold") ? (
-              <Button
-                variant="primary"
-                className={`action-prospective${condition.draftRoutingOutcome?.outcome === "prospectiveHold" ? " action-selected" : ""}`}
-                aria-label="Send to Prospective"
-                aria-pressed={condition.draftRoutingOutcome?.outcome === "prospectiveHold"}
-                disabled={isDisabled(condition.workflow === "codesOnClaim" ? "Send to Prospective" : "Yes")}
-                title={actionTitle(condition.workflow === "codesOnClaim" ? "Send to Prospective" : "Yes")}
-                onClick={() => actRoute("prospectiveHold")}
-              >
-                Send to Prospective
-              </Button>
-            ) : null}
             {reviewModel.availableDecisions.map((decision) => {
               const action = legacyActionForDecision(decision);
               const selected = condition.draftDecision?.decision === decision;
-              const className = `${decision === "validate" || decision === "prepareProviderQuery" ? "action-validate" : decision === "delete" ? "action-delete" : decision === "addToClaim" ? "action-add" : decision === "dismiss" ? "action-disagree" : "action-prospective"}${selected ? " action-selected" : ""}`;
+              const recommended = legacyRecommendation?.action === action;
+              const className = `${decision === "validate" || decision === "prepareProviderQuery" ? "action-validate" : decision === "delete" ? "action-delete" : decision === "addToClaim" ? "action-add" : decision === "dismiss" ? "action-disagree" : "action-prospective"}${selected ? " action-selected" : ""}${recommended ? " action-recommended" : ""}`;
               return (
                 <Button
                   key={decision}
                   className={className}
-                  aria-label={conditionDecisionLabels[decision]}
+                  aria-label={conditionDecisionLabel(decision, condition)}
                   aria-pressed={selected}
                   variant={decision === "delete" ? "danger" : decision === "prepareProviderQuery" ? "primary" : undefined}
                   disabled={isDisabled(action)}
                   title={actionTitle(action)}
                   onClick={() => actDecision(decision)}
                 >
-                  {conditionDecisionLabels[decision]}
+                  {conditionDecisionLabel(decision, condition)}
                 </Button>
               );
             })}
+            {reviewModel.availableRoutes.includes("prospectiveHold") ? (
+              <Button
+                variant="primary"
+                className={`action-prospective${condition.draftDisposition?.action === "Send to Prospective" ? " action-selected" : ""}${legacyRecommendation?.action === "Send to Prospective" ? " action-recommended" : ""}`}
+                aria-label="Send to Prospective"
+                aria-pressed={condition.draftDisposition?.action === "Send to Prospective"}
+                disabled={isDisabled("Send to Prospective")}
+                title={actionTitle("Send to Prospective")}
+                onClick={() => actRoute("prospectiveHold")}
+              >
+                Send to Prospective
+              </Button>
+            ) : null}
             <Button variant="ghost" disabled={!editable} title={!editable ? readOnlyTitle : undefined} onClick={() => onFlag(condition)}>
               <Flag size={14} />
               Flag issue
@@ -1802,6 +1824,17 @@ function ConditionCard({
             </Button>
           </div>
         </div>
+      ) : null}
+      {overrideAction ? (
+        <OverrideRationaleModal
+          action={overrideAction}
+          recommendation={legacyRecommendation?.action}
+          onClose={() => setOverrideAction(null)}
+          onConfirm={(rationale) => {
+            stageAction(overrideAction, rationale);
+            setOverrideAction(null);
+          }}
+        />
       ) : null}
     </article>
   );
@@ -1862,6 +1895,14 @@ function DisagreeModal({ condition, reviewId, onClose }: { condition: Condition;
   const recommendation = getRecommendation(condition, review, data, settings);
   const [reason, setReason] = useState<DisagreeReason>("Not Enough MEAT");
   const [comments, setComments] = useState("");
+  const hasAppointment = Boolean(review.appointmentId && data.appointments.some((appointment) => appointment.id === review.appointmentId));
+  const routeExplanation = reason === "Condition Resolved"
+    ? "This closes the opportunity without downstream work."
+    : reason === "Other"
+      ? "This routes the opportunity to Manager Review."
+      : hasAppointment
+        ? "This prepares a Provider Query for the attached appointment."
+        : "This holds the opportunity in the Prospective Review Queue until a future visit is available.";
   return (
     <Modal title="Disagree Reason" onClose={onClose}>
       <label>
@@ -1872,6 +1913,7 @@ function DisagreeModal({ condition, reviewId, onClose }: { condition: Condition;
           ))}
         </select>
       </label>
+      <p className="modal-copy">{routeExplanation}</p>
       <label>
         Comments
         <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder={reason === "Other" ? "Required for Other in the prototype workflow" : "Optional comments"} />
@@ -1909,14 +1951,14 @@ function ChangeModal({ condition, reviewId, onClose }: { condition: Condition; r
         <input value={replacementCode} onChange={(event) => setReplacementCode(event.target.value.toUpperCase())} placeholder="Enter replacement code" />
       </label>
       <label>
-        Comments
-        <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Reason for changing the proposed code" />
+        Change rationale
+        <textarea value={comments} onChange={(event) => setComments(event.target.value)} placeholder="Required rationale for changing the proposed code" />
       </label>
       <div className="modal-actions">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
-          disabled={!replacementCode.trim()}
+          disabled={!replacementCode.trim() || !comments.trim()}
           onClick={() => {
             actions.setDisposition(reviewId, condition.id, "Change", recommendation ? recommendation.action === "Change" : undefined, undefined, comments, replacementCode);
             onClose();
@@ -1924,6 +1966,35 @@ function ChangeModal({ condition, reviewId, onClose }: { condition: Condition; r
         >
           Stage change
         </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function OverrideRationaleModal({
+  action,
+  recommendation,
+  onClose,
+  onConfirm
+}: {
+  action: RecommendationAction;
+  recommendation?: RecommendationAction;
+  onClose: () => void;
+  onConfirm: (rationale: string) => void;
+}) {
+  const [rationale, setRationale] = useState("");
+  return (
+    <Modal title="Document Coder Rationale" onClose={onClose}>
+      <p className="modal-copy">
+        The AI recommended <strong>{recommendation}</strong>. You can select <strong>{action}</strong>, but a rationale is required for the audit record.
+      </p>
+      <label>
+        Rationale
+        <textarea value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Explain why the coder decision differs from the AI recommendation" />
+      </label>
+      <div className="modal-actions">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={!rationale.trim()} onClick={() => onConfirm(rationale.trim())}>Stage action</Button>
       </div>
     </Modal>
   );
@@ -2090,15 +2161,5 @@ function EligibilityChip({ label, ok }: { label: string; ok: boolean }) {
 }
 
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="modal">
-        <header>
-          <h2>{title}</h2>
-          <CloseDialogButton onClick={onClose} />
-        </header>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
+  return <Dialog title={title} onClose={onClose}>{children}</Dialog>;
 }

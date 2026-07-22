@@ -26,8 +26,6 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const hierarchy = evaluateHierarchySuppression(condition, review, data);
     const contextualExclusion = evaluateContextualExclusion(condition);
     const lookback = evaluateThreeYearLookbackRecapture(condition, review, data);
-    const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
-
     const deleteSafety = evaluateDeleteSafety(condition, review, data);
     deleteSafety.supportingEvidenceIds.forEach((id) => supportingEvidenceIds.add(id));
     deleteSafety.conflictingEvidenceIds.forEach((id) => conflictingEvidenceIds.add(id));
@@ -67,25 +65,9 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
       });
     }
 
-    if (!condition.disposition && !condition.ruleOutcome && condition.workflow === "codesOnClaim" && !currentPrototypeYear) {
-      disabledActions.push({
-        action: "Send to Prospective",
-        reason: `Send to Prospective is available only for current calendar-year claims. This review is CY ${review.calendarYear}.`,
-        ruleId: "current-year-prospective-routing",
-        source: "rule-suppressed"
-      });
-    }
-
     if (!condition.disposition && !condition.ruleOutcome && acuteOnClaim) {
-      disabledActions.push({
-        action: "Send to Prospective",
-        reason: "Acute diagnoses are not carried into prospective review in this prototype. Review the encounter-specific documentation and validate only when the acute diagnosis is actively managed; otherwise delete it from the claim.",
-        ruleId: "acute-on-claim-conservative-delete",
-        source: "rule-suppressed",
-        supportingEvidenceIds: condition.evidenceIds
-      });
       warnings.push({
-        message: "Acute diagnosis: do not carry this condition forward. Validate only when encounter-specific acute-care documentation supports it; otherwise delete.",
+        message: "Acute diagnosis: the AI recommends encounter-specific review before carrying this condition forward, but all coder actions remain available.",
         severity: "warning",
         evidenceIds: condition.evidenceIds
       });
@@ -215,7 +197,7 @@ export class PrototypeDecisionSupportService implements DecisionSupportService {
     const currentPrototypeYear = review.calendarYear === settings.prototypeCurrentYear && condition.currentYear;
     if (!directActionSourceEligible && condition.workflow !== "prospective") {
       return {
-        action: "Disagree",
+        action: condition.workflow === "codesOnClaim" ? "Delete" : "Disagree",
         confidence: "High",
         source: "rules",
         rationale:
@@ -511,7 +493,7 @@ function getCaptureActionsForWorkflow(condition: Condition): RecommendationActio
 }
 
 function getAllActionsForWorkflow(condition: Condition): RecommendationAction[] {
-  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete"];
+  if (condition.workflow === "codesOnClaim") return ["Validate", "Delete", "Send to Prospective"];
   if (condition.workflow === "codesNotOnClaim") return ["Add to Claim", "Disagree"];
   if (condition.workflow === "prospective") return ["Yes", "No", "Change"];
   return [];

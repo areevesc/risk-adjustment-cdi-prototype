@@ -48,6 +48,11 @@ button {
   cursor: pointer;
 }
 
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid rgba(15, 106, 168, 0.3);
+  outline-offset: 2px;
+}
+
 button:disabled,
 .button:disabled {
   color: #64748b;
@@ -739,6 +744,38 @@ label {
 
 .cdi-queue-page .legacy-queue-table {
   display: none;
+}
+
+.manager-detail-table {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+
+.manager-detail-table > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  color: #344054;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.manager-detail-table > summary span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.manager-detail-table[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.manager-detail-table .legacy-queue-table {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0 0 9px 9px;
 }
 
 .data-table {
@@ -2259,6 +2296,12 @@ tr.chart-row.has-evidence td {
   text-transform: uppercase;
 }
 
+.action-routing-note {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .draft-disposition-row {
   padding: 8px 10px;
   border: 1px dashed #84caff;
@@ -2347,6 +2390,13 @@ tr.chart-row.has-evidence td {
   border-color: #1570ef;
   box-shadow: 0 0 0 3px rgba(21, 112, 239, 0.2);
   font-weight: 800;
+}
+
+.condition-card .action-row .button.action-recommended:not(:disabled) {
+  outline: 2px solid #0f6aa8;
+  outline-offset: 2px;
+  font-weight: 900;
+  box-shadow: 0 3px 10px rgba(15, 106, 168, 0.16);
 }
 
 .condition-card .action-row .action-validate:not(:disabled) {
@@ -2552,6 +2602,41 @@ tr.chart-row.has-evidence td {
   color: var(--text-muted);
 }
 
+.metric-sections {
+  display: grid;
+  gap: 18px;
+}
+
+.metric-section {
+  display: grid;
+  gap: 9px;
+}
+
+.metric-section + .metric-section {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.metric-section h3 {
+  margin: 0;
+  color: #344054;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.compact-metric-sections {
+  gap: 14px;
+}
+
+.route-loading {
+  display: grid;
+  min-height: 45vh;
+  place-items: center;
+  color: var(--text-muted);
+  font-weight: 800;
+}
+
 .safety-evidence-list {
   display: grid;
   gap: 8px;
@@ -2727,7 +2812,7 @@ tr.chart-row.has-evidence td {
   }
 
   .sidebar nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   }
 
   .sidebar a {
@@ -2745,6 +2830,11 @@ tr.chart-row.has-evidence td {
 
   .page-stack {
     padding: 16px;
+  }
+
+  .sidebar-footer {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
   }
 
   .chart-search-card {
@@ -2768,6 +2858,10 @@ tr.chart-row.has-evidence td {
 
   .filter-bar .button {
     justify-self: stretch;
+  }
+
+  .condition-card .action-row .button:not(.button-ghost) {
+    flex: 1 1 140px;
   }
 
   .patient-header-actions {
